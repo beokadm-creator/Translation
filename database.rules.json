@@ -1,0 +1,42 @@
+{
+  "rules": {
+    "conferences": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "projects": {
+      ".read": "auth != null",
+      ".write": false,
+      "$projectId": {
+        ".read": true,
+        "stream": {
+          ".read": true,
+          ".write": "auth != null"
+        },
+        "settings": {
+          ".read": true,
+          ".write": "auth != null"
+        },
+        "sessions": {
+          "$sessionId": {
+            ".read": "auth != null",
+            ".write": "auth != null"
+          },
+          ".read": "auth != null",
+          ".write": "auth != null",
+          ".indexOn": ["accessCode"]
+        },
+        "activeSessionId": {
+          ".read": true,
+          ".write": "auth != null"
+        },
+        "state": {
+          ".read": true,
+          ".write": "auth != null"
+        }
+      }
+    },
+    ".read": false,
+    ".write": false
+  }
+}

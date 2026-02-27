@@ -1,0 +1,3 @@
+M	stable_v1/functions/src/archive.ts
+M	stable_v1/functions/src/index.ts
+M	stable_v1/functions/src/stt.ts

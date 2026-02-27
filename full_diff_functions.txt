@@ -1,0 +1,1235 @@
+diff --git a/backup/v3_stable/functions_src/App.tsx b/functions/src/App.tsx
+index 9425b9e..c13bd41 100644
+--- a/backup/v3_stable/functions_src/App.tsx
++++ b/functions/src/App.tsx
+@@ -29,7 +29,6 @@ function App() {
+       // Get system audio via display media
+       const displayStream = await navigator.mediaDevices.getDisplayMedia({
+         video: false,
+-        audio: true,
+         audio: {
+           channelCount: 2,
+           sampleRate: 48000,
+diff --git a/backup/v3_stable/functions_src/archive.ts b/functions/src/archive.ts
+index 69c192b..558b451 100644
+--- a/backup/v3_stable/functions_src/archive.ts
++++ b/functions/src/archive.ts
+@@ -1,88 +1,68 @@
+ import * as functions from "firebase-functions/v1";
+ import * as admin from "firebase-admin";
+-import { verifyAuth } from "./middleware";
+-import cors from "cors";
+ 
+-const corsHandler = cors({ origin: true });
++export const archiveSession = functions.https.onRequest(async (req, res) => {
++  res.set("Access-Control-Allow-Origin", "*");
++  res.set("Access-Control-Allow-Methods", "POST");
++  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
++  
++  if (req.method === "OPTIONS") {
++    res.status(204).send("");
++    return;
++  }
+ 
+-export const archiveSession = functions.https.onRequest((req, res) => {
+-  corsHandler(req, res, async () => {
+-    // 1. Auth Check
+-    await verifyAuth(req, res, async () => {
+-      const projectId = req.query.projectId as string;
+-      if (!projectId) {
+-        res.status(400).send("Missing projectId");
+-        return;
+-      }
++  try {
++    const authHeader = req.headers.authorization;
++    if (!authHeader || !authHeader.startsWith("Bearer ")) {
++      res.status(401).send("Unauthorized");
++      return;
++    }
++    const token = authHeader.split("Bearer ")[1];
++    await admin.auth().verifyIdToken(token);
+ 
+-      try {
+-        // 2. Fetch Data from RTDB
+-        const rtdbRef = admin.database().ref(`sessions/${projectId}/stream`);
+-        const snapshot = await rtdbRef.once('value');
+-        const data = snapshot.val();
++    const projectId = req.body.projectId || req.query.projectId;
++    const sessionId = req.body.sessionId || req.query.sessionId;
+ 
+-        if (!data) {
+-          res.status(404).send("No session data found to archive.");
+-          return;
+-        }
++    if (!projectId || !sessionId) {
++      res.status(400).send({ error: "Missing projectId or sessionId" });
++      return;
++    }
+ 
+-        // 3. Transform Data for Firestore
+-        // We can store it as a single large document (if size < 1MB) or subcollection.
+-        // For transcripts, a subcollection is safer for scalability, but a single JSON blob 
+-        // is easier for simple "Export" if it's not huge.
+-        // Let's store as a subcollection 'segments' in Firestore.
+-        
+-        const firestoreBatch = admin.firestore().batch();
+-        const transcriptRef = admin.firestore().collection('transcripts').doc(projectId);
+-        
+-        // Set metadata
+-        firestoreBatch.set(transcriptRef, {
+-          archivedAt: admin.firestore.FieldValue.serverTimestamp(),
+-          projectId: projectId,
+-          sessionCount: Object.keys(data).length
+-        });
++    const projectRef = admin.database().ref(`projects/${projectId}`);
++    const streamRef = projectRef.child("stream");
++    const transcriptRef = projectRef.child(`sessions/${sessionId}/transcript`);
+ 
+-        // Add segments
+-        // Note: Firestore batch limit is 500 ops. If > 500 segments, need multiple batches.
+-        // For MVP, assuming < 500 segments or we just store the whole JSON blob in a Storage bucket?
+-        // Actually, storing the raw JSON in Firestore as a 'fullTranscript' field might be easier for small events.
+-        // Or better: Store the processed array in Firestore if it fits.
+-        // Let's try the subcollection approach with chunking.
+-        
+-        const segments = Object.entries(data).map(([key, val]: [string, any]) => ({
+-          id: key,
+-          ...val
+-        }));
++    // 1. Get Stream Data
++    const snapshot = await streamRef.get();
++    if (!snapshot.exists()) {
++      res.status(200).send({ message: "No stream data to archive." });
++      return;
++    }
+ 
+-        // Chunking for batch
+-        const chunkSize = 450; 
+-        for (let i = 0; i < segments.length; i += chunkSize) {
+-          const chunk = segments.slice(i, i + chunkSize);
+-          const batch = admin.firestore().batch();
+-          
+-          chunk.forEach((seg) => {
+-            const segRef = transcriptRef.collection('segments').doc(seg.id);
+-            batch.set(segRef, seg);
+-          });
+-          
+-          await batch.commit();
+-        }
++    const streamData = snapshot.val();
+ 
+-        // 4. Update Project Status
+-        await admin.firestore().collection('projects').doc(projectId).update({
+-          status: 'ended'
+-        });
++    // 2. Save to Session Transcript
++    await transcriptRef.set(streamData);
+ 
+-        // 5. (Optional) Cleanup RTDB? 
+-        // Maybe keep it for a while or delete it to save space.
+-        // await rtdbRef.remove(); 
++    // 3. Clear Stream & State
++    await streamRef.remove();
++    await projectRef.child("state").set({
++        bufferText: "",
++        bufferIds: [],
++        lastGeminiTime: Date.now()
++    });
+ 
+-        res.status(200).send({ success: true, message: "Session archived successfully" });
++    // 4. Reset Active Session if it matches
++    const activeSnap = await projectRef.child("activeSessionId").get();
++    if (activeSnap.exists() && activeSnap.val() === sessionId) {
++        await projectRef.child("activeSessionId").remove();
++    }
+ 
+-      } catch (error) {
+-        console.error("Archive Error:", error);
+-        res.status(500).send("Internal Server Error");
+-      }
+-    });
+-  });
++    functions.logger.info(`Archived session ${sessionId} for project ${projectId}`);
++    res.status(200).send({ success: true, message: "Archived and cleared." });
++
++  } catch (error: any) {
++    functions.logger.error("Archive Error", error);
++    res.status(500).send({ error: error.message });
++  }
+ });
+diff --git a/backup/v3_stable/functions_src/index.ts b/functions/src/index.ts
+index e3ad892..5421bf3 100644
+--- a/backup/v3_stable/functions_src/index.ts
++++ b/functions/src/index.ts
+@@ -31,7 +31,7 @@ try {
+ }
+ 
+ // Export functions
+-export { processAudio } from "./stt";
++export { processAudio, onRefineRequest, remasterSession, triggerRemaster } from "./stt";
+ export { diagnoseSystem } from "./diagnose"; // New Diagnostic Tool
+ // export { translateNewSegment } from "./translate"; // DEPRECATED: Moved to inline processing in stt.ts
+ export { archiveSession } from "./archive";
+diff --git a/backup/v3_stable/functions_src/stt.ts b/functions/src/stt.ts
+index 2f53ab8..eaa928e 100644
+--- a/backup/v3_stable/functions_src/stt.ts
++++ b/functions/src/stt.ts
+@@ -1,453 +1,648 @@
+-// Version: Quality Stable v1
++// Version: v7.9 (Language Locking)
+ import * as functions from "firebase-functions/v1"
+ import * as admin from "firebase-admin"
+ import OpenAI from "openai"
+-import { GoogleGenerativeAI } from "@google/generative-ai"
+ import { Readable } from "stream"
+-import * as fs from "fs"
+ 
+ let _openai: OpenAI | null = null
+ const DIRECT_GEMINI_KEY = "AIzaSyDNqx0ScloGAYK74hddqiaNf188T8uZnnw"
+ const GEMINI_FLASH_URL = (key: string) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${key}`
+ const GEMINI_PRO_URL = (key: string) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-latest:generateContent?key=${key}`
+-const GEMINI_SYSTEM_PROMPT = `
+-Role: Lecture Subtitle Editor
+-Task:
+-1. Edit and refine the input as natural Korean lecture subtitles.
+-2. Preserve lecturer speech: connecting words, explanations, and light jokes; do NOT drop valid flow.
+-3. Delete only obvious hallucinations (e.g., MBC 뉴스, 날씨, 김성현, 방송 마감 멘트, 구독/좋아요 등).
+-4. Dentistry/medical terms are not required; if it sounds like part of the lecture, set isMedicalContext=true.
+-5. Provide English and Japanese translations when possible.
+-6. Keep the input sentence length and breathing; do not summarize or merge segments. Maintain pacing.
+-
+-Output JSON Format:
+-{"isMedicalContext": true|false, "refined": "", "en": "", "ja": ""}
++
++const getDynamicPrompt = (sourceLang: string, sessionContext: string, previousContext: string) => {
++    const base = `
++Role: Live Captioner for Medical Conference
++Rule 1: Always output valid JSON.
++Rule 2: Refine the input text to be grammatically correct and professional.
++Rule 3: Infer medical terms from phonetic errors (e.g. "Gamgon" -> "Recommendation").
++
++[FRAGMENT HANDLING]
++- Even if the input is a single word or a fragment (e.g., "Criteria, Prevention,"), YOU MUST TRANSLATE IT.
++- Do not skip short segments.
++- If the input Korean seems like a typo (e.g., "불유부" -> sounds like "분류"), fix the Korean mentally and translate the intended meaning (e.g., "Classification").
++
++[STRICT LANGUAGE RULES]
++- Source Language: ${sourceLang}
++`;
++
++    let instructions = "";
++    if (sourceLang === 'ko') {
++        instructions = `
++- "refined": Refine the input in Korean.
++- "en": Translate to English. DO NOT include Korean characters in this field.
++- "ja": Translate to Japanese.
+ `;
+-const callGeminiREST = async (text: string, previousContext: string = ""): Promise<{ isMedicalContext?: boolean, refined?: string, en?: string, ja?: string }> => {
+-  const contextPrompt = previousContext ? `\nPREVIOUS CONTEXT (The sentence right before this one): "${previousContext}"` : "";
+-  const payload: any = { contents: [{ parts: [{ text: `${GEMINI_SYSTEM_PROMPT}${contextPrompt}\nINPUT (Current Audio Chunk): "${text}"\nINSTRUCTION: Connect naturally with previous context if needed. If INPUT is a duplicate of context, output empty string. Output only the NEW content.` }]}], generationConfig: { responseMimeType: "application/json" } }
+-  let res = await fetch(GEMINI_FLASH_URL(DIRECT_GEMINI_KEY), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+-  if (!res.ok) {
+-    const errText = await res.text()
+-    functions.logger.error("Gemini REST error", { status: res.status, body: errText })
+-    res = await fetch(GEMINI_PRO_URL(DIRECT_GEMINI_KEY), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
++    } else if (sourceLang === 'en') {
++        instructions = `
++- "refined": Refine the input in English.
++- "en": Same as "refined".
++- "ja": Translate to Japanese.
++`;
++    } else if (sourceLang === 'ja') {
++        instructions = `
++- "refined": Refine the input in Japanese.
++- "en": Translate to English.
++- "ja": Same as "refined".
++`;
++    } else if (sourceLang === 'zh') {
++        instructions = `
++- "refined": Refine the input in Chinese.
++- "en": Translate to English.
++- "ja": Translate to Japanese.
++`;
++    } else {
++        instructions = `
++- "refined": Refine the input.
++- "en": Translate to English.
++- "ja": Translate to Japanese.
++`;
++    }
++
++    return `${base}${instructions}
++Output JSON Format: {"isMedicalContext": true|false, "refined": "...", "en": "...", "ja": "..."}
++
++${sessionContext ? `SESSION INFO: ${sessionContext}` : ""}
++${previousContext ? `PREVIOUS CONTEXT: ${previousContext}` : ""}
++INPUT: `;
++};
++
++const callGeminiREST = async (text: string, previousContext: string, sessionContext: string, sourceLang: string): Promise<{ isMedicalContext?: boolean, refined?: string, en?: string, ja?: string }> => {
++    const prompt = getDynamicPrompt(sourceLang, sessionContext, previousContext);
++
++    const payload: any = { contents: [{ parts: [{ text: `${prompt}"${text}"` }] }], generationConfig: { responseMimeType: "application/json" } }
++
++    let res = await fetch(GEMINI_FLASH_URL(DIRECT_GEMINI_KEY), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+     if (!res.ok) {
+-      const errText2 = await res.text()
+-      functions.logger.error("Gemini REST fallback error", { status: res.status, body: errText2 })
+-      throw new Error(`Gemini REST Error: ${res.status} - ${errText2}`)
++        const errText = await res.text()
++        functions.logger.error("Gemini REST error", { status: res.status, body: errText })
++        res = await fetch(GEMINI_PRO_URL(DIRECT_GEMINI_KEY), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
++        if (!res.ok) {
++            throw new Error(`Gemini REST Error: ${res.status}`)
++        }
+     }
+-  }
+-  const data = await res.json()
+-  const outText = (((data || {}).candidates || [])[0] || {}).content?.parts?.[0]?.text || ""
+-  try {
+-    const cleanText = outText.replace(/```json\s*|```/g, "").trim()
+-    const obj = JSON.parse(cleanText)
+-    // Ensure refined is simple text, not JSON string
+-    let r = (obj.refined || "").toString()
++    const data = await res.json()
++    const outText = (((data || {}).candidates || [])[0] || {}).content?.parts?.[0]?.text || ""
++    if (!outText) return { refined: "" };
++
+     try {
+-      const inner = JSON.parse(r)
+-      if (inner && inner.refined) r = inner.refined
+-    } catch {}
+-    return { isMedicalContext: !!obj.isMedicalContext, refined: sanitize(r), en: (obj.en || "").toString(), ja: (obj.ja || "").toString() }
+-  } catch {
+-    return { refined: sanitize(outText || "") }
+-  }
++        const cleanText = outText.replace(/```json\s*|```/g, "").trim()
++        const obj = JSON.parse(cleanText)
++        return { isMedicalContext: !!obj.isMedicalContext, refined: sanitize(obj.refined), en: sanitize(obj.en), ja: sanitize(obj.ja) }
++    } catch {
++        return { refined: sanitize(outText) }
++    }
+ }
+ 
+ const getOpenAI = (): OpenAI => {
+-  if (!_openai) {
+-    const envKey = process.env.OPENAI_API_KEY || ""
+-    let cfgKey = ""
+-    try {
+-      cfgKey = (functions.config()?.openai?.key as string) || ""
+-    } catch {}
+-    const apiKey = envKey || cfgKey
+-    if (!apiKey) throw new Error("OPENAI_API_KEY missing")
+-    _openai = new OpenAI({ apiKey })
+-  }
+-  return _openai
++    if (!_openai) {
++        const envKey = process.env.OPENAI_API_KEY || ""
++        const apiKey = envKey || (functions.config()?.openai?.key as string) || ""
++        if (!apiKey) throw new Error("OPENAI_API_KEY missing")
++        _openai = new OpenAI({ apiKey })
++    }
++    return _openai
+ }
+ 
+-const getGenAI = (): GoogleGenerativeAI => new GoogleGenerativeAI(DIRECT_GEMINI_KEY)
++// TTS Helper
++const generateTTS = async (text: string, lang: string, projectId: string, sessionId: string, seq: number): Promise<string | null> => {
++    const apiKey = process.env.GOOGLE_TTS_API_KEY || process.env.GOOGLE_API_KEY;
++    if (!apiKey) return null;
+ 
+-const DENTAL_PROMPT = ""
+-const PROMPT_WORDS = [
+-  "수술","사이너스","Sinus","Sinus Graft","픽스처","Fixture","어버트먼트","Abutment","임플란트","크라운","브릿지","파절","치주염","골이식"
+-]
++    // Filter out very short text or garbage
++    if (!text || text.length < 2) return null;
++
++    const voiceName = lang === 'ko' ? 'ko-KR-Neural2-C' : 'en-US-Neural2-J';
++    const languageCode = lang === 'ko' ? 'ko-KR' : 'en-US';
++
++    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
++    const payload = {
++        input: { text },
++        voice: { languageCode, name: voiceName },
++        audioConfig: { audioEncoding: 'MP3' }
++    };
++
++    try {
++        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
++        const data = await res.json();
++        if (!data.audioContent) {
++            functions.logger.error("TTS Failed", data);
++            return null;
++        }
++
++        const bucketName = "translation-comm.firebasestorage.app"; // Hardcoded or env
++        const bucket = admin.storage().bucket(bucketName);
++        const filePath = `audios/${projectId}/${sessionId}/${seq}.mp3`;
++        const file = bucket.file(filePath);
++
++        await file.save(Buffer.from(data.audioContent, 'base64'), {
++            metadata: { contentType: 'audio/mpeg' }
++        });
++
++        await file.makePublic();
++        return `https://storage.googleapis.com/${bucketName}/${filePath}`;
++    } catch (e) {
++        functions.logger.error("TTS Error", e);
++        return null;
++    }
++};
++
++const DENTAL_PROMPT = "치과, 임플란트, 보철, 수술, 상악동, 골이식, 픽스처, 어버트먼트, 크라운, Implant, Surgery, Bone Graft, Fixture, Abutment, Crown"
+ 
+ const sanitize = (s: string): string => {
+-  let t = (s || "");
+-  t = t.replace(/소음이나\s*인사말은\s*무시하고\s*실제\s*강연\s*내용만\s*출력하세요\.?/gi, "");
+-  t = t.replace(/프롬프트에\s*적힌\s*단어를\s*반복하지\s*마세요\.?/gi, "");
+-  t = t.replace(/MBC\s*뉴스/gi, "");
+-  t = t.replace(/시청해주셔서\s*감사합니다/gi, "");
+-  t = t.replace(/구독과\s*좋아요/gi, "");
+-  t = t.replace(/안녕하세요/gi, "");
+-  t = t.replace(/이덕영입니다/gi, "");
+-  t = t.replace(/뉴스입니다/gi, "");
+-  t = t.replace(/이명노/gi, "");
+-  t = t.replace(/날씨였습니다/gi, "");
+-  t = t.replace(/고맙습니다/gi, "");
+-  t = t.replace(/수고하셨습니다/gi, "");
+-  t = t.replace(/(?:^|\s)(?:Input|Output|교정\s*결과)\s*:?/gi, "");
+-  t = t.replace(/[`]{3,}/g, "");
+-  t = t.replace(/[`]/g, "");
+-  t = t.replace(/#{1,}/g, "");
+-  t = t.replace(/\*{2,}/g, "");
+-  t = t.replace(/_{2,}/g, "");
+-  t = t.replace(/^>+/gm, "");
+-  t = t.replace(/\bundefined\b/gi, "");
+-  t = t.replace(/\s{2,}/g, " ").trim();
+-  return t;
++    let t = (s || "").toString();
++    t = t.replace(/[`]{3,}/g, "").replace(/[`]/g, "");
++    t = t.replace(/\bundefined\b/gi, "");
++    return t.trim();
+ }
+ 
+-const BANNED_WORDS = ["이덕영", "MBC", "MBC 뉴스", "시청해", "구독", "좋아요", "감사합니다", "수고하셨습니다", "뉴스입니다", "김성현", "재택 플러스", "뉴스", "기자", "체결합니다", "입니다.", "날씨"]
+-const isBannedDominant = (s: string): boolean => {
+-  const tokens = s.split(/[\s]+/).filter(Boolean)
+-  if (!tokens.length) return false
+-  const lower = tokens.map(w => w.toLowerCase())
+-  const bannedCount = lower.filter(w => BANNED_WORDS.some(b => w.includes(b.toLowerCase()))).length
+-  const ratio = bannedCount / tokens.length
+-  if (ratio >= 0.5) return true
+-  if (tokens.length <= 6 && bannedCount >= 1) return true
+-  return false
+-}
+-const isRepetitiveHallucination = (s: string): boolean => {
+-  const t = (s || "").trim();
+-  if (t.length < 2) return false;
+-  // Check for repeated single characters (e.g. "오오오오", "......")
+-  if (/(.)\1{4,}/.test(t)) return true;
+-  // Check for repeated short phrases (e.g. "음음음", "네네네")
+-  if (/(..)\1{3,}/.test(t)) return true;
+-  return false;
+-}
++const HALLUCINATION_BLACKLIST = ['자막제작', '자막 제작', 'Subtitles by', 'MBC 뉴스', 'Copyright', 'http', '.co.kr'];
++const isLoopPattern = (text: string): boolean => {
++    if (HALLUCINATION_BLACKLIST.some(b => text.includes(b))) return true;
++    if (/(.+)\1{2,}/.test(text)) return true;
++    if (/(.*,){4,}/.test(text)) return true;
++    if (/^(Implant, Surgery|임플란트, 보철)/i.test(text)) return true;
++    return false;
++};
+ 
+-const isHallucination = (s: string): boolean => {
+-  const t = (s || "").trim()
+-  if (!t) return false
+-  if (isRepetitiveHallucination(t)) return true;
+-  const short = t.length <= 5
+-  const hasBanned = BANNED_WORDS.some(b => t.toLowerCase().includes(b.toLowerCase()))
+-  return hasBanned && short
+-}
++// 1. HTTP Trigger: Receive Audio -> STT (Language Locked) -> Save Raw
++export const processAudio = functions
++    .runWith({ timeoutSeconds: 60, memory: "512MB" })
++    .https.onRequest(async (req, res) => {
++        const versionTag = "v7.9_lang_lock"
++        res.set("Access-Control-Allow-Origin", "*")
++        res.set("Access-Control-Allow-Methods", "POST, OPTIONS")
++        res.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
++        if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+ 
+-const isPromptEcho = (s: string): boolean => {
+-  const tokens = s.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+-  if (!tokens.length) return false;
+-  const matchCount = tokens.filter(tok => PROMPT_WORDS.includes(tok)).length;
+-  const repetitionRatio = 1 - (new Set(tokens).size / tokens.length);
+-  return (matchCount / tokens.length) > 0.6 || repetitionRatio > 0.6;
+-}
++        try {
++            if (!admin.apps.length) throw new Error("Admin not initialized")
++            const auth = (req.headers.authorization || "").toString()
++            if (!auth.startsWith("Bearer ")) { res.status(401).json({ success: false }); return; }
+ 
+-const analyzeRelationship = (lastText: string, newText: string): { type: 'new' | 'update' | 'append', cleanedText: string } => {
+-    const a = lastText.trim();
+-    const b = newText.trim();
+-    if (!a || !b) return { type: 'new', cleanedText: b };
++            const projectId = (req.query.projectId || "").toString()
++            const sourceLabel = (req.query.sourceLabel || "").toString()
++            if (!projectId) { res.status(400).json({ success: false }); return; }
+ 
+-    // Normalize for comparison
+-    const normA = a.replace(/\s/g, "");
+-    const normB = b.replace(/\s/g, "");
++            let buf: Buffer | null = null
++            const raw = (req as any).rawBody as Buffer | undefined
++            if (raw && Buffer.isBuffer(raw)) buf = raw
++            else if (Buffer.isBuffer(req.body)) buf = req.body as Buffer
++            else if (typeof req.body === "string") buf = Buffer.from(req.body, "binary")
+ 
+-    // 1. UPDATE: New text contains Old text (Correction/Expansion)
+-    if (normB.includes(normA)) {
+-        // Example: "방법을" -> "방법을 썼습니다"
+-        // Return full new text to REPLACE old text
+-        return { type: 'update', cleanedText: b };
+-    }
+-    
+-    // 2. UPDATE: Old text contains New text (Shrink? Rare, maybe correction)
+-    // If similarity is high (>80%), assume it's a correction
+-    if (normA.includes(normB) && normB.length > normA.length * 0.8) {
+-        return { type: 'update', cleanedText: b };
+-    }
++            if (!buf || buf.length === 0) { res.status(400).json({ success: false }); return; }
++
++            // Get Source Language
++            let sourceLang = 'ko';
++            let activeSessionId: string | null = null;
++            try {
++                const activeSnap = await admin.database().ref(`projects/${projectId}/activeSessionId`).get();
++                activeSessionId = activeSnap.val();
++                if (activeSessionId) {
++                    const sessionSnap = await admin.database().ref(`projects/${projectId}/sessions/${activeSessionId}`).get();
++                    if (sessionSnap.exists()) {
++                        sourceLang = sessionSnap.val().sourceLanguage || 'ko';
++                    }
++                }
++            } catch { }
++
++            await admin.database().ref(`projects/${projectId}/status`).update({ lastActive: Date.now() }).catch(() => { })
++
++            let openai: OpenAI
++            try { openai = getOpenAI() } catch (cfgErr: any) { res.status(500).json({ success: false }); return; }
++
++            if (buf.length < 2000) { res.status(200).json({ success: false, error: "TooSmall" }); return; }
+ 
+-    // 3. APPEND with Overlap Trimming
+-    // Check if Head of New overlaps with Tail of Old
+-    // We check from 5 chars up to min(a.len, b.len)
+-    const minOverlap = 5;
+-    const maxOverlap = Math.min(a.length, b.length);
+-    
+-    // Check for overlap starting from largest possible
+-    for (let len = maxOverlap; len >= minOverlap; len--) {
+-        const tailA = a.slice(-len);
+-        if (b.startsWith(tailA)) {
+-            // Found overlap!
+-            // Cleaned text is b without the overlapping part
+-            const clean = b.slice(len).trim();
+-            if (!clean) {
+-                // Fully overlapped? Then it's actually an UPDATE case that we missed, or duplicate.
+-                // If fully overlapped, it means b is a substring of a's tail.
+-                // e.g. A="...hello world", B="hello world"
+-                // This should be ignored or update?
+-                // If we treat as update, we might lose context of A.
+-                // Better to treat as Duplicate (Ignore).
+-                // But let's return 'update' with original A to be safe? 
+-                // Or just 'append' with empty?
+-                return { type: 'update', cleanedText: a }; // Keep old text
++            let stt: any
++            try {
++                const audioStream = Readable.from(buf)
++                    ; (audioStream as any).path = "audio.webm"
++                stt = await openai.audio.transcriptions.create({
++                    file: audioStream as any,
++                    model: "whisper-1",
++                    language: sourceLang, // LOCKED!
++                    prompt: DENTAL_PROMPT,
++                    temperature: 0
++                })
++                await admin.database().ref(`projects/${projectId}/status/services/openai`).set({ state: "ok", ts: Date.now() }).catch(() => { })
++            } catch (err) {
++                // Retry with mp4 ext if needed, but let's keep it simple for now
++                res.status(200).json({ success: false, error: "WhisperFailed" });
++                return;
+             }
+-            return { type: 'append', cleanedText: clean };
++
++            let rawText = sanitize((stt?.text || "").trim())
++            if (rawText.length < 2) rawText = "";
++            if (isLoopPattern(rawText)) { res.status(200).json({ success: true, info: "LoopDropped" }); return; }
++
++            if (!rawText) { res.status(200).json({ success: true, info: "Empty" }); return; }
++
++            const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
++            const timestamp = Date.now()
++
++            // Sequence Logic
++            const seqRef = admin.database().ref(`projects/${projectId}/lastSequence`);
++            const seqResult = await seqRef.transaction((current) => {
++                return (current || 0) + 1;
++            });
++            const seq = seqResult.snapshot.val();
++
++            await admin.database().ref(`projects/${projectId}/stream/${id}`).set({
++                original: rawText,
++                status: "raw",
++                timestamp,
++                sourceLabel,
++                sessionId: activeSessionId,
++                seq
++            })
++
++            await admin.database().ref(`projects/${projectId}/state`).update({ lastText: rawText, lastId: id }).catch(() => { })
++
++            res.status(200).json({ success: true, id, text: rawText, stage: "original", timestamp, version: versionTag })
++
++        } catch (e: any) {
++            res.status(500).json({ success: false, error: "Internal Error" })
+         }
+-    }
+-    
+-    // No overlap found
+-    return { type: 'new', cleanedText: b };
+-}
++    })
+ 
+-export const processAudio = functions
+-  .runWith({ timeoutSeconds: 60, memory: "512MB" })
+-  .https.onRequest(async (req, res) => {
+-    const versionTag = "v1.1.0_dental"
+-    res.set("Access-Control-Allow-Origin", "*")
+-    res.set("Access-Control-Allow-Methods", "POST, OPTIONS")
+-    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+-    if (req.method === "OPTIONS") {
+-      res.status(204).send("")
+-      return
+-    }
+-    try {
+-      if (!admin.apps.length) throw new Error("Admin not initialized")
+-      const auth = (req.headers.authorization || "").toString()
+-      if (!auth.startsWith("Bearer ")) {
+-        res.status(401).json({ success: false, error: "Unauthorized", version: versionTag })
+-        return
+-      }
+-      await admin.auth().verifyIdToken(auth.split("Bearer ")[1])
+-      const projectId = (req.query.projectId || "").toString()
+-      const mode = (req.query.mode || "").toString()
+-      const sourceLabel = (req.query.sourceLabel || "").toString()
+-      if (!projectId) {
+-        res.status(400).json({ success: false, error: "Missing projectId", version: versionTag })
+-        return
+-      }
+-      let buf: Buffer | null = null
+-      const raw = (req as any).rawBody as Buffer | undefined
+-      if (raw && Buffer.isBuffer(raw)) buf = raw
+-      else if (Buffer.isBuffer(req.body)) buf = req.body as Buffer
+-      else if (typeof req.body === "string") buf = Buffer.from(req.body, "binary")
+-      if (!buf || buf.length === 0) {
+-        res.status(400).json({ success: false, error: "Empty audio", version: versionTag })
+-        return
+-      }
+-      await admin.database().ref(`sessions/${projectId}/status`).update({ lastActive: Date.now() }).catch(() => {})
+-      const tmpPath = `/tmp/audio.webm`
+-      try {
+-        fs.writeFileSync(tmpPath, buf)
+-        const bucket = admin.storage().bucket()
+-        const dest = `diagnostics/audio_${Date.now()}.webm`
+-        await bucket.upload(tmpPath, { destination: dest, contentType: "audio/webm" })
++// 2. DB Trigger: Refine Text (Concurrency Safe & Dynamic Language)
++export const onRefineRequest = functions
++    .runWith({ timeoutSeconds: 60, memory: "512MB" })
++    .database.ref("projects/{projectId}/stream/{dataId}")
++    .onCreate(async (snapshot, context) => {
++        const { projectId, dataId } = context.params;
++        const val = snapshot.val();
++
++        if (!val || val.status !== 'raw') return;
++        const rawText = val.original;
++
++        const projectRef = admin.database().ref(`projects/${projectId}`);
++        let bufferText = "";
++        let bufferIds: string[] = [];
++        let lastGeminiTime = 0;
++        let sessionContext = "";
++        let sourceLang = "ko";
++        let chunkSettings = { minLength: 50, timeoutMs: 6000, sentenceEnd: true }; // Default
++
++        let activeSessionId: string | null = null;
++        try {
++            const [stateSnap, activeSnap, settingsSnap] = await Promise.all([
++                projectRef.child('state').get(),
++                projectRef.child('activeSessionId').get(),
++                projectRef.child('settings/chunk').get()
++            ]);
++
++            if (stateSnap.exists()) {
++                const st = stateSnap.val();
++                bufferText = (st.bufferText || "").toString();
++                bufferIds = (st.bufferIds || []);
++                lastGeminiTime = Number(st.lastGeminiTime || 0);
++            }
++
++            if (settingsSnap.exists()) {
++                chunkSettings = { ...chunkSettings, ...settingsSnap.val() };
++            }
++
++            if (activeSnap.exists()) {
++                activeSessionId = activeSnap.val();
++                const sessionSnap = await projectRef.child(`sessions/${activeSessionId}`).get();
++                if (sessionSnap.exists()) {
++                    const s = sessionSnap.val();
++                    sessionContext = `Speaker: ${s.speaker}, Topic: ${s.topic}, Abstract: ${s.abstract}, Keywords: ${s.keywords}`;
++                    sourceLang = s.sourceLanguage || "ko";
++                }
++            }
++        } catch { }
++
++        bufferText = bufferText ? bufferText + " " + rawText : rawText;
++        bufferIds.push(dataId);
++
++        const now = Date.now();
++        const timeDiff = now - lastGeminiTime;
++        const isSentenceEnd = chunkSettings.sentenceEnd && /[.!?]$/.test(rawText.trim());
++        const isLongEnough = bufferText.length >= chunkSettings.minLength;
++        const isTimeOut = timeDiff > chunkSettings.timeoutMs;
++
++        const shouldFlush = isSentenceEnd || isLongEnough || isTimeOut;
++
++        if (!shouldFlush) {
++            await projectRef.child('state').update({ bufferText, bufferIds });
++            return;
++        }
++
++        functions.logger.info("Flushing Buffer", { projectId, lang: sourceLang, textLen: bufferText.length });
++
++        let previousContext = "";
+         try {
+-          const [signed] = await bucket.file(dest).getSignedUrl({ action: "read", expires: Date.now() + 15 * 60 * 1000 })
+-          ;(req as any)._uploadedUrl = signed
+-        } catch {}
+-      } catch {}
+-      let openai: OpenAI
+-      try {
+-        openai = getOpenAI()
+-      } catch (cfgErr: any) {
+-        await admin.database().ref(`sessions/${projectId}/status/services/openai`).set({ state: "error", message: cfgErr?.message || "OPENAI_API_KEY missing", ts: Date.now() }).catch(() => {})
+-        res.status(500).json({ success: false, error: cfgErr?.message || "OPENAI_API_KEY missing", version: versionTag })
+-        return
+-      }
+-      if (mode === "test") {
+-        const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+-        const timestamp = Date.now()
+-        const text = "Internal Connection"
+-        await admin.database().ref(`sessions/${projectId}/stream/${id}/original`).set({ id, text, lang: "original", timestamp, isFinal: true, sourceLabel })
+-        res.status(200).json({ success: true, id, text, timestamp, metrics: { whisperMs: 0, geminiMs: 0 }, version: versionTag })
+-        return
+-      }
+-      const tOpenaiStart = Date.now()
+-      let tOpenaiEnd = tOpenaiStart
+-      if (buf.length < 2000) {
+-        res.status(200).json({ success: false, error: "TooSmallChunk", audioBytes: buf.length, version: versionTag })
+-        return
+-      }
+-      let stt: any
+-      try {
+-        const audioStream = Readable.from(buf)
+-        ;(audioStream as any).path = "audio.webm"
+-        stt = await openai.audio.transcriptions.create({ file: audioStream as any, model: "whisper-1", language: "ko", prompt: DENTAL_PROMPT, temperature: 0 })
+-        tOpenaiEnd = Date.now()
+-        await admin.database().ref(`sessions/${projectId}/status/services/openai`).set({ state: "ok", ts: Date.now() }).catch(() => {})
+-      } catch (err1: any) {
++            const snap = await projectRef.child('state/lastRefined').get();
++            previousContext = (snap.val() || "").toString();
++        } catch { }
++
++        let refined = bufferText;
++        let firstEn = "";
++        let firstJa = "";
++        const tGeminiStart = Date.now();
++
+         try {
+-          const audioStream2 = Readable.from(buf)
+-          ;(audioStream2 as any).path = "audio.mp4"
+-          stt = await openai.audio.transcriptions.create({ file: audioStream2 as any, model: "whisper-1", language: "ko", prompt: DENTAL_PROMPT, temperature: 0 })
+-          tOpenaiEnd = Date.now()
+-          await admin.database().ref(`sessions/${projectId}/status/services/openai`).set({ state: "ok", ts: Date.now(), note: "mp4-fallback" }).catch(() => {})
+-        } catch (err2: any) {
+-          // Graceful: mark invalid chunk and continue
+-          const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+-          await admin.database().ref(`sessions/${projectId}/errors/${id}`).set({ type: "WhisperInvalidFormat", bytes: buf.length, ts: Date.now() }).catch(() => {})
+-          await admin.database().ref(`sessions/${projectId}/status/services/openai`).set({ state: "error", message: "WhisperInvalidFormat", ts: Date.now() }).catch(() => {})
+-          res.status(200).json({ success: false, error: "WhisperInvalidFormat", audioBytes: buf.length, version: versionTag })
+-          return
++            const out = await callGeminiREST(bufferText, previousContext, sessionContext, sourceLang);
++            refined = sanitize(out.refined || bufferText);
++            firstEn = (out.en || "").toString();
++            firstJa = (out.ja || "").toString();
++        } catch (err) {
++            refined = bufferText;
+         }
+-      }
+-      let rawText = sanitize((stt?.text || "").trim())
+-      let hall = false
+-      if (rawText && isPromptEcho(rawText)) {
+-        rawText = "";
+-      }
+-      if (rawText && isBannedDominant(rawText)) {
+-        rawText = "";
+-      }
+-      if (rawText && isHallucination(rawText)) {
+-        hall = true
+-        rawText = ""
+-      }
+-
+-      // Rollback: No complex relationship analysis
+-      // Just basic duplicate check for exact matches within 30s
+-      let id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+-      let isUpdate = false
+-
+-      try {
+-        const stateSnap = await admin.database().ref(`sessions/${projectId}/state`).get()
+-        const last = stateSnap.exists() ? (stateSnap.val() || {}) : {}
+-        const lastText = (last.lastText || "").toString()
+-        const lastTs = Number(last.lastTimestamp || 0)
+-        
+-        // Simple Duplicate Check
+-        if (lastText === rawText && (Date.now() - lastTs) < 30000) {
+-             res.status(200).json({ success: true, id, text: "", stage: "original", timestamp: Date.now(), audioBytes: buf.length, info: "DuplicateSuppressed", fileUrl: (req as any)._uploadedUrl || null, metrics: { whisperMs: tOpenaiEnd - tOpenaiStart, geminiMs: 0 }, version: versionTag })
+-             return;
++
++        const updates: any = {};
++        const targetId = bufferIds[0];
++        const idsToDelete = bufferIds.slice(1);
++
++        updates[`projects/${projectId}/stream/${targetId}/refined`] = refined;
++        updates[`projects/${projectId}/stream/${targetId}/en`] = firstEn;
++        updates[`projects/${projectId}/stream/${targetId}/ja`] = firstJa;
++        updates[`projects/${projectId}/stream/${targetId}/status`] = "final";
++        updates[`projects/${projectId}/stream/${targetId}/geminiMs`] = Date.now() - tGeminiStart;
++        updates[`projects/${projectId}/stream/${targetId}/mergedIds`] = idsToDelete;
++
++        // TTS Trigger (Refine)
++        try {
++            const targetSnap = await admin.database().ref(`projects/${projectId}/stream/${targetId}`).get();
++            if (targetSnap.exists()) {
++                const tVal = targetSnap.val();
++                const tSeq = tVal.seq;
++                const tSessionId = tVal.sessionId || activeSessionId;
++
++                if (tSeq && tSessionId) {
++                    const audioUrl = await generateTTS(refined, sourceLang, projectId, tSessionId, tSeq);
++                    if (audioUrl) {
++                        updates[`projects/${projectId}/stream/${targetId}/audioUrl`] = audioUrl;
++                    }
++                }
++            }
++        } catch (e) {
++            functions.logger.error("TTS Gen Error (Refine)", e);
++        }
++
++        for (const pid of idsToDelete) {
++            updates[`projects/${projectId}/stream/${pid}/status`] = "merged";
++            updates[`projects/${projectId}/stream/${pid}/refined`] = "";
+         }
+-      } catch {}
+-
+-      if (!rawText) {
+-        const timestamp = Date.now()
+-        const info = hall ? "HallucinationSuppressed" : "Empty"
+-        res.status(200).json({ success: true, id, text: "", stage: "original", timestamp, audioBytes: buf.length, info, fileUrl: (req as any)._uploadedUrl || null, metrics: { whisperMs: tOpenaiEnd - tOpenaiStart, geminiMs: 0 }, version: versionTag })
+-        return
+-      }
+-
+-      const timestamp = Date.now()
+-      functions.logger.info(isUpdate ? "Original segment UPDATING" : "Original segment CREATING", { id, projectId, len: rawText.length })
+-      
+-      await admin.database().ref(`sessions/${projectId}/stream/${id}`).update({ status: "raw" }).catch(() => {})
+-      await admin.database().ref(`sessions/${projectId}/stream/${id}/original`).set(rawText)
+-      
+-      await admin.database().ref(`sessions/${projectId}/state`).update({ lastText: rawText, lastId: id, lastTimestamp: timestamp }).catch(() => {})
+-      
+-      // IMMEDIATE RESPONSE
+-      res.status(200).json({ success: true, id, text: rawText, stage: "original", timestamp, audioBytes: buf.length, fileUrl: (req as any)._uploadedUrl || null, metrics: { whisperMs: tOpenaiEnd - tOpenaiStart, geminiMs: 0 }, version: versionTag })
+-
+-      // Async Processing (Using the same 'id')
+-      const runAsyncWork = async () => {
+-          let refined = rawText
+-          let firstEn = ""
+-          let firstJa = ""
+-          let contextOk = true
+-          const tGeminiStart = Date.now()
+-          functions.logger.info("Gemini REST call start", { id, projectId, len: rawText.length })
+-          
+-          // Get Previous Context for Injection
+-          let previousContext = "";
+-          try {
+-             const stateSnap = await admin.database().ref(`sessions/${projectId}/state`).get();
+-             if (stateSnap.exists()) {
+-                 const st = stateSnap.val();
+-                 previousContext = (st.lastRefined || st.lastText || "").toString();
+-             }
+-          } catch {}
+-          
+-          try {
+-            const out = await callGeminiREST(rawText, previousContext)
+-            if (out && out.isMedicalContext === false) {
+-              functions.logger.info("Filtered out non-medical context", { id, projectId })
+-              return
++
++        updates[`projects/${projectId}/state/bufferText`] = "";
++        updates[`projects/${projectId}/state/bufferIds`] = [];
++        updates[`projects/${projectId}/state/lastGeminiTime`] = Date.now();
++        updates[`projects/${projectId}/state/lastRefined`] = refined;
++
++        await admin.database().ref().update(updates);
++    });
++
++// 3. Scheduled Batch: Live Remastering (Every 2 minutes)
++export const remasterSession = functions
++    .runWith({ timeoutSeconds: 300, memory: "1GB" })
++    .pubsub.schedule("every 2 minutes").onRun(async (context) => {
++        await runRemasterLogic();
++    });
++
++// Manual Trigger for Remastering
++export const triggerRemaster = functions
++    .runWith({ timeoutSeconds: 300, memory: "1GB" })
++    .https.onRequest(async (req, res) => {
++        res.set("Access-Control-Allow-Origin", "*");
++        if (req.method === "OPTIONS") { res.status(204).send(""); return; }
++
++        try {
++            const projectId = (req.query.projectId || "").toString();
++            let count = 0;
++            if (!projectId) {
++                // If no project ID, run for all (batch mode) or error? 
++                // Let's run the batch logic for simplicity
++                count = await runRemasterLogic() || 0;
++            } else {
++                // Run for specific project logic (simplified version of batch logic)
++                count = await runRemasterLogic(projectId) || 0;
+             }
+-            contextOk = true
+-            refined = sanitize(((out.refined || "").trim()) || rawText)
+-            firstEn = (out.en || "").toString()
+-            firstJa = (out.ja || "").toString()
+-            const tGeminiEnd = Date.now()
+-            await admin.database().ref(`sessions/${projectId}/stream/${id}`).update({ geminiMs: tGeminiEnd - tGeminiStart }).catch(() => {})
+-            await admin.database().ref(`sessions/${projectId}/status/services/gemini`).set({ state: "ok", ts: Date.now() }).catch(() => {})
+-            functions.logger.info("Gemini REST call success", { id, projectId, refinedLen: refined.length })
+-          } catch (err: any) {
+-            await admin.database().ref(`sessions/${projectId}/stream/${id}`).update({ refinedError: err?.message || "Gemini REST failed" }).catch(() => {})
+-            await admin.database().ref(`sessions/${projectId}/status/services/gemini`).set({ state: "error", message: err?.message || "Gemini REST failed", ts: Date.now() }).catch(() => {})
+-            functions.logger.error("Gemini REST call error", { id, projectId, message: err?.message || "unknown" })
+-            refined = rawText
+-          }
+-          if (!contextOk || !refined) {
+-            await admin.database().ref(`sessions/${projectId}/stream/${id}`).set(null).catch(() => {})
+-            functions.logger.info("Segment discarded by context filter", { id })
+-            return
+-          }
+-            await admin.database().ref(`sessions/${projectId}/stream/${id}/context`).set({ isMedicalContext: true, ts: Date.now() }).catch(() => {})
+-          
+-        // Regex-based JSON extraction (Hardened)
+-        // Find all JSON objects in the string
+-        const jsonRegex = /\{[\s\S]*?\}/g;
+-        const matches = refined.match(jsonRegex);
+-        let cleanRefined = refined;
+-
+-        if (matches && matches.length > 0) {
++            res.json({ success: true, count });
++        } catch (e: any) {
++            res.status(500).json({ success: false, error: e.message });
++        }
++    });
++
++const runRemasterLogic = async (targetProjectId?: string): Promise<number | void> => {
++    const now = Date.now();
++    // Target: Recent 10 minutes (State-based Sweeping)
++    // Avoid very recent 30s
++    const START_OFFSET = 600 * 1000; // 10 min
++    const END_OFFSET = 30 * 1000;    // 30s
++
++    // 1. Get projects
++    let projectsSnap;
++    if (targetProjectId) {
++        projectsSnap = await admin.database().ref(`projects/${targetProjectId}`).get();
++    } else {
++        projectsSnap = await admin.database().ref('projects').get();
++    }
++
++    if (!projectsSnap.exists()) return;
++
++    const promises: Promise<number>[] = [];
++
++    const processProject = (pSnap: admin.database.DataSnapshot, pid: string) => {
++        const pVal = pSnap.val();
++        const activeId = pVal.activeSessionId;
++        const lastRemasteredAt = Number(pVal.settings?.lastRemasteredAt || 0);
++
++        if (!activeId) return;
++
++        // Determine Time Window
++        // Force Remaster: Always look back 60 minutes, ignoring lastRemasteredAt
++        // This ensures we always re-evaluate the recent context
++        const ONE_HOUR = 3600 * 1000;
++        const startTime = now - ONE_HOUR;
++        const endTime = now - 1000; // Up to 1 second ago
++
++        promises.push((async (): Promise<number> => {
++            // 2. Fetch data within time window
++            const streamRef = admin.database().ref(`projects/${pid}/stream`);
++            const q = streamRef.orderByChild('timestamp').startAt(startTime).endAt(endTime);
++            const streamSnap = await q.get();
++
++            if (!streamSnap.exists()) return 0;
++
++            const items: any[] = [];
++
++            streamSnap.forEach(child => {
++                const val = child.val();
++                if (val.sessionId === activeId && val.status === 'final') {
++                    items.push({ id: child.key, ...val });
++                }
++            });
++
++            if (items.length === 0) return 0; // Nothing to update (Sweeping complete)
++
++            // Sort by timestamp
++            const allItems = items.sort((a, b) => a.timestamp - b.timestamp);
++
++            if (allItems.length < 3) return 0;
++
++            // 3. Prepare Prompt
++            const sessionInfo = pVal.sessions?.[activeId] || {};
++            const contextText = `Speaker: ${sessionInfo.speaker}, Topic: ${sessionInfo.topic}, Abstract: ${sessionInfo.abstract}`;
++            const sourceLang = sessionInfo.sourceLanguage || 'ko';
++
++            // Determine targets:
++            // We want to fix broken sentences.
++            // We pass ALL items to Gemini, but mark them as "isTarget: true" if they are recent (last 10 mins) OR haven't been remastered.
++            // Actually, for "Force Remaster", let's just ask Gemini to review the whole block and fix any broken flows.
++            const inputList = allItems.map(i => ({
++                id: i.id,
++                text: i.refined || i.original,
++                // isTarget: !i.isRemastered // OLD LOGIC
++                isTarget: true // FORCE LOGIC: Check everything in the window
++            }));
++
++            const prompt = `
++[TASK: REMASTER TRANSCRIPT]
++- Analyze the conversation list (JSON).
++- Focus on items where "isTarget": true.
++- Use context from other items to fix terminology and flow.
++- Output the updated list for TARGET items only.
++
++[REMASTERING RULES]
++1. Input Source Language: ${sourceLang}
++2. Target Languages: en, ja
++
++[OUTPUT FIELDS]
++- "id": The ID of the item being updated (The main sentence).
++- "refined": MUST BE in ${sourceLang}. Fix typos and grammar only. DO NOT TRANSLATE.
++- "translations": Object containing keys for each target language.
++- "mergedIds": Array of IDs that were merged/absorbed into this sentence. (These will be DELETED from the screen).
++
++[RULE]
++- If you combine multiple fragments into one complete sentence, use the ID of the FIRST fragment as the main "id", and list all other absorbed IDs in "mergedIds".
++
++[EXAMPLE]
++Input: 
++Item 1 (ID: A): "1, 2, 3"
++Item 2 (ID: B): "Hello"
++Item 3 (ID: C): "World"
++(Source: en)
++
++Output:
++[
++  {
++    "id": "B",
++    "refined": "Hello World.",
++    "translations": { "ko": "안녕 세상아." },
++    "mergedIds": ["A", "C"] 
++  }
++]
++
++[NOISE CLEANUP]
++- Remove non-lecture speech like microphone testing ("1, 2, 3, 4", "Ah, ah").
++- Fix obvious typos ("띵 진료" -> "루틴 진료" or "핵심 진료" based on context).
++- If a sentence is broken, merge it with the next one to make a complete paragraph.
++- If the Korean sentence lacks a subject (e.g., "권고합니다"), add a proper subject like "We recommend" or "It is recommended" based on context.
++- Ensure the final English output forms complete, professional sentences suitable for a medical lecture.
++
++[Session Abstract]
++${contextText}
++
++[INPUT JSON]
++${JSON.stringify(inputList)}
++`;
++            // 4. Call Gemini Pro
+             try {
+-                // Try to parse each match and see if it has 'refined' key
+-                for (const match of matches) {
+-                    try {
+-                        const parsed = JSON.parse(match);
+-                        if (parsed && parsed.refined) {
+-                            cleanRefined = parsed.refined;
+-                            break; // Use the first valid one
++                const payload: any = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }
++                const res = await fetch(GEMINI_PRO_URL(DIRECT_GEMINI_KEY), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
++                if (!res.ok) return 0;
++
++                const data = await res.json();
++                const outText = (((data || {}).candidates || [])[0] || {}).content?.parts?.[0]?.text || "";
++                if (!outText) return 0;
++
++                const cleanText = outText.replace(/```json\s*|```/g, "").trim();
++                const refinedList = JSON.parse(cleanText);
++
++                if (!Array.isArray(refinedList)) return 0;
++
++                // 5. Update DB
++                const updates: any = {};
++                for (const item of refinedList) {
++                    if (!item || !item.id) continue;
++                    const originalItem = items.find(i => i.id === item.id);
++
++                    if (originalItem && item.refined) {
++                        // Safety Guard: Check if source language is preserved
++                        if (sourceLang === 'ko' && !/[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(item.refined)) {
++                            functions.logger.warn(`Safety Guard: Dropped English update for Korean field`, item);
++                            continue; // Skip this update
+                         }
+-                    } catch {}
++
++                        updates[`projects/${pid}/stream/${item.id}/refined`] = sanitize(item.refined);
++                        if (item.translations) {
++                            if (item.translations.en) updates[`projects/${pid}/stream/${item.id}/en`] = sanitize(item.translations.en);
++                            if (item.translations.ja) updates[`projects/${pid}/stream/${item.id}/ja`] = sanitize(item.translations.ja);
++                        }
++                        updates[`projects/${pid}/stream/${item.id}/isRemastered`] = true;
++
++                        // Handle Merged IDs (Delete them)
++                        if (item.mergedIds && Array.isArray(item.mergedIds)) {
++                            item.mergedIds.forEach((mid: string) => {
++                                if (mid !== item.id) { // Prevent self-deletion
++                                    updates[`projects/${pid}/stream/${mid}`] = null; // Delete from DB
++                                }
++                            });
++                        }
++
++                        // TTS Trigger (Remaster)
++                        const rSeq = originalItem.seq;
++                        const rSessionId = originalItem.sessionId;
++                        if (rSeq && rSessionId) {
++                            try {
++                                const audioUrl = await generateTTS(sanitize(item.refined), sourceLang, pid, rSessionId, rSeq);
++                                if (audioUrl) {
++                                    updates[`projects/${pid}/stream/${item.id}/audioUrl`] = audioUrl;
++                                }
++                            } catch (e) { }
++                        }
++                    }
+                 }
+-            } catch {}
+-        }
+ 
+-        // Final Sanitize & Fallback
+-        // If cleanRefined still looks like JSON or contains brackets, force use rawText
+-        if (cleanRefined.trim().startsWith('{') || cleanRefined.includes('{"refined"')) {
+-             functions.logger.warn("JSON parsing failed fully, falling back to rawText", { id, cleanRefined });
+-             cleanRefined = rawText; // Better to show original than code
+-        }
+-        
+-        // Explicitly cast to string to be safe and sanitize again just in case
+-        cleanRefined = sanitize(String(cleanRefined || ""));
+-
+-        await admin.database().ref(`sessions/${projectId}/stream/${id}`).update({ refined: cleanRefined, en: firstEn, ja: firstJa, status: "final" }).catch(() => {})
+-        // Update State with Refined Text for next context
+-        await admin.database().ref(`sessions/${projectId}/state`).update({ lastRefined: cleanRefined, lastTimestamp: Date.now() }).catch(() => {})
+-        
+-        functions.logger.info("Refined segment saved", { id, projectId, refinedLen: cleanRefined.length })
+-        await admin.database().ref(`sessions/${projectId}/stream/${id}`).update({ status: "final" }).catch(() => {})
+-
+-          // Translation step
+-          try {
+-            // Prefer Google Translate if available
+-            let en = firstEn, ja = firstJa
+-            if (!en && !ja) {
+-              try {
+-                const joint = await callGeminiREST(refined || rawText) // Context removed for speed
+-                en = (joint.en || "").toString()
+-                ja = (joint.ja || "").toString()
+-              } catch {}
++                // Update lastRemasteredAt to the max timestamp of fetched items
++                let maxTimestamp = 0;
++                if (items.length > 0) {
++                    maxTimestamp = Math.max(...items.map(i => i.timestamp || 0));
++                }
++
++                if (maxTimestamp > 0) {
++                    updates[`projects/${pid}/settings/lastRemasteredAt`] = maxTimestamp;
++                }
++
++                if (Object.keys(updates).length > 0) {
++                    await admin.database().ref().update(updates);
++                    functions.logger.info(`Remastered ${Object.keys(updates).length} items for ${pid}`);
++                    return Object.keys(updates).length; // Return count
++                }
++
++                // Even if no updates, update pointer
++                if (maxTimestamp > 0) {
++                    await admin.database().ref(`projects/${pid}/settings/lastRemasteredAt`).set(maxTimestamp);
++                }
++
++                return 0;
++
++            } catch (e: any) {
++                functions.logger.error("Remaster Inner Error", e);
++                throw new Error(`Inner Error: ${e.message}`);
+             }
+-            const tStart = Date.now()
+-            const tEnd = Date.now()
+-            const tObj: any = { en, ja, timestamp: Date.now(), isFinal: true }
+-            await admin.database().ref(`sessions/${projectId}/stream/${id}/translated`).set(tObj).catch(() => {})
+-            // For overlay compatibility: also expose language keys at top-level
+-            if (en) await admin.database().ref(`sessions/${projectId}/stream/${id}/en`).set({ id, text: en, lang: "en", timestamp: Date.now(), isFinal: true }).catch(() => {})
+-            if (ja) await admin.database().ref(`sessions/${projectId}/stream/${id}/ja`).set({ id, text: ja, lang: "ja", timestamp: Date.now(), isFinal: true }).catch(() => {})
+-            await admin.database().ref(`sessions/${projectId}/stream/${id}`).update({ translateMs: tEnd - tStart, status: "final" }).catch(() => {})
+-            await admin.database().ref(`sessions/${projectId}/status/services/translation`).set({ state: "ok", ts: Date.now() }).catch(() => {})
+-          } catch (tErr: any) {
+-            await admin.database().ref(`sessions/${projectId}/stream/${id}`).update({ translatedError: tErr?.message || "Translate failed" }).catch(() => {})
+-            await admin.database().ref(`sessions/${projectId}/status/services/translation`).set({ state: "error", message: tErr?.message || "Translate failed", ts: Date.now() }).catch(() => {})
+-          }
+-      };
+-
+-      // Execute async work (without await, so function returns immediately)
+-      // Using Promise.resolve().then() to detach from main loop slightly
+-      Promise.resolve().then(runAsyncWork).catch(err => functions.logger.error("Async work failed", err));
+-    } catch (e: any) {
+-      res.status(500).json({ success: false, error: e?.message || "Internal Error", version: versionTag })
++        })());
++    };
++
++    if (targetProjectId) {
++        processProject(projectsSnap, targetProjectId);
++    } else {
++        projectsSnap.forEach((pSnap) => processProject(pSnap, pSnap.key!));
+     }
+-  })
++
++    const results = await Promise.all(promises);
++    const totalCount = results.reduce((a, b) => (a || 0) + (b || 0), 0);
++    return totalCount;
++};

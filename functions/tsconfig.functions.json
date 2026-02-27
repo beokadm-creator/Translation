@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "module": "commonjs",
+    "outDir": "./lib",
+    "rootDir": "./src",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/index.ts",
+    "src/stt.ts",
+    "src/diagnose.ts",
+    "src/archive.ts",
+    "src/middleware.ts"
+  ]
+}

@@ -1,0 +1,8 @@
+api/routes/audio.ts(64,14): error TS2339: Property 'file' does not exist on type 'Request<{}, any, any, ParsedQs, Record<string, any>>'.
+api/routes/audio.ts(72,27): error TS2339: Property 'file' does not exist on type 'Request<{}, any, any, ParsedQs, Record<string, any>>'.
+api/routes/audio.ts(82,16): error TS2339: Property 'createReadStream' does not exist on type 'typeof import("fs/promises")'.
+api/routes/audio.ts(131,13): error TS2339: Property 'file' does not exist on type 'Request<{}, any, any, ParsedQs, Record<string, any>>'.
+api/routes/audio.ts(133,29): error TS2339: Property 'file' does not exist on type 'Request<{}, any, any, ParsedQs, Record<string, any>>'.
+src/App.tsx(33,9): error TS1117: An object literal cannot have multiple properties with the same name.
+src/stt.ts(370,52): error TS2552: Cannot find name 'activeSessionId'. Did you mean 'tSessionId'?
+src/translate.ts(3,42): error TS2307: Cannot find module '@google-cloud/translate' or its corresponding type declarations.
