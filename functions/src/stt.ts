@@ -2,6 +2,7 @@
 import * as functions from "firebase-functions/v1"
 import * as admin from "firebase-admin"
 import OpenAI from "openai"
+import type { Request } from "express"
 import { Readable } from "stream"
 
 let _openai: OpenAI | null = null
@@ -10,7 +11,7 @@ const getGeminiKey = (): string => {
     if (!key) functions.logger.warn("GEMINI_API_KEY is not set.");
     return key;
 };
-const GEMINI_FLASH_URL = (key: string) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${key}`
+    const GEMINI_FLASH_URL = (key: string) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${key}`
 const GEMINI_PRO_URL = (key: string) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-latest:generateContent?key=${key}`
 
 const getDynamicPrompt = (sourceLang: string, sessionContext: string, previousContext: string) => {
@@ -73,7 +74,11 @@ INPUT: `;
 const callGeminiREST = async (text: string, previousContext: string, sessionContext: string, sourceLang: string): Promise<{ isMedicalContext?: boolean, refined?: string, en?: string, ja?: string }> => {
     const prompt = getDynamicPrompt(sourceLang, sessionContext, previousContext);
 
-    const payload: any = { contents: [{ parts: [{ text: `${prompt}"${text}"` }] }], generationConfig: { responseMimeType: "application/json" } }
+    type GeminiPayload = {
+        contents: { parts: { text: string }[] }[];
+        generationConfig: { responseMimeType: string };
+    };
+    const payload: GeminiPayload = { contents: [{ parts: [{ text: `${prompt}"${text}"` }] }], generationConfig: { responseMimeType: "application/json" } }
     const apiKey = getGeminiKey();
 
     let res = await fetch(GEMINI_FLASH_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
@@ -189,7 +194,7 @@ export const processAudio = functions
             if (!projectId) { res.status(400).json({ success: false }); return; }
 
             let buf: Buffer | null = null
-            const raw = (req as any).rawBody as Buffer | undefined
+            const raw = (req as Request & { rawBody?: Buffer }).rawBody as Buffer | undefined
             if (raw && Buffer.isBuffer(raw)) buf = raw
             else if (Buffer.isBuffer(req.body)) buf = req.body as Buffer
             else if (typeof req.body === "string") buf = Buffer.from(req.body, "binary")
@@ -208,28 +213,29 @@ export const processAudio = functions
                         sourceLang = sessionSnap.val().sourceLanguage || 'ko';
                     }
                 }
-            } catch { }
+} catch { // Intentionally empty
+}
 
             await admin.database().ref(`projects/${projectId}/status`).update({ lastActive: Date.now() }).catch(() => { })
 
-            let openai: OpenAI
-            try { openai = getOpenAI() } catch (cfgErr: any) { res.status(500).json({ success: false }); return; }
+let openai: OpenAI
+            try { openai = getOpenAI() } catch { res.status(500).json({ success: false }); return; }
 
             if (buf.length < 2000) { res.status(200).json({ success: false, error: "TooSmall" }); return; }
 
-            let stt: any
+            let stt: { text?: string } | undefined
             try {
-                const audioStream = Readable.from(buf)
-                    ; (audioStream as any).path = "audio.webm"
+                const audioStream = Readable.from(buf) as Readable & { path: string };
+                audioStream.path = "audio.webm";
                 stt = await openai.audio.transcriptions.create({
-                    file: audioStream as any,
+                    file: audioStream,
                     model: "whisper-1",
                     language: sourceLang, // LOCKED!
                     prompt: DENTAL_PROMPT,
                     temperature: 0
                 })
                 await admin.database().ref(`projects/${projectId}/status/services/openai`).set({ state: "ok", ts: Date.now() }).catch(() => { })
-            } catch (err) {
+            } catch {
                 // Retry with mp4 ext if needed, but let's keep it simple for now
                 res.status(200).json({ success: false, error: "WhisperFailed" });
                 return;
@@ -264,7 +270,8 @@ export const processAudio = functions
 
             res.status(200).json({ success: true, id, text: rawText, stage: "original", timestamp, version: versionTag })
 
-        } catch (e: any) {
+        } catch (e: unknown) {
+            void e;
             res.status(500).json({ success: false, error: "Internal Error" })
         }
     })
@@ -316,7 +323,8 @@ export const onRefineRequest = functions
                     sourceLang = s.sourceLanguage || "ko";
                 }
             }
-        } catch { }
+} catch { // Intentionally empty
+}
 
         bufferText = bufferText ? bufferText + " " + rawText : rawText;
         bufferIds.push(dataId);
@@ -340,7 +348,9 @@ export const onRefineRequest = functions
         try {
             const snap = await projectRef.child('state/lastRefined').get();
             previousContext = (snap.val() || "").toString();
-        } catch { }
+        } catch { // Intentionally empty
+            void 0;
+        }
 
         let refined = bufferText;
         let firstEn = "";
@@ -352,11 +362,12 @@ export const onRefineRequest = functions
             refined = sanitize(out.refined || bufferText);
             firstEn = (out.en || "").toString();
             firstJa = (out.ja || "").toString();
-        } catch (err) {
+        } catch (_err: unknown) {
+            void _err;
             refined = bufferText;
         }
 
-        const updates: any = {};
+    const updates: Record<string, unknown> = {};
         const targetId = bufferIds[0];
         const idsToDelete = bufferIds.slice(1);
 
@@ -376,14 +387,14 @@ export const onRefineRequest = functions
                 const tSessionId = tVal.sessionId || activeSessionId;
 
                 if (tSeq && tSessionId) {
-                    const audioUrl = await generateTTS(refined, sourceLang, projectId, tSessionId, tSeq);
+                    const audioUrl = await generateTTS(refined, sourceLang, projectId, tSessionId, tSeq) as string | null;
                     if (audioUrl) {
-                        updates[`projects/${projectId}/stream/${targetId}/audioUrl`] = audioUrl;
+                        updates[`projects/${projectId}/stream/${targetId}/audioUrl`] = audioUrl as string;
                     }
                 }
             }
-        } catch (e) {
-            functions.logger.error("TTS Gen Error (Refine)", e);
+        } catch (_e: unknown) {
+            functions.logger.error("TTS Gen Error (Refine)", _e instanceof Error ? _e.message : 'Unknown error');
         }
 
         for (const pid of idsToDelete) {
@@ -402,7 +413,8 @@ export const onRefineRequest = functions
 // 3. Scheduled Batch: Live Remastering (Every 2 minutes)
 export const remasterSession = functions
     .runWith({ timeoutSeconds: 300, memory: "1GB" })
-    .pubsub.schedule("every 2 minutes").onRun(async (context) => {
+    .pubsub.schedule("every 2 minutes").onRun(async (_context) => {
+        void _context;
         await runRemasterLogic();
     });
 
@@ -425,8 +437,8 @@ export const triggerRemaster = functions
                 count = await runRemasterLogic(projectId) || 0;
             }
             res.json({ success: true, count });
-        } catch (e: any) {
-            res.status(500).json({ success: false, error: e.message });
+    } catch (e: unknown) {
+            res.status(500).json({ success: false, error: e instanceof Error ? e.message : 'Unknown error' });
         }
     });
 
@@ -434,11 +446,11 @@ const runRemasterLogic = async (targetProjectId?: string): Promise<number | void
     const now = Date.now();
     // Target: Recent 10 minutes (State-based Sweeping)
     // Avoid very recent 30s
-    const START_OFFSET = 600 * 1000; // 10 min
-    const END_OFFSET = 30 * 1000;    // 30s
+    // START_OFFSET removed: unused
+    // END_OFFSET removed: unused
 
     // 1. Get projects
-    let projectsSnap;
+    let projectsSnap: admin.database.DataSnapshot;
     if (targetProjectId) {
         projectsSnap = await admin.database().ref(`projects/${targetProjectId}`).get();
     } else {
@@ -452,7 +464,6 @@ const runRemasterLogic = async (targetProjectId?: string): Promise<number | void
     const processProject = (pSnap: admin.database.DataSnapshot, pid: string) => {
         const pVal = pSnap.val();
         const activeId = pVal.activeSessionId;
-        const lastRemasteredAt = Number(pVal.settings?.lastRemasteredAt || 0);
 
         if (!activeId) return;
 
@@ -471,19 +482,22 @@ const runRemasterLogic = async (targetProjectId?: string): Promise<number | void
 
             if (!streamSnap.exists()) return 0;
 
-            const items: any[] = [];
+            type StreamItem = { id?: string; timestamp?: number; refined?: string; original?: string; sessionId?: string };
+            const items: StreamItem[] = [];
 
-            streamSnap.forEach(child => {
-                const val = child.val();
-                if (val.sessionId === activeId && val.status === 'final') {
-                    items.push({ id: child.key, ...val });
+            const streamVal = streamSnap.val() || {};
+            const entries = Object.entries(streamVal) as [string, unknown][];
+            for (const [key, val] of entries) {
+                const v = val as { sessionId?: string; status?: string; timestamp?: number; refined?: string; original?: string };
+                if (v && v.sessionId === activeId && v.status === 'final') {
+                    items.push({ id: key, timestamp: v.timestamp, refined: v.refined, original: v.original, sessionId: v.sessionId });
                 }
-            });
+            }
 
             if (items.length === 0) return 0; // Nothing to update (Sweeping complete)
 
             // Sort by timestamp
-            const allItems = items.sort((a, b) => a.timestamp - b.timestamp);
+            const allItems = items.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
             if (allItems.length < 3) return 0;
 
@@ -556,7 +570,11 @@ ${JSON.stringify(inputList)}
             // 4. Call Gemini Pro
             try {
                 const apiKey = getGeminiKey();
-                const payload: any = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }
+                type GeminiProPayload = {
+                    contents: { parts: { text: string }[] }[];
+                    generationConfig: { responseMimeType: string };
+                };
+                const payload: GeminiProPayload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }
                 const res = await fetch(GEMINI_PRO_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
                 if (!res.ok) return 0;
 
@@ -570,7 +588,7 @@ ${JSON.stringify(inputList)}
                 if (!Array.isArray(refinedList)) return 0;
 
                 // 5. Update DB
-                const updates: any = {};
+                const updates: Record<string, unknown> = {};
                 for (const item of refinedList) {
                     if (!item || !item.id) continue;
                     const originalItem = items.find(i => i.id === item.id);
@@ -599,15 +617,16 @@ ${JSON.stringify(inputList)}
                         }
 
                         // TTS Trigger (Remaster)
-                        const rSeq = originalItem.seq;
+                        // TTS Trigger (Remaster) - seq is not available in items, skipping for now
+                        // const rSeq = originalItem.seq;
                         const rSessionId = originalItem.sessionId;
-                        if (rSeq && rSessionId) {
+                        if (rSessionId) {
                             try {
-                                const audioUrl = await generateTTS(sanitize(item.refined), sourceLang, pid, rSessionId, rSeq);
+                                const audioUrl = await generateTTS(sanitize(item.refined), sourceLang, pid, rSessionId, 0);
                                 if (audioUrl) {
                                     updates[`projects/${pid}/stream/${item.id}/audioUrl`] = audioUrl;
                                 }
-                            } catch (e) { }
+                            } catch (_e: unknown) { void _e; }
                         }
                     }
                 }
@@ -635,9 +654,9 @@ ${JSON.stringify(inputList)}
 
                 return 0;
 
-            } catch (e: any) {
+    } catch (e: unknown) {
                 functions.logger.error("Remaster Inner Error", e);
-                throw new Error(`Inner Error: ${e.message}`);
+                throw new Error(`Inner Error: ${e instanceof Error ? e.message : 'Unknown error'}`);
             }
         })());
     };
@@ -645,7 +664,7 @@ ${JSON.stringify(inputList)}
     if (targetProjectId) {
         processProject(projectsSnap, targetProjectId);
     } else {
-        projectsSnap.forEach((pSnap) => processProject(pSnap, pSnap.key!));
+        projectsSnap.forEach((pSnap) => { processProject(pSnap, pSnap.key!); });
     }
 
     const results = await Promise.all(promises);

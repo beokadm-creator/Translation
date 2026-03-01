@@ -17,7 +17,8 @@ const TextItem: React.FC<Props> = ({ id, text, isRaw, targetLang = "original", c
   useEffect(() => {
     // If text changed (e.g. from Raw to Refined, or Refined update), trigger highlight
     if (prevTextRef.current !== text) {
-        setHighlight(true);
+        // Wrap in Promise.resolve to avoid setState warning
+        Promise.resolve().then(() => setHighlight(true));
         const timer = setTimeout(() => setHighlight(false), 800);
         prevTextRef.current = text;
         return () => clearTimeout(timer);

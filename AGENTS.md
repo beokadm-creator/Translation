@@ -1,5 +1,25 @@
 # Translation App - Agent Guidelines
 
+## 📚 Documentation Index
+
+**Project Documentation** (for human developers):
+- **[README.md](README.md)** - Project overview and quick start guide
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Complete system architecture and data flow
+- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Development setup and workflow guide
+- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** - Firebase deployment and production configuration
+- **[docs/API.md](docs/API.md)** - API endpoints, WebSocket events, and database schemas
+
+**Agent Guidelines** (this document - for AI agents):
+- Code style patterns
+- Import conventions
+- Architecture patterns
+- Firebase integration patterns
+- React component patterns
+
+---
+
+## Project Overview
+
 ## Project Overview
 
 Real-time medical conference translation platform with AI-powered speech-to-text, text refinement, and multi-language captioning. Uses Firebase backend, React client, and Socket.IO for real-time audio streaming.

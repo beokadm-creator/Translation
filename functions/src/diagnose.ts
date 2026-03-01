@@ -9,7 +9,7 @@ export const diagnoseSystem = onRequest(async (req, res) => {
         return;
     }
 
-    const report: any = {
+    const report: Record<string, unknown> = {
         timestamp: new Date().toISOString(),
         env: process.env.FUNCTIONS_EMULATOR ? 'emulator' : 'cloud',
         projectId: process.env.GCLOUD_PROJECT || 'unknown',
@@ -29,15 +29,14 @@ export const diagnoseSystem = onRequest(async (req, res) => {
             status: 'ok',
             time: Date.now()
         });
-        report.tests.rtdbWrite = 'SUCCESS';
-
+        (report.tests as Record<string, unknown>).rtdbWrite = 'SUCCESS';
         // Test 2: RTDB Read
         const snap = await dbRef.once('value');
         const val = snap.val();
-        report.tests.rtdbRead = val?.status === 'ok' ? 'SUCCESS' : 'FAILED_CONTENT_MISMATCH';
+        (report.tests as Record<string, unknown>).rtdbRead = val?.status === 'ok' ? 'SUCCESS' : 'FAILED_CONTENT_MISMATCH';
 
-    } catch (e: any) {
-        report.tests.rtdb = `FAILED: ${e.message}`;
+    } catch (e: unknown) {
+        (report.tests as Record<string, unknown>).rtdb = `FAILED: ${e instanceof Error ? e.message : 'Unknown error'}`;
     }
 
     try {
@@ -46,9 +45,9 @@ export const diagnoseSystem = onRequest(async (req, res) => {
             status: 'ok',
             time: Date.now()
         });
-        report.tests.firestore = 'SUCCESS';
-    } catch (e: any) {
-        report.tests.firestore = `FAILED: ${e.message}`;
+        (report.tests as Record<string, unknown>).firestore = 'SUCCESS';
+    } catch (e: unknown) {
+        (report.tests as Record<string, unknown>).firestore = `FAILED: ${e instanceof Error ? e.message : 'Unknown error'}`;
     }
 
     res.json(report);

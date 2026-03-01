@@ -59,9 +59,10 @@ const AdminLanding: React.FC = () => {
   // 2. Load Projects when Conference Selected
   useEffect(() => {
       if (!selectedConfId) {
-          setConfProjects([]);
+          // Return early without calling setState
           return;
       }
+
       const loadProjects = async () => {
           // In a real app, use query orderByChild('settings/conferenceId').equalTo(selectedConfId)
           // For now, we fetch all and filter client side (simpler for this scale)
@@ -70,8 +71,8 @@ const AdminLanding: React.FC = () => {
               const data = snap.val();
               const list = Object.keys(data).map(k => {
                   const s = data[k].settings || {};
-                  return { ...s, slug: k };
-              }).filter((p: any) => p.conferenceId === selectedConfId);
+                  return { ...s, slug: k } as ProjectSettings & { slug: string };
+              }).filter(p => p.conferenceId === selectedConfId);
               setConfProjects(list);
           } else {
               setConfProjects([]);
@@ -124,9 +125,10 @@ const AdminLanding: React.FC = () => {
           setIsCreatingConf(false);
           setConfForm({ id: "", title: "", accessCode: "", startDate: "", endDate: "" });
           alert("Conference Created Successfully!");
-      } catch (error: any) {
+} catch (error: unknown) {
           console.error("Create Failed:", error);
-          alert("Create Failed: " + error.message);
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          alert("Create Failed: " + message);
       }
   };
 

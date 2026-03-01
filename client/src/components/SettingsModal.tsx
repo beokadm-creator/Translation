@@ -54,7 +54,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ project, onUpdate, onClos
       const [parent, child] = name.split('.');
       setGeneralData(prev => ({
         ...prev,
-        [parent]: { ...(prev as any)[parent], [child]: value }
+        [parent]: { ...(prev as Record<string, unknown>)[parent] as Record<string, unknown>, [child]: value }
       }));
     } else {
       setGeneralData(prev => ({ ...prev, [name]: value }));

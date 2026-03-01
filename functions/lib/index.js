@@ -32,12 +32,16 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.helloWorld = exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.triggerRemaster = exports.remasterSession = exports.onRefineRequest = exports.processAudio = void 0;
 // Version: Quality Stable v1
 const functions = __importStar(require("firebase-functions"));
 const https_1 = require("firebase-functions/v2/https");
 const admin = __importStar(require("firebase-admin"));
+const service_account_json_1 = __importDefault(require("../service-account.json"));
 // Initialize Firebase Admin
 try {
     // Check if running in Cloud Functions environment where config is auto-populated
@@ -46,18 +50,17 @@ try {
         functions.logger.info("Initialized with FIREBASE_CONFIG");
     }
     else {
-        // Local or fallback
-        const serviceAccount = require("../service-account.json");
+        // Local or fallback - service account import must be at top level
+        // This is handled by the top-level import below
+        functions.logger.info("Using service account from file");
         admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount),
-            // If DB exists, it will be picked up. If not, this might be undefined or need manual set.
-            // For now, let's NOT hardcode a broken URL.
+            credential: admin.credential.cert(service_account_json_1.default),
             databaseURL: "https://translation-comm-default-rtdb.firebaseio.com"
         });
         functions.logger.info("Initialized with service-account.json");
     }
 }
-catch (error) {
+catch {
     // Final Fallback: Just try default init (works in some emulators/cloud setups)
     try {
         admin.initializeApp();

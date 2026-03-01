@@ -14,7 +14,7 @@ export const verifyAuth = async (req: functions.https.Request, res: Response, ne
   const idToken = authHeader.split("Bearer ")[1];
   try {
     const decodedToken = await admin.auth().verifyIdToken(idToken);
-    (req as any).user = decodedToken;
+    (req as typeof req & { user?: unknown }).user = decodedToken;
     next();
   } catch (error) {
     console.error("Error verifying auth token:", error);

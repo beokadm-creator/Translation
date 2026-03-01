@@ -4,7 +4,7 @@ import { ref, onValue, off } from 'firebase/database';
 
 export const useProjectStream = (projectIdOrSlug: string | undefined, options: { subscribe?: boolean } = { subscribe: true }) => {
   const [realProjectId, setRealProjectId] = useState<string | null>(null);
-  const [streamData, setStreamData] = useState<any>(null);
+  const [streamData, setStreamData] = useState<Record<string, { original: string; refined?: string; en?: string; ja?: string; status: 'raw' | 'final' | 'merged'; timestamp: number; mergedIds?: string[] } | null> | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -15,8 +15,8 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
     }
 
     let mounted = true;
-    let streamRef: any = null;
-    let streamListener: any = null;
+    let streamRef: ReturnType<typeof ref> | null = null;
+    let streamListener: ((snapshot: { val: () => unknown }) => void) | null = null;
 
     const resolveAndSubscribe = async () => {
       try {
@@ -27,18 +27,19 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
         // Subscribe to Stream
         if (options.subscribe) {
           streamRef = ref(rtdb, `projects/${resolvedId}/stream`);
-          streamListener = onValue(streamRef, (snapshot) => {
+          streamListener = (snapshot) => {
             if (!mounted) return;
-            setStreamData(snapshot.val());
-          }, (err) => {
+            setStreamData(snapshot.val() as typeof streamData);
+          };
+          onValue(streamRef, streamListener, (err) => {
             console.error("Stream subscription error:", err);
-            if (mounted) setError(err.message);
+            if (mounted) setError(err instanceof Error ? err.message : String(err));
           });
         }
 
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Error in useProjectStream:", err);
-        if (mounted) setError(err.message || "Unknown error");
+        if (mounted) setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
         if (mounted) setLoading(false);
       }

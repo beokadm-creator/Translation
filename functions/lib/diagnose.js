@@ -69,7 +69,7 @@ exports.diagnoseSystem = (0, https_1.onRequest)(async (req, res) => {
         report.tests.rtdbRead = (val === null || val === void 0 ? void 0 : val.status) === 'ok' ? 'SUCCESS' : 'FAILED_CONTENT_MISMATCH';
     }
     catch (e) {
-        report.tests.rtdb = `FAILED: ${e.message}`;
+        report.tests.rtdb = `FAILED: ${e instanceof Error ? e.message : 'Unknown error'}`;
     }
     try {
         // Test 3: Firestore Write (Optional, just to check permissions)
@@ -80,7 +80,7 @@ exports.diagnoseSystem = (0, https_1.onRequest)(async (req, res) => {
         report.tests.firestore = 'SUCCESS';
     }
     catch (e) {
-        report.tests.firestore = `FAILED: ${e.message}`;
+        report.tests.firestore = `FAILED: ${e instanceof Error ? e.message : 'Unknown error'}`;
     }
     res.json(report);
 });

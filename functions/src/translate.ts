@@ -9,7 +9,7 @@ try {
     config.databaseURL = "https://translation-comm-default-rtdb.firebaseio.com";
     process.env.FIREBASE_CONFIG = JSON.stringify(config);
   }
-} catch (e) {
+} catch {
   // Ignore error if JSON parse fails, fallback to hard overwrite if needed or do nothing
   if (!process.env.FIREBASE_CONFIG) {
     process.env.FIREBASE_CONFIG = JSON.stringify({
@@ -54,7 +54,7 @@ export const translateNewSegment = functions.database
           let translatedText = "";
           
           try {
-            const request: any = {
+            const request: Record<string, unknown> = {
               parent: `projects/${gcpProjectId}/locations/${location}`,
               contents: [val.text],
               mimeType: "text/plain",

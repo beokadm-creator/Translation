@@ -2,6 +2,7 @@
 import * as functions from "firebase-functions";
 import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import serviceAccount from "../service-account.json";
 
 // Initialize Firebase Admin
 try {
@@ -10,17 +11,16 @@ try {
        admin.initializeApp();
        functions.logger.info("Initialized with FIREBASE_CONFIG");
   } else {
-      // Local or fallback
-      const serviceAccount = require("../service-account.json");
+      // Local or fallback - service account import must be at top level
+      // This is handled by the top-level import below
+      functions.logger.info("Using service account from file");
       admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        // If DB exists, it will be picked up. If not, this might be undefined or need manual set.
-        // For now, let's NOT hardcode a broken URL.
-        databaseURL: "https://translation-comm-default-rtdb.firebaseio.com" 
+        credential: admin.credential.cert(serviceAccount as any),
+        databaseURL: "https://translation-comm-default-rtdb.firebaseio.com"
       });
       functions.logger.info("Initialized with service-account.json");
   }
-} catch (error) {
+} catch {
   // Final Fallback: Just try default init (works in some emulators/cloud setups)
   try {
       admin.initializeApp();

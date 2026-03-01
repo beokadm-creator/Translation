@@ -24,10 +24,10 @@ async function verifyKey() {
         // const hasWhisper = models.data.some(m => m.id === 'whisper-1');
         // console.log("Whisper-1 Model Available:", hasWhisper ? "YES" : "NO");
 
-    } catch (error: any) {
-        console.error("❌ API Key Verification Failed:", error.message);
-        if (error.code === 'invalid_api_key') {
-             console.error("The provided API key is invalid.");
+    } catch (error: unknown) {
+        console.error("❌ API Key Verification Failed:", error instanceof Error ? error.message : 'Unknown error');
+        if (error instanceof Error && 'code' in error && error.code === 'invalid_api_key') {
+            console.error("The provided API key is invalid.");
         }
     }
 }

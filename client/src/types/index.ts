@@ -51,6 +51,6 @@ export interface ProjectState {
   activeSessionId?: string;
   status: {
     lastActive: number;
-    services: Record<string, any>;
+    services: Record<string, unknown>;
   };
 }

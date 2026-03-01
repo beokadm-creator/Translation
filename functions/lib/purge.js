@@ -63,6 +63,6 @@ exports.purgeSession = functions
         res.status(200).json({ success: true, target: projectId || "all" });
     }
     catch (e) {
-        res.status(500).json({ success: false, error: (e === null || e === void 0 ? void 0 : e.message) || "Internal Error" });
+        res.status(500).json({ success: false, error: (e instanceof Error ? e.message : "Internal Error") || "Internal Error" });
     }
 });

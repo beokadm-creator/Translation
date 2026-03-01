@@ -6,7 +6,7 @@ import { ref, get } from 'firebase/database';
 const Portal: React.FC = () => {
   const navigate = useNavigate();
   const [accessCode, setAccessCode] = useState('');
-  const [liveProjects, setLiveProjects] = useState<any[]>([]);
+  const [liveProjects, setLiveProjects] = useState<Array<{ id: string; name: string; date: string }>>([]);
 
   useEffect(() => {
     // Find active projects (simple logic: check /projects)
@@ -25,7 +25,9 @@ const Portal: React.FC = () => {
                 }).filter(Boolean);
                 setLiveProjects(active);
             }
-        } catch {}
+        } catch (error: unknown) {
+            console.error("Error fetching live projects:", error);
+        }
     };
     fetchLive();
   }, []);
@@ -72,7 +74,7 @@ const Portal: React.FC = () => {
           {liveProjects.length > 0 && (
               <div className="space-y-3">
                   <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Live Now</h3>
-                  {liveProjects.map((p: any) => (
+                  {liveProjects.map((p) => (
                       <div 
                           key={p.id}
                           onClick={() => navigate(`/p/${p.id}`)}

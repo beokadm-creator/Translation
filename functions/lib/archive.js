@@ -87,6 +87,6 @@ exports.archiveSession = functions.https.onRequest(async (req, res) => {
     }
     catch (error) {
         functions.logger.error("Archive Error", error);
-        res.status(500).send({ error: error.message });
+        res.status(500).send({ error: error instanceof Error ? error.message : "Unknown error" });
     }
 });

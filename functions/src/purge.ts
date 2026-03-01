@@ -20,8 +20,8 @@ export const purgeSession = functions
         await admin.database().ref(`sessions`).remove();
       }
       res.status(200).json({ success: true, target: projectId || "all" });
-    } catch (e: any) {
-      res.status(500).json({ success: false, error: e?.message || "Internal Error" });
+    } catch (e: unknown) {
+      res.status(500).json({ success: false, error: (e instanceof Error ? e.message : "Internal Error") || "Internal Error" });
     }
   });
 

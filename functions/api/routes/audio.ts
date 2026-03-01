@@ -25,9 +25,7 @@ let genAI: GoogleGenerativeAI | null = null
 function getOpenAIClient() {
   if (!openai) {
     const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey) {
-      throw new Error('OPENAI_API_KEY environment variable is not set')
-    }
+    if (!apiKey) throw new Error('OPENAI_API_KEY environment variable is not set')
     openai = new OpenAI({ apiKey })
   }
   return openai
@@ -36,9 +34,7 @@ function getOpenAIClient() {
 function getGeminiClient() {
   if (!genAI) {
     const apiKey = process.env.GEMINI_API_KEY
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY environment variable is not set')
-    }
+    if (!apiKey) throw new Error('GEMINI_API_KEY environment variable is not set')
     genAI = new GoogleGenerativeAI(apiKey)
   }
   return genAI
@@ -63,13 +59,11 @@ router.post('/upload', upload.single('audio'), async (req, res) => {
     await ensureTempDir()
 
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: 'No audio file provided'
-      })
+      return res.status(400).json({ success: false, error: 'No audio file provided' })
     }
 
-    const sessionId = req.body.sessionId || 'default'
+
+
     const audioFile = req.file
 
     // Read the uploaded file
@@ -92,7 +86,6 @@ router.post('/upload', upload.single('audio'), async (req, res) => {
 
     // Step 2: Gemini correction for dental terminology
     let corrected = ''
-
     try {
       const geminiClient = getGeminiClient()
       const model = geminiClient.getGenerativeModel({ model: 'gemini-pro' })
@@ -100,10 +93,8 @@ router.post('/upload', upload.single('audio'), async (req, res) => {
         DENTAL_CORRECTION_PROMPT,
         transcript
       ])
-
       const response = await result.response
       corrected = response.text()
-
     } catch (geminiError) {
       console.error('Gemini correction failed:', geminiError)
       // Fallback: use original transcript if Gemini fails
@@ -120,14 +111,12 @@ router.post('/upload', upload.single('audio'), async (req, res) => {
 
     res.json({
       success: true,
-      transcript: transcript,
-      corrected: corrected,
+      transcript,
+      corrected,
       timestamp: new Date().toISOString()
     })
-
   } catch (error) {
     console.error('Audio upload error:', error)
-
     // Clean up temp file on error
     if (req.file?.path) {
       try {
@@ -136,11 +125,7 @@ router.post('/upload', upload.single('audio'), async (req, res) => {
         console.error('Failed to cleanup temp file on error:', cleanupError)
       }
     }
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to process audio file'
-    })
+    res.status(500).json({ success: false, error: 'Failed to process audio file' })
   }
 })
 

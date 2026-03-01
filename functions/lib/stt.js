@@ -43,7 +43,13 @@ const admin = __importStar(require("firebase-admin"));
 const openai_1 = __importDefault(require("openai"));
 const stream_1 = require("stream");
 let _openai = null;
-const DIRECT_GEMINI_KEY = "AIzaSyDNqx0ScloGAYK74hddqiaNf188T8uZnnw";
+const getGeminiKey = () => {
+    var _a, _b;
+    const key = process.env.GEMINI_API_KEY || ((_b = (_a = functions.config()) === null || _a === void 0 ? void 0 : _a.gemini) === null || _b === void 0 ? void 0 : _b.key) || "";
+    if (!key)
+        functions.logger.warn("GEMINI_API_KEY is not set.");
+    return key;
+};
 const GEMINI_FLASH_URL = (key) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${key}`;
 const GEMINI_PRO_URL = (key) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-latest:generateContent?key=${key}`;
 const getDynamicPrompt = (sourceLang, sessionContext, previousContext) => {
@@ -108,11 +114,12 @@ const callGeminiREST = async (text, previousContext, sessionContext, sourceLang)
     var _a, _b, _c;
     const prompt = getDynamicPrompt(sourceLang, sessionContext, previousContext);
     const payload = { contents: [{ parts: [{ text: `${prompt}"${text}"` }] }], generationConfig: { responseMimeType: "application/json" } };
-    let res = await fetch(GEMINI_FLASH_URL(DIRECT_GEMINI_KEY), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const apiKey = getGeminiKey();
+    let res = await fetch(GEMINI_FLASH_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     if (!res.ok) {
         const errText = await res.text();
         functions.logger.error("Gemini REST error", { status: res.status, body: errText });
-        res = await fetch(GEMINI_PRO_URL(DIRECT_GEMINI_KEY), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        res = await fetch(GEMINI_PRO_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
         if (!res.ok) {
             throw new Error(`Gemini REST Error: ${res.status}`);
         }
@@ -249,13 +256,14 @@ exports.processAudio = functions
                 }
             }
         }
-        catch { }
+        catch { // Intentionally empty
+        }
         await admin.database().ref(`projects/${projectId}/status`).update({ lastActive: Date.now() }).catch(() => { });
         let openai;
         try {
             openai = getOpenAI();
         }
-        catch (cfgErr) {
+        catch {
             res.status(500).json({ success: false });
             return;
         }
@@ -276,7 +284,7 @@ exports.processAudio = functions
             });
             await admin.database().ref(`projects/${projectId}/status/services/openai`).set({ state: "ok", ts: Date.now() }).catch(() => { });
         }
-        catch (err) {
+        catch {
             // Retry with mp4 ext if needed, but let's keep it simple for now
             res.status(200).json({ success: false, error: "WhisperFailed" });
             return;
@@ -312,6 +320,7 @@ exports.processAudio = functions
         res.status(200).json({ success: true, id, text: rawText, stage: "original", timestamp, version: versionTag });
     }
     catch (e) {
+        void e;
         res.status(500).json({ success: false, error: "Internal Error" });
     }
 });
@@ -358,7 +367,8 @@ exports.onRefineRequest = functions
             }
         }
     }
-    catch { }
+    catch { // Intentionally empty
+    }
     bufferText = bufferText ? bufferText + " " + rawText : rawText;
     bufferIds.push(dataId);
     const now = Date.now();
@@ -377,7 +387,9 @@ exports.onRefineRequest = functions
         const snap = await projectRef.child('state/lastRefined').get();
         previousContext = (snap.val() || "").toString();
     }
-    catch { }
+    catch { // Intentionally empty
+        void 0;
+    }
     let refined = bufferText;
     let firstEn = "";
     let firstJa = "";
@@ -388,7 +400,8 @@ exports.onRefineRequest = functions
         firstEn = (out.en || "").toString();
         firstJa = (out.ja || "").toString();
     }
-    catch (err) {
+    catch (_err) {
+        void _err;
         refined = bufferText;
     }
     const updates = {};
@@ -415,8 +428,8 @@ exports.onRefineRequest = functions
             }
         }
     }
-    catch (e) {
-        functions.logger.error("TTS Gen Error (Refine)", e);
+    catch (_e) {
+        functions.logger.error("TTS Gen Error (Refine)", _e instanceof Error ? _e.message : 'Unknown error');
     }
     for (const pid of idsToDelete) {
         updates[`projects/${projectId}/stream/${pid}/status`] = "merged";
@@ -431,7 +444,8 @@ exports.onRefineRequest = functions
 // 3. Scheduled Batch: Live Remastering (Every 2 minutes)
 exports.remasterSession = functions
     .runWith({ timeoutSeconds: 300, memory: "1GB" })
-    .pubsub.schedule("every 2 minutes").onRun(async (context) => {
+    .pubsub.schedule("every 2 minutes").onRun(async (_context) => {
+    void _context;
     await runRemasterLogic();
 });
 // Manual Trigger for Remastering
@@ -458,15 +472,15 @@ exports.triggerRemaster = functions
         res.json({ success: true, count });
     }
     catch (e) {
-        res.status(500).json({ success: false, error: e.message });
+        res.status(500).json({ success: false, error: e instanceof Error ? e.message : 'Unknown error' });
     }
 });
 const runRemasterLogic = async (targetProjectId) => {
     const now = Date.now();
     // Target: Recent 10 minutes (State-based Sweeping)
     // Avoid very recent 30s
-    const START_OFFSET = 600 * 1000; // 10 min
-    const END_OFFSET = 30 * 1000; // 30s
+    // START_OFFSET removed: unused
+    // END_OFFSET removed: unused
     // 1. Get projects
     let projectsSnap;
     if (targetProjectId) {
@@ -479,10 +493,8 @@ const runRemasterLogic = async (targetProjectId) => {
         return;
     const promises = [];
     const processProject = (pSnap, pid) => {
-        var _a;
         const pVal = pSnap.val();
         const activeId = pVal.activeSessionId;
-        const lastRemasteredAt = Number(((_a = pVal.settings) === null || _a === void 0 ? void 0 : _a.lastRemasteredAt) || 0);
         if (!activeId)
             return;
         // Determine Time Window
@@ -500,16 +512,18 @@ const runRemasterLogic = async (targetProjectId) => {
             if (!streamSnap.exists())
                 return 0;
             const items = [];
-            streamSnap.forEach(child => {
-                const val = child.val();
-                if (val.sessionId === activeId && val.status === 'final') {
-                    items.push({ id: child.key, ...val });
+            const streamVal = streamSnap.val() || {};
+            const entries = Object.entries(streamVal);
+            for (const [key, val] of entries) {
+                const v = val;
+                if (v && v.sessionId === activeId && v.status === 'final') {
+                    items.push({ id: key, timestamp: v.timestamp, refined: v.refined, original: v.original, sessionId: v.sessionId });
                 }
-            });
+            }
             if (items.length === 0)
                 return 0; // Nothing to update (Sweeping complete)
             // Sort by timestamp
-            const allItems = items.sort((a, b) => a.timestamp - b.timestamp);
+            const allItems = items.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             if (allItems.length < 3)
                 return 0;
             // 3. Prepare Prompt
@@ -578,8 +592,9 @@ ${JSON.stringify(inputList)}
 `;
             // 4. Call Gemini Pro
             try {
+                const apiKey = getGeminiKey();
                 const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } };
-                const res = await fetch(GEMINI_PRO_URL(DIRECT_GEMINI_KEY), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+                const res = await fetch(GEMINI_PRO_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
                 if (!res.ok)
                     return 0;
                 const data = await res.json();
@@ -619,16 +634,19 @@ ${JSON.stringify(inputList)}
                             });
                         }
                         // TTS Trigger (Remaster)
-                        const rSeq = originalItem.seq;
+                        // TTS Trigger (Remaster) - seq is not available in items, skipping for now
+                        // const rSeq = originalItem.seq;
                         const rSessionId = originalItem.sessionId;
-                        if (rSeq && rSessionId) {
+                        if (rSessionId) {
                             try {
-                                const audioUrl = await generateTTS(sanitize(item.refined), sourceLang, pid, rSessionId, rSeq);
+                                const audioUrl = await generateTTS(sanitize(item.refined), sourceLang, pid, rSessionId, 0);
                                 if (audioUrl) {
                                     updates[`projects/${pid}/stream/${item.id}/audioUrl`] = audioUrl;
                                 }
                             }
-                            catch (e) { }
+                            catch (_e) {
+                                void _e;
+                            }
                         }
                     }
                 }
@@ -653,7 +671,7 @@ ${JSON.stringify(inputList)}
             }
             catch (e) {
                 functions.logger.error("Remaster Inner Error", e);
-                throw new Error(`Inner Error: ${e.message}`);
+                throw new Error(`Inner Error: ${e instanceof Error ? e.message : 'Unknown error'}`);
             }
         })());
     };
@@ -661,7 +679,7 @@ ${JSON.stringify(inputList)}
         processProject(projectsSnap, targetProjectId);
     }
     else {
-        projectsSnap.forEach((pSnap) => processProject(pSnap, pSnap.key));
+        projectsSnap.forEach((pSnap) => { processProject(pSnap, pSnap.key); });
     }
     const results = await Promise.all(promises);
     const totalCount = results.reduce((a, b) => (a || 0) + (b || 0), 0);

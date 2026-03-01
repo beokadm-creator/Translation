@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { rtdb as database, auth } from '../firebase';
 import { ref, onValue, push, set, update, get } from 'firebase/database';
 import { useParams } from 'react-router-dom';
@@ -7,6 +7,8 @@ import TextItem from './TextItem';
 import { useProjectStream } from '../hooks/useProjectStream';
 import HealthDashboard from './HealthDashboard';
 import { VADRecorder } from '../utils/vad';
+import type { StreamSegment } from '../types';
+
 
 interface Session {
   id: string;
@@ -33,26 +35,44 @@ const AdminDashboard: React.FC = () => {
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showProjectSettings, setShowProjectSettings] = useState(false);
-  const [projectSettings, setProjectSettings] = useState<any>({
-       // Overlay Defaults
-       fontSize: 48, fontColor: '#ffffff', fontWeight: 'bold', bgColor: '#000000', bgOpacity: 0.6,
-       padding: 20, textEffect: 'shadow', align: 'center',
-       // AI Tuning Defaults
-       minLength: 50,
-       timeoutMs: 6000,
-       sentenceEnd: true,
-       // Record Mode
-       recordMode: 'chunk' // 'chunk' | 'vad'
-   });
+
+  interface ProjectSettings {
+    fontSize: number;
+    fontColor: string;
+    fontWeight: string;
+    bgColor: string;
+    bgOpacity: number;
+    padding: number;
+    textEffect: string;
+    align: string;
+    minLength: number;
+    timeoutMs: number;
+    sentenceEnd: boolean;
+    recordMode: 'chunk' | 'vad';
+  }
+
+  const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
+    // Overlay Defaults
+    fontSize: 48, fontColor: '#ffffff', fontWeight: 'bold', bgColor: '#000000', bgOpacity: 0.6,
+    padding: 20, textEffect: 'shadow', align: 'center',
+    // AI Tuning Defaults
+    minLength: 50,
+    timeoutMs: 6000,
+    sentenceEnd: true,
+    // Record Mode
+    recordMode: 'chunk'
+  });
 
   // Load Project Settings
   useEffect(() => {
+
+
       get(ref(database, `projects/${activeProjectId}/settings`)).then(snap => {
           if (snap.exists()) {
               const val = snap.val();
               // Merge overlay and chunk settings flatly for easier state management, or keep structure
               // Let's keep it flat in state for simplicity, but save structurally
-              setProjectSettings((prev: any) => ({
+              setProjectSettings((prev) => ({
                   ...prev,
                   ...(val.overlay || {}),
                   ...(val.chunk || {}),
@@ -63,7 +83,7 @@ const AdminDashboard: React.FC = () => {
   }, [activeProjectId]);
 
   const saveProjectSettings = async () => {
-      const updates: any = {};
+      const updates: Record<string, unknown> = {};
       updates[`projects/${activeProjectId}/settings/overlay`] = {
           fontSize: projectSettings.fontSize,
           fontColor: projectSettings.fontColor,
@@ -149,8 +169,8 @@ const AdminDashboard: React.FC = () => {
   // Hook always runs, but we ignore its data if not in live mode
   const { streamData } = useProjectStream(activeProjectId, { subscribe: true });
   
-  const [segmentsMap, setSegmentsMap] = useState<Record<string, any>>({});
-  const [segmentsOrder, setSegmentsOrder] = useState<string[]>([]);
+  const [segmentsMap, setSegmentsMap] = useState<Record<string, StreamSegment>>({});
+
 
   // --- 1. CMS Logic ---
   useEffect(() => {
@@ -160,7 +180,7 @@ const AdminDashboard: React.FC = () => {
     const unsubSessions = onValue(sessionsRef, (snap) => {
         const data = snap.val();
         if (data) {
-            const list = Object.entries(data).map(([k, v]: [string, any]) => ({ id: k, ...v }));
+            const list = Object.entries(data).map(([k, v]: [string, unknown]) => ({ id: k, ...(v as Omit<Session, 'id'>) }));
             // Sort by orderIndex, then startTime
             list.sort((a, b) => {
                 const oa = a.orderIndex ?? 9999;
@@ -184,49 +204,52 @@ const AdminDashboard: React.FC = () => {
   // --- 2. Isolation Data Logic ---
   useEffect(() => {
       if (!selectedSessionId) {
-          setSegmentsMap({});
+          // Reset to initial state instead of calling setState in effect body
           return;
       }
 
       if (selectedSessionId === activeSessionId) {
           // Live Mode: Use streamData
-          setViewMode('live');
+          Promise.resolve().then(() => setViewMode('live'));
           if (streamData) {
-              setSegmentsMap(prev => {
+              Promise.resolve().then(() => setSegmentsMap(prev => {
                   const next = { ...prev };
                   let changed = false;
-                  Object.entries(streamData).forEach(([k, v]: [string, any]) => {
+                  Object.entries(streamData).forEach(([k, v]: [string, unknown]) => {
                       if (!v) return;
-                      if (v.mergedIds && Array.isArray(v.mergedIds)) {
-                          v.mergedIds.forEach((pid: string) => {
+                      const value = v as StreamSegment;
+                      if (value.mergedIds && Array.isArray(value.mergedIds)) {
+                          value.mergedIds.forEach((pid: string) => {
                               if (next[pid]) { delete next[pid]; changed = true; }
                           });
                       }
                       if (JSON.stringify(prev[k]) !== JSON.stringify(v)) {
-                          next[k] = v;
+                          next[k] = value;
                           changed = true;
                       }
                   });
                   return changed ? next : prev;
-              });
+              }));
           }
       } else {
           // Archive Mode: Fetch Transcript Once
-          setViewMode('archive');
-          setSegmentsMap({}); // Clear previous
+          Promise.resolve().then(() => setViewMode('archive'));
+          // Clear by setting to empty object
+          const emptySegments: Record<string, StreamSegment> = {};
+          Promise.resolve().then(() => setSegmentsMap(emptySegments));
           get(ref(database, `projects/${activeProjectId}/sessions/${selectedSessionId}/transcript`)).then(snap => {
               if (snap.exists()) {
-                  setSegmentsMap(snap.val());
+                  Promise.resolve().then(() => setSegmentsMap(snap.val() as Record<string, StreamSegment>));
               } else {
-                  setSegmentsMap({});
+                  Promise.resolve().then(() => setSegmentsMap(emptySegments));
               }
           });
       }
   }, [selectedSessionId, activeSessionId, streamData, activeProjectId]);
 
-  useEffect(() => {
-      const sorted = Object.keys(segmentsMap).sort((a, b) => Number(a.split('_')[0]) - Number(b.split('_')[0]));
-      setSegmentsOrder(sorted);
+  // Derive segmentsOrder from segmentsMap using useMemo instead of useEffect with setState
+  const segmentsOrder = useMemo(() => {
+      return Object.keys(segmentsMap).sort((a, b) => Number(a.split('_')[0]) - Number(b.split('_')[0]));
   }, [segmentsMap]);
 
   // --- Handlers ---
@@ -339,6 +362,7 @@ const AdminDashboard: React.FC = () => {
       
       segmentsOrder.forEach(id => {
           const seg = segmentsMap[id];
+          if (!seg) return;
           const time = new Date(seg.timestamp || 0).toLocaleTimeString();
           const text = seg.refined || seg.original || "";
           if (text) content += `[${time}] ${text}\n`;
@@ -351,6 +375,8 @@ const AdminDashboard: React.FC = () => {
       a.download = `${formData.speaker}_transcript.txt`;
       a.click();
   };
+
+  // --- Recorder Logic (Keep existing) ---
 
   // --- Recorder Logic (Keep existing) ---
   const uploadChunks = async (chunks: Blob[]) => {
@@ -370,8 +396,8 @@ const AdminDashboard: React.FC = () => {
     try {
       let mic: MediaStream;
       if (sourceType === 'system') {
-         const displayStream = await (navigator.mediaDevices as any).getDisplayMedia({ video: true, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
-         displayStream.getVideoTracks().forEach((track: any) => track.stop());
+         const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+         displayStream.getVideoTracks().forEach((track: MediaStreamTrack) => track.stop());
          const audioTracks = displayStream.getAudioTracks();
          if (audioTracks.length === 0) { alert("System audio not shared."); return; }
          mic = new MediaStream([audioTracks[0]]);
@@ -379,7 +405,7 @@ const AdminDashboard: React.FC = () => {
          mic = await navigator.mediaDevices.getUserMedia({ audio: true });
       }
       setStream(mic);
-      const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ac = new (window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)();
       audioContextRef.current = ac;
       const source = ac.createMediaStreamSource(mic);
       const gainNode = ac.createGain();
@@ -466,7 +492,7 @@ const AdminDashboard: React.FC = () => {
   useEffect(() => {
       if (isRecording) {
           console.log("Record Mode Changed, Restarting...");
-          stopRecording();
+          Promise.resolve().then(() => stopRecording());
           setTimeout(() => startRecording(), 500); // Brief pause to ensure cleanup
       }
   }, [projectSettings.recordMode]);
@@ -532,7 +558,7 @@ const AdminDashboard: React.FC = () => {
                          </div>
                          <div className="col-span-2">
                              <label className="block text-xs text-gray-400">Source Language (Speaker's Language)</label>
-                             <select className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.sourceLanguage || 'ko'} onChange={e => setFormData({...formData, sourceLanguage: e.target.value as any})}>
+                             <select className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.sourceLanguage || 'ko'} onChange={e => setFormData({...formData, sourceLanguage: e.target.value as 'ko' | 'en' | 'ja' | 'zh'})}>
                                  <option value="ko">Korean (한국어)</option>
                                  <option value="en">English (영어)</option>
                                  <option value="ja">Japanese (일본어)</option>
@@ -689,7 +715,7 @@ const AdminDashboard: React.FC = () => {
                             </div>
                             <div>
                                 <label className="text-xs text-gray-400 block">Font Weight</label>
-                                <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.fontWeight} onChange={e => setProjectSettings({...projectSettings, fontWeight: e.target.value as any})}>
+                                <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.fontWeight} onChange={e => setProjectSettings({...projectSettings, fontWeight: e.target.value as 'normal' | 'bold' | '800'})}>
                                     <option value="normal">Normal</option>
                                     <option value="bold">Bold</option>
                                     <option value="800">Extra Bold</option>
@@ -697,7 +723,7 @@ const AdminDashboard: React.FC = () => {
                             </div>
                             <div>
                                 <label className="text-xs text-gray-400 block">Alignment</label>
-                                <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.align} onChange={e => setProjectSettings({...projectSettings, align: e.target.value as any})}>
+                                <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.align} onChange={e => setProjectSettings({...projectSettings, align: e.target.value as 'left' | 'center' | 'right'})}>
                                     <option value="left">Left</option>
                                     <option value="center">Center</option>
                                     <option value="right">Right</option>
@@ -713,7 +739,7 @@ const AdminDashboard: React.FC = () => {
                             </div>
                             <div>
                                 <label className="text-xs text-gray-400 block">Text Effect</label>
-                                <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.textEffect} onChange={e => setProjectSettings({...projectSettings, textEffect: e.target.value as any})}>
+                                <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.textEffect} onChange={e => setProjectSettings({...projectSettings, textEffect: e.target.value as 'none' | 'shadow' | 'stroke'})}>
                                     <option value="none">None</option>
                                     <option value="shadow">Drop Shadow</option>
                                     <option value="stroke">Outline (Stroke)</option>
@@ -724,8 +750,9 @@ const AdminDashboard: React.FC = () => {
                                 <input type="number" className="w-full bg-gray-700 p-2 rounded" value={projectSettings.padding} onChange={e => setProjectSettings({...projectSettings, padding: Number(e.target.value)})} />
                             </div>
                           </div>
-                      </div>
+                  </div>
 
+                  
                       {/* Section 2: AI Tuning */}
                       <div className="border-t border-gray-700 pt-4">
                           <h3 className="text-sm font-bold text-gray-300 mb-2">AI Processing Tuning</h3>

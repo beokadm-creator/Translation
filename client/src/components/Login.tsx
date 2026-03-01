@@ -13,8 +13,9 @@ const Login = () => {
     try {
       await signInWithEmailAndPassword(auth, email, password);
       navigate('/admin');
-    } catch (error) {
-      alert('Login failed');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Login failed: ${message}`);
     }
   };
 

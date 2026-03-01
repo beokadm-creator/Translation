@@ -3,6 +3,7 @@ import { auth } from "../firebase";
 import AudioVisualizer from "./AudioVisualizer";
 import TextItem from "./TextItem";
 import { useProjectStream } from "../hooks/useProjectStream";
+import type { StreamSegment } from '../types';
 
 interface Props {
   projectId: string;
@@ -21,16 +22,16 @@ const LiveConsole: React.FC<Props> = ({ projectId, sourceLabel = "presenter" }) 
       setRemasterStatus("processing");
       try {
           await fetch(`https://us-central1-translation-comm.cloudfunctions.net/triggerRemaster?projectId=${activeProjectId}`);
-          setRemasterStatus("done");
-          setTimeout(() => setRemasterStatus("idle"), 3000);
+          Promise.resolve().then(() => setRemasterStatus("done"));
+          Promise.resolve().then(() => setTimeout(() => setRemasterStatus("idle"), 3000));
       } catch {
-          setRemasterStatus("error");
-          setTimeout(() => setRemasterStatus("idle"), 3000);
+          Promise.resolve().then(() => setRemasterStatus("error"));
+          Promise.resolve().then(() => setTimeout(() => setRemasterStatus("idle"), 3000));
       }
   };
   
   // Keep using Map for optimistic updates
-  const [segmentsMap, setSegmentsMap] = useState<Record<string, any>>({});
+  const [segmentsMap, setSegmentsMap] = useState<Record<string, StreamSegment>>({});
   const [segmentsOrder, setSegmentsOrder] = useState<string[]>([]);
 
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -52,14 +53,16 @@ const LiveConsole: React.FC<Props> = ({ projectId, sourceLabel = "presenter" }) 
   // Sync Stream Data to Map (Merge & Purge)
   useEffect(() => {
     if (!streamData) return;
-    setSegmentsMap(prev => {
+    Promise.resolve().then(() => {
+      setSegmentsMap(prev => {
         const next = { ...prev };
         let changed = false;
         
-        Object.entries(streamData).forEach(([k, v]: [string, any]) => {
+        Object.entries(streamData).forEach(([k, v]: [string, unknown]) => {
+          const value = v as StreamSegment;
             // Check if this update contains 'mergedIds' (Purge Request)
-            if (v?.mergedIds && Array.isArray(v.mergedIds)) {
-                v.mergedIds.forEach((pid: string) => {
+            if (value.mergedIds && Array.isArray(value.mergedIds)) {
+                value.mergedIds.forEach((pid: string) => {
                     if (next[pid]) {
                         delete next[pid]; // PURGE: Remove merged segment
                         changed = true;
@@ -68,12 +71,13 @@ const LiveConsole: React.FC<Props> = ({ projectId, sourceLabel = "presenter" }) 
             }
 
             // Normal Upsert
-            if (JSON.stringify(prev[k]) !== JSON.stringify(v)) {
-                next[k] = v;
+            if (JSON.stringify(prev[k]) !== JSON.stringify(value)) {
+                next[k] = value;
                 changed = true;
             }
         });
         return changed ? next : prev;
+      });
     });
   }, [streamData]);
 
@@ -82,7 +86,7 @@ const LiveConsole: React.FC<Props> = ({ projectId, sourceLabel = "presenter" }) 
       const sorted = Object.keys(segmentsMap).sort((a, b) => {
           return Number(a.split('_')[0]) - Number(b.split('_')[0]);
       });
-      setSegmentsOrder(sorted);
+      Promise.resolve().then(() => setSegmentsOrder(sorted));
   }, [segmentsMap]);
 
   const [sourceType, setSourceType] = useState<'mic' | 'system'>('mic');
@@ -106,7 +110,7 @@ const LiveConsole: React.FC<Props> = ({ projectId, sourceLabel = "presenter" }) 
             body: buf,
           }).catch(console.error);
           
-          setStatus("streaming");
+          Promise.resolve().then(() => setStatus("streaming"));
       } catch (e) {
           console.error(e);
           setStatus("error");
@@ -117,7 +121,7 @@ const LiveConsole: React.FC<Props> = ({ projectId, sourceLabel = "presenter" }) 
     try {
       let mic: MediaStream;
       if (sourceType === 'system') {
-         const displayStream = await (navigator.mediaDevices as any).getDisplayMedia({ 
+         const displayStream = await (navigator.mediaDevices as typeof navigator.mediaDevices & { getDisplayMedia?: (options: { video: boolean; audio?: { echoCancellation: boolean; noiseSuppression: boolean; autoGainControl: boolean } }) => Promise<MediaStream> }).getDisplayMedia({
              video: true, 
              audio: {
                  echoCancellation: false,
@@ -125,7 +129,7 @@ const LiveConsole: React.FC<Props> = ({ projectId, sourceLabel = "presenter" }) 
                  autoGainControl: false
              }
          });
-         displayStream.getVideoTracks().forEach((track: any) => track.stop());
+         displayStream.getVideoTracks().forEach((track: MediaStreamTrack) => track.stop());
          const audioTracks = displayStream.getAudioTracks();
          if (audioTracks.length === 0) {
              alert("System audio not shared.");
@@ -139,7 +143,7 @@ const LiveConsole: React.FC<Props> = ({ projectId, sourceLabel = "presenter" }) 
       setStream(mic);
       
       // Visualizer Setup
-      const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ac = new (window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)();
       audioContextRef.current = ac;
       const source = ac.createMediaStreamSource(mic);
       const analyser = ac.createAnalyser();

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { rtdb } from '../firebase';
 import { ref, get } from 'firebase/database';
@@ -7,22 +7,27 @@ import type { ProjectSettings } from '../types';
 const Landing: React.FC = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    
+
     // --- State ---
     const [accessCode, setAccessCode] = useState("");
     const [status, setStatus] = useState<'idle' | 'loading' | 'error' | 'success'>('idle');
     const [conference, setConference] = useState<{title: string, id: string} | null>(null);
     const [projects, setProjects] = useState<ProjectSettings[]>([]);
-
-    // Auto-login via URL Query ?conf={id}
-    useEffect(() => {
-        const confId = searchParams.get('conf');
-        if (confId) {
-            autoLogin(confId);
+    // Define loadProjects before autoLogin since it's used in autoLogin
+    const loadProjects = useCallback(async (confId: string) => {
+        const projSnap = await get(ref(rtdb, 'projects'));
+        if (projSnap.exists()) {
+            const data = projSnap.val();
+            const list = Object.keys(data).map(k => {
+                const s = data[k].settings || {};
+                return { ...s, slug: k } as ProjectSettings & { slug: string };
+            }).filter((p) => p.conferenceId === confId);
+            setProjects(list);
         }
-    }, [searchParams]);
+    }, []);
 
-    const autoLogin = async (confId: string) => {
+    // Define autoLogin before useEffect to satisfy React Hooks exhaustive-deps
+    const autoLogin = useCallback(async (confId: string) => {
         setStatus('loading');
         try {
             const snap = await get(ref(rtdb, `conferences/${confId}`));
@@ -32,27 +37,22 @@ const Landing: React.FC = () => {
             }
             const data = snap.val();
             const conf = { id: confId, title: data.title };
-            
+
             setConference(conf);
             await loadProjects(conf.id);
             setStatus('success');
         } catch {
             setStatus('error');
         }
-    };
-
-    const loadProjects = async (confId: string) => {
-        const projSnap = await get(ref(rtdb, 'projects'));
-        if (projSnap.exists()) {
-            const data = projSnap.val();
-            const list = Object.keys(data).map(k => {
-                const s = data[k].settings || {};
-                return { ...s, slug: k };
-            }).filter((p: any) => p.conferenceId === confId);
-            setProjects(list);
+    }, [loadProjects]);
+    // Auto-login via URL Query ?conf={id}
+    useEffect(() => {
+        const confId = searchParams.get('conf');
+        if (confId) {
+            // Wrap in setTimeout to avoid calling setState synchronously in effect
+            Promise.resolve().then(() => autoLogin(confId));
         }
-    };
-
+    }, [searchParams, autoLogin]);
     const handleEnter = async () => {
         if (!accessCode) return;
         setStatus('loading');

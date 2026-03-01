@@ -8,7 +8,12 @@ export class VADRecorder {
   private animationFrameId: number | null = null;
 
   constructor(stream: MediaStream, onSilence: () => void) {
-    this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    // Type cast for webkitAudioContext browser compatibility
+    type AudioContextConstructor = typeof AudioContext;
+    const WindowWithAudioContext = window as Window & { webkitAudioContext?: AudioContextConstructor };
+    const AudioContextCtor = window.AudioContext || WindowWithAudioContext.webkitAudioContext;
+    if (!AudioContextCtor) throw new Error('AudioContext not supported');
+    this.audioContext = new AudioContextCtor();
     const source = this.audioContext.createMediaStreamSource(stream);
     this.analyser = this.audioContext.createAnalyser();
     this.analyser.fftSize = 2048; // Precision
@@ -19,9 +24,9 @@ export class VADRecorder {
   }
 
   private checkVolume = () => {
-    // TS fix: Force cast to any to avoid ArrayBufferLike mismatch issues in strict mode
-    this.analyser.getByteTimeDomainData(this.dataArray as any);
-    
+    // Type cast to avoid ArrayBufferLike mismatch issues with strict TypeScript
+    this.analyser.getByteTimeDomainData(this.dataArray as Uint8Array & ArrayBufferLike);
+
     // RMS(Root Mean Square) calculation
     let sum = 0;
     for (let i = 0; i < this.dataArray.length; i++) {

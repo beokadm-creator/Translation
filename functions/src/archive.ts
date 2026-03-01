@@ -61,8 +61,8 @@ export const archiveSession = functions.https.onRequest(async (req, res) => {
     functions.logger.info(`Archived session ${sessionId} for project ${projectId}`);
     res.status(200).send({ success: true, message: "Archived and cleared." });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     functions.logger.error("Archive Error", error);
-    res.status(500).send({ error: error.message });
+    res.status(500).send({ error: error instanceof Error ? error.message : "Unknown error" });
   }
 });

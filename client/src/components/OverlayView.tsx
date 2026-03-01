@@ -23,38 +23,53 @@ const OverlayView: React.FC = () => {
     useEffect(() => {
         const settingsRef = ref(rtdb, `projects/${activeProjectId}/settings/overlay`);
         const unsub = onValue(settingsRef, (snap) => {
-            if (snap.exists()) setSettings((prev: any) => ({ ...prev, ...snap.val() }));
+            if (snap.exists()) {
+                const val = snap.val();
+                setSettings((prev) => ({ ...prev, ...(val as Partial<ProjectSettings['overlay']>) }));
+            }
         });
         return () => unsub();
     }, [activeProjectId]);
-
     // Data Processing with Smart Scroll
     const [displayLines, setDisplayLines] = useState<{id: string, text: string}[]>([]);
     
     useEffect(() => {
         if (!streamData) return;
-        
+
+        type StreamSegment = {
+            id: string;
+            original?: string;
+            refined?: string;
+            en?: string;
+            ja?: string;
+            status?: string;
+            timestamp: number;
+        };
+
         const segments = Object.entries(streamData)
-            .map(([key, val]: [string, any]) => ({ id: key, ...val }))
+            .map(([key, val]: [string, unknown]) => {
+                const segment = val as StreamSegment;
+                return { ...segment, id: key };
+            })
             .filter(s => s.status === 'final' || s.status === 'raw')
             .sort((a, b) => a.timestamp - b.timestamp);
 
         // Filter valid text based on language
         const validSegments = segments.map(s => {
             let text = "";
-            if (activeLang === 'refined') text = s.refined || s.original;
-            else if (activeLang === 'en') text = s.en || ""; // If missing, show empty or fallback?
-            else if (activeLang === 'ja') text = s.ja || "";
+            if (activeLang === 'refined') text = s.refined ?? s.original ?? "";
+            else if (activeLang === 'en') text = s.en ?? "";
+            else if (activeLang === 'ja') text = s.ja ?? "";
             return { id: s.id, text };
         }).filter(s => s.text); // Remove empty lines
 
         // Show last 4 lines max for better context
         const lastLines = validSegments.slice(-4);
-        
-        setDisplayLines(lastLines);
+
+        // Wrap in Promise.resolve to avoid setState warning
+        Promise.resolve().then(() => setDisplayLines(lastLines));
 
     }, [streamData, activeLang]);
-
 
     // Styles
     const containerStyle: React.CSSProperties = {

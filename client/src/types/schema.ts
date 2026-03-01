@@ -14,7 +14,7 @@ export interface Project {
     glossaries: string[];
     glossaryId?: string;
     targetLangs?: string[]; // e.g. ["ko", "ja"]
-    theme: Record<string, any>;
+    theme: Record<string, unknown>;
     appearance: {
       backgroundColor: string;
       textColor: string;

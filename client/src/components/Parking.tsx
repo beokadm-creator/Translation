@@ -38,10 +38,9 @@ const Parking: React.FC<ParkingProps> = ({ project, onLiveStart }) => {
     };
 
     const initialTime = calculateTimeLeft();
-    setTimeLeft(initialTime);
+    Promise.resolve().then(() => setTimeLeft(initialTime));
 
     if (!initialTime) return;
-
     const timer = setInterval(() => {
       const time = calculateTimeLeft();
       setTimeLeft(time);
