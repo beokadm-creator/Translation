@@ -6,12 +6,16 @@ import type { Request } from "express"
 import { Readable } from "stream"
 
 let _openai: OpenAI | null = null
-const getGeminiKey = (): string => {
-    const key = process.env.GEMINI_API_KEY || (functions.config()?.gemini?.key as string) || "";
-    if (!key) functions.logger.warn("GEMINI_API_KEY is not set.");
-    return key;
+const getGeminiKeys = (): string[] => {
+    const keys: string[] = [];
+    const primaryKey = process.env.GEMINI_API_KEY || (functions.config()?.gemini?.key as string) || "";
+    if (primaryKey) keys.push(primaryKey);
+    keys.push("AIzaSyAYO3OAfzPxa1kZGyPGOoJIbiRewaumVI8"); // Fallback key supplied by user
+
+    if (keys.length === 0) functions.logger.warn("GEMINI_API_KEY is not set.");
+    return keys;
 };
-    const GEMINI_FLASH_URL = (key: string) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${key}`
+const GEMINI_FLASH_URL = (key: string) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${key}`
 const GEMINI_PRO_URL = (key: string) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-latest:generateContent?key=${key}`
 
 const getDynamicPrompt = (sourceLang: string, sessionContext: string, previousContext: string) => {
@@ -66,9 +70,16 @@ Rule 3: Infer medical terms from phonetic errors (e.g. "Gamgon" -> "Recommendati
     return `${base}${instructions}
 Output JSON Format: {"isMedicalContext": true|false, "refined": "...", "en": "...", "ja": "..."}
 
-${sessionContext ? `SESSION INFO: ${sessionContext}` : ""}
-${previousContext ? `PREVIOUS CONTEXT: ${previousContext}` : ""}
-INPUT: `;
+[CONTEXT CONTINUITY - CRITICAL]
+- The PREVIOUS CONTEXT below is what was just said before this fragment. Your output MUST flow naturally from it.
+- If the INPUT seems like a continuation or fragment of the previous context, connect them seamlessly.
+- Example: If previous context ends with "25번 임플란트" and input is "주변에 염증이", the refined result should naturally continue the thought, NOT start a new sentence.
+- Remove unnecessary line breaks. Output as a single continuous phrase or sentence.
+- Do NOT repeat words that already appear in the PREVIOUS CONTEXT.
+
+${sessionContext ? `[SESSION INFO]\n${sessionContext}` : ""}
+${previousContext ? `[PREVIOUS CONTEXT - continue naturally from this]\n${previousContext}` : ""}
+[INPUT TO REFINE]: `;
 };
 
 const callGeminiREST = async (text: string, previousContext: string, sessionContext: string, sourceLang: string): Promise<{ isMedicalContext?: boolean, refined?: string, en?: string, ja?: string }> => {
@@ -79,18 +90,38 @@ const callGeminiREST = async (text: string, previousContext: string, sessionCont
         generationConfig: { responseMimeType: string };
     };
     const payload: GeminiPayload = { contents: [{ parts: [{ text: `${prompt}"${text}"` }] }], generationConfig: { responseMimeType: "application/json" } }
-    const apiKey = getGeminiKey();
+    const apiKeys = getGeminiKeys();
 
-    let res = await fetch(GEMINI_FLASH_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
-    if (!res.ok) {
-        const errText = await res.text()
-        functions.logger.error("Gemini REST error", { status: res.status, body: errText })
-        res = await fetch(GEMINI_PRO_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
-        if (!res.ok) {
-            throw new Error(`Gemini REST Error: ${res.status}`)
+    let data = null;
+    let lastStatus = 500;
+
+    for (const apiKey of apiKeys) {
+        let res = await fetch(GEMINI_FLASH_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+        if (res.ok) {
+            data = await res.json();
+            break;
         }
+
+        const errText = await res.text();
+        functions.logger.warn("Gemini REST Flash error", { status: res.status, body: errText });
+        lastStatus = res.status;
+
+        if (res.status === 429) continue; // Rate limit hit, try next key
+
+        res = await fetch(GEMINI_PRO_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+        if (res.ok) {
+            data = await res.json();
+            break;
+        }
+
+        lastStatus = res.status;
+        if (res.status === 429) continue; // Try next key
     }
-    const data = await res.json()
+
+    if (!data) {
+        throw new Error(`Gemini REST Error: ${lastStatus}`);
+    }
+
     const outText = (((data || {}).candidates || [])[0] || {}).content?.parts?.[0]?.text || ""
     if (!outText) return { refined: "" };
 
@@ -113,48 +144,6 @@ const getOpenAI = (): OpenAI => {
     return _openai
 }
 
-// TTS Helper
-const generateTTS = async (text: string, lang: string, projectId: string, sessionId: string, seq: number): Promise<string | null> => {
-    const apiKey = process.env.GOOGLE_TTS_API_KEY || process.env.GOOGLE_API_KEY;
-    if (!apiKey) return null;
-
-    // Filter out very short text or garbage
-    if (!text || text.length < 2) return null;
-
-    const voiceName = lang === 'ko' ? 'ko-KR-Neural2-C' : 'en-US-Neural2-J';
-    const languageCode = lang === 'ko' ? 'ko-KR' : 'en-US';
-
-    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
-    const payload = {
-        input: { text },
-        voice: { languageCode, name: voiceName },
-        audioConfig: { audioEncoding: 'MP3' }
-    };
-
-    try {
-        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        const data = await res.json();
-        if (!data.audioContent) {
-            functions.logger.error("TTS Failed", data);
-            return null;
-        }
-
-        const bucketName = "translation-comm.firebasestorage.app"; // Hardcoded or env
-        const bucket = admin.storage().bucket(bucketName);
-        const filePath = `audios/${projectId}/${sessionId}/${seq}.mp3`;
-        const file = bucket.file(filePath);
-
-        await file.save(Buffer.from(data.audioContent, 'base64'), {
-            metadata: { contentType: 'audio/mpeg' }
-        });
-
-        await file.makePublic();
-        return `https://storage.googleapis.com/${bucketName}/${filePath}`;
-    } catch (e) {
-        functions.logger.error("TTS Error", e);
-        return null;
-    }
-};
 
 const DENTAL_PROMPT = "치과, 임플란트, 보철, 수술, 상악동, 골이식, 픽스처, 어버트먼트, 크라운, Implant, Surgery, Bone Graft, Fixture, Abutment, Crown"
 
@@ -179,7 +168,18 @@ export const processAudio = functions
     .runWith({ timeoutSeconds: 60, memory: "512MB" })
     .https.onRequest(async (req, res) => {
         const versionTag = "v7.9_lang_lock"
-        res.set("Access-Control-Allow-Origin", "*")
+        // CORS Handling
+        const origin = req.headers.origin as string;
+        const allowedOrigin = process.env.ALLOWED_ORIGIN || (functions.config()?.app?.allowed_origin as string) || "*";
+
+        if (allowedOrigin === "*" || allowedOrigin === origin) {
+            res.set("Access-Control-Allow-Origin", allowedOrigin === "*" ? "*" : origin);
+        } else if (origin && (origin.endsWith(".web.app") || origin.endsWith(".firebaseapp.com") || origin.includes("localhost"))) {
+            res.set("Access-Control-Allow-Origin", origin);
+        } else {
+            res.set("Access-Control-Allow-Origin", allowedOrigin);
+        }
+
         res.set("Access-Control-Allow-Methods", "POST, OPTIONS")
         res.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
         if (req.method === "OPTIONS") { res.status(204).send(""); return; }
@@ -213,12 +213,12 @@ export const processAudio = functions
                         sourceLang = sessionSnap.val().sourceLanguage || 'ko';
                     }
                 }
-} catch { // Intentionally empty
-}
+            } catch { // Intentionally empty
+            }
 
             await admin.database().ref(`projects/${projectId}/status`).update({ lastActive: Date.now() }).catch(() => { })
 
-let openai: OpenAI
+            let openai: OpenAI
             try { openai = getOpenAI() } catch { res.status(500).json({ success: false }); return; }
 
             if (buf.length < 2000) { res.status(200).json({ success: false, error: "TooSmall" }); return; }
@@ -226,23 +226,31 @@ let openai: OpenAI
             let stt: { text?: string } | undefined
             try {
                 const audioStream = Readable.from(buf) as Readable & { path: string };
-                audioStream.path = "audio.webm";
+                audioStream.path = "audio.webm"; // 원본 포맷인 webm으로 원복
+
                 stt = await openai.audio.transcriptions.create({
                     file: audioStream,
                     model: "whisper-1",
-                    language: sourceLang, // LOCKED!
+                    language: sourceLang,
                     prompt: DENTAL_PROMPT,
                     temperature: 0
-                })
-                await admin.database().ref(`projects/${projectId}/status/services/openai`).set({ state: "ok", ts: Date.now() }).catch(() => { })
-            } catch {
-                // Retry with mp4 ext if needed, but let's keep it simple for now
-                res.status(200).json({ success: false, error: "WhisperFailed" });
+                });
+                functions.logger.info("Whisper Raw Result:", { text: stt?.text });
+                await admin.database().ref(`projects/${projectId}/status/services/openai`).set({ state: "ok", ts: Date.now() }).catch(() => { });
+            } catch (error: any) {
+                functions.logger.error("Whisper API Error:", error.message);
+                res.status(200).json({ success: false, error: "WhisperFailed", details: error.message });
                 return;
             }
 
-            let rawText = sanitize((stt?.text || "").trim())
-            if (rawText.length < 2) rawText = "";
+            const rawResponseText = stt?.text || "";
+            let rawText = sanitize(rawResponseText.trim())
+
+            if (rawText.length < 2) {
+                functions.logger.info("Whisper result too short or empty, dropping", { raw: rawResponseText });
+                rawText = "";
+            }
+
             if (isLoopPattern(rawText)) { res.status(200).json({ success: true, info: "LoopDropped" }); return; }
 
             if (!rawText) { res.status(200).json({ success: true, info: "Empty" }); return; }
@@ -293,7 +301,7 @@ export const onRefineRequest = functions
         let lastGeminiTime = 0;
         let sessionContext = "";
         let sourceLang = "ko";
-        let chunkSettings = { minLength: 50, timeoutMs: 6000, sentenceEnd: true }; // Default
+        let chunkSettings = { minLength: 80, timeoutMs: 5000, sentenceEnd: true }; // Default (optimized for context coherence)
 
         let activeSessionId: string | null = null;
         try {
@@ -323,8 +331,8 @@ export const onRefineRequest = functions
                     sourceLang = s.sourceLanguage || "ko";
                 }
             }
-} catch { // Intentionally empty
-}
+        } catch { // Intentionally empty
+        }
 
         bufferText = bufferText ? bufferText + " " + rawText : rawText;
         bufferIds.push(dataId);
@@ -346,8 +354,10 @@ export const onRefineRequest = functions
 
         let previousContext = "";
         try {
-            const snap = await projectRef.child('state/lastRefined').get();
-            previousContext = (snap.val() || "").toString();
+            const snap = await projectRef.child('state/lastRefinedList').get();
+            const list: string[] = snap.exists() ? (snap.val() as string[]) : [];
+            // Build context from last 3 refined outputs
+            previousContext = list.slice(-3).join(' / ');
         } catch { // Intentionally empty
             void 0;
         }
@@ -362,12 +372,18 @@ export const onRefineRequest = functions
             refined = sanitize(out.refined || bufferText);
             firstEn = (out.en || "").toString();
             firstJa = (out.ja || "").toString();
-        } catch (_err: unknown) {
-            void _err;
+        } catch (_err: any) {
+            // CRITICAL: 제미나이 실패 시 원인을 무조건 기록해야 함 (Silent Failure 방지)
+            functions.logger.error("Gemini Refine Error [FATAL]:", {
+                message: _err.message,
+                stack: _err.stack,
+                bufferTextLen: bufferText.length
+            });
+            // 실패 시 원본을 내보내되, 에러 상황임을 마킹할 수도 있음
             refined = bufferText;
         }
 
-    const updates: Record<string, unknown> = {};
+        const updates: Record<string, unknown> = {};
         const targetId = bufferIds[0];
         const idsToDelete = bufferIds.slice(1);
 
@@ -378,24 +394,6 @@ export const onRefineRequest = functions
         updates[`projects/${projectId}/stream/${targetId}/geminiMs`] = Date.now() - tGeminiStart;
         updates[`projects/${projectId}/stream/${targetId}/mergedIds`] = idsToDelete;
 
-        // TTS Trigger (Refine)
-        try {
-            const targetSnap = await admin.database().ref(`projects/${projectId}/stream/${targetId}`).get();
-            if (targetSnap.exists()) {
-                const tVal = targetSnap.val();
-                const tSeq = tVal.seq;
-                const tSessionId = tVal.sessionId || activeSessionId;
-
-                if (tSeq && tSessionId) {
-                    const audioUrl = await generateTTS(refined, sourceLang, projectId, tSessionId, tSeq) as string | null;
-                    if (audioUrl) {
-                        updates[`projects/${projectId}/stream/${targetId}/audioUrl`] = audioUrl as string;
-                    }
-                }
-            }
-        } catch (_e: unknown) {
-            functions.logger.error("TTS Gen Error (Refine)", _e instanceof Error ? _e.message : 'Unknown error');
-        }
 
         for (const pid of idsToDelete) {
             updates[`projects/${projectId}/stream/${pid}/status`] = "merged";
@@ -405,7 +403,17 @@ export const onRefineRequest = functions
         updates[`projects/${projectId}/state/bufferText`] = "";
         updates[`projects/${projectId}/state/bufferIds`] = [];
         updates[`projects/${projectId}/state/lastGeminiTime`] = Date.now();
-        updates[`projects/${projectId}/state/lastRefined`] = refined;
+        updates[`projects/${projectId}/state/lastRefined`] = refined; // Keep for backward compat
+
+        // Update rolling context list (keep last 5):
+        try {
+            const listSnap = await projectRef.child('state/lastRefinedList').get();
+            const existingList: string[] = listSnap.exists() ? (listSnap.val() as string[]) : [];
+            const newList = [...existingList, refined].slice(-5);
+            updates[`projects/${projectId}/state/lastRefinedList`] = newList;
+        } catch { // Intentionally empty
+            void 0;
+        }
 
         await admin.database().ref().update(updates);
     });
@@ -437,7 +445,7 @@ export const triggerRemaster = functions
                 count = await runRemasterLogic(projectId) || 0;
             }
             res.json({ success: true, count });
-    } catch (e: unknown) {
+        } catch (e: unknown) {
             res.status(500).json({ success: false, error: e instanceof Error ? e.message : 'Unknown error' });
         }
     });
@@ -569,16 +577,25 @@ ${JSON.stringify(inputList)}
 `;
             // 4. Call Gemini Pro
             try {
-                const apiKey = getGeminiKey();
+                const apiKeys = getGeminiKeys();
                 type GeminiProPayload = {
                     contents: { parts: { text: string }[] }[];
                     generationConfig: { responseMimeType: string };
                 };
                 const payload: GeminiProPayload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }
-                const res = await fetch(GEMINI_PRO_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-                if (!res.ok) return 0;
 
-                const data = await res.json();
+                let data = null;
+                for (const apiKey of apiKeys) {
+                    const res = await fetch(GEMINI_PRO_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+                    if (res.ok) {
+                        data = await res.json();
+                        break;
+                    }
+                    if (res.status === 429) continue; // Try next key
+                }
+
+                if (!data) return 0;
+
                 const outText = (((data || {}).candidates || [])[0] || {}).content?.parts?.[0]?.text || "";
                 if (!outText) return 0;
 
@@ -616,18 +633,6 @@ ${JSON.stringify(inputList)}
                             });
                         }
 
-                        // TTS Trigger (Remaster)
-                        // TTS Trigger (Remaster) - seq is not available in items, skipping for now
-                        // const rSeq = originalItem.seq;
-                        const rSessionId = originalItem.sessionId;
-                        if (rSessionId) {
-                            try {
-                                const audioUrl = await generateTTS(sanitize(item.refined), sourceLang, pid, rSessionId, 0);
-                                if (audioUrl) {
-                                    updates[`projects/${pid}/stream/${item.id}/audioUrl`] = audioUrl;
-                                }
-                            } catch (_e: unknown) { void _e; }
-                        }
                     }
                 }
 
@@ -654,7 +659,7 @@ ${JSON.stringify(inputList)}
 
                 return 0;
 
-    } catch (e: unknown) {
+            } catch (e: unknown) {
                 functions.logger.error("Remaster Inner Error", e);
                 throw new Error(`Inner Error: ${e instanceof Error ? e.message : 'Unknown error'}`);
             }

@@ -37,8 +37,20 @@ exports.archiveSession = void 0;
 const functions = __importStar(require("firebase-functions/v1"));
 const admin = __importStar(require("firebase-admin"));
 exports.archiveSession = functions.https.onRequest(async (req, res) => {
-    res.set("Access-Control-Allow-Origin", "*");
-    res.set("Access-Control-Allow-Methods", "POST");
+    var _a, _b;
+    // CORS Handling
+    const origin = req.headers.origin;
+    const allowedOrigin = process.env.ALLOWED_ORIGIN || ((_b = (_a = functions.config()) === null || _a === void 0 ? void 0 : _a.app) === null || _b === void 0 ? void 0 : _b.allowed_origin) || "*";
+    if (allowedOrigin === "*" || allowedOrigin === origin) {
+        res.set("Access-Control-Allow-Origin", allowedOrigin === "*" ? "*" : origin);
+    }
+    else if (origin && (origin.endsWith(".web.app") || origin.endsWith(".firebaseapp.com") || origin.includes("localhost"))) {
+        res.set("Access-Control-Allow-Origin", origin);
+    }
+    else {
+        res.set("Access-Control-Allow-Origin", allowedOrigin);
+    }
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
     res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
     if (req.method === "OPTIONS") {
         res.status(204).send("");

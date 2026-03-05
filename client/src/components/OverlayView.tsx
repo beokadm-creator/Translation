@@ -9,11 +9,11 @@ const OverlayView: React.FC = () => {
     const { projectId, lang } = useParams<{ projectId: string, lang?: string }>();
     const [searchParams] = useSearchParams();
     const isDebug = searchParams.get('debug') === 'true';
-    const activeLang = lang || 'refined'; // Default to refined (source) if not specified
+    const activeLang = lang || 'refined';
 
     const activeProjectId = projectId || "default";
     const { streamData, loading, error } = useProjectStream(activeProjectId, { subscribe: true });
-    
+
     // Settings
     const [settings, setSettings] = useState<NonNullable<ProjectSettings['overlay']>>({
         fontSize: 48, fontColor: '#ffffff', fontWeight: 'bold', bgColor: '#000000', bgOpacity: 0.6,
@@ -30,11 +30,16 @@ const OverlayView: React.FC = () => {
         });
         return () => unsub();
     }, [activeProjectId]);
-    // Data Processing with Smart Scroll
-    const [displayLines, setDisplayLines] = useState<{id: string, text: string}[]>([]);
-    
+
+    // ── Data Processing ───────────────────────────────────────────────────────
+    type SegEntry = { id: string; text: string; isRaw: boolean };
+    const [displayLines, setDisplayLines] = useState<SegEntry[]>([]);
+
     useEffect(() => {
-        if (!streamData) return;
+        if (!streamData) {
+            setDisplayLines([]);
+            return;
+        }
 
         type StreamSegment = {
             id: string;
@@ -54,24 +59,23 @@ const OverlayView: React.FC = () => {
             .filter(s => s.status === 'final' || s.status === 'raw')
             .sort((a, b) => a.timestamp - b.timestamp);
 
-        // Filter valid text based on language
         const validSegments = segments.map(s => {
             let text = "";
             if (activeLang === 'refined') text = s.refined ?? s.original ?? "";
             else if (activeLang === 'en') text = s.en ?? "";
             else if (activeLang === 'ja') text = s.ja ?? "";
-            return { id: s.id, text };
-        }).filter(s => s.text); // Remove empty lines
+            return { id: s.id, text, isRaw: s.status === 'raw' || !text };
+        }).filter(s => s.text);
 
-        // Show last 4 lines max for better context
         const lastLines = validSegments.slice(-4);
 
-        // Wrap in Promise.resolve to avoid setState warning
-        Promise.resolve().then(() => setDisplayLines(lastLines));
-
+        Promise.resolve().then(() => {
+            setDisplayLines(lastLines);
+        });
     }, [streamData, activeLang]);
 
-    // Styles
+
+    // ── Styles ────────────────────────────────────────────────────────────────
     const containerStyle: React.CSSProperties = {
         position: 'fixed',
         bottom: 50,
@@ -83,25 +87,29 @@ const OverlayView: React.FC = () => {
         padding: `0 ${settings.padding}px`,
         pointerEvents: 'none',
         zIndex: 9999,
-        gap: '10px' // Space between lines
+        gap: '10px',
     };
 
-    const textStyle = (isLast: boolean): React.CSSProperties => ({
+    const bgHex = `${settings.bgColor}${Math.round(settings.bgOpacity * 255).toString(16).padStart(2, '0')}`;
+
+    const lineStyle = (isLast: boolean, isRaw: boolean): React.CSSProperties => ({
         fontSize: `${settings.fontSize}px`,
-        color: settings.fontColor,
+        color: isRaw ? '#a8b5c8' : settings.fontColor,
         fontWeight: settings.fontWeight,
-        backgroundColor: `${settings.bgColor}${Math.round(settings.bgOpacity * 255).toString(16).padStart(2, '0')}`,
+        backgroundColor: bgHex,
         padding: '10px 30px',
         borderRadius: '12px',
-        textAlign: settings.align,
+        textAlign: settings.align as React.CSSProperties['textAlign'],
         textShadow: settings.textEffect === 'shadow' ? '2px 2px 4px rgba(0,0,0,0.8)' : 'none',
         WebkitTextStroke: settings.textEffect === 'stroke' ? '2px black' : 'none',
         maxWidth: '90%',
-        transition: 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)', // Smooth transition
-        opacity: isLast ? 1 : 0.7, // Fade out older line slightly
-        transform: isLast ? 'translateY(0)' : 'translateY(-5px) scale(0.98)', // Subtle shrink for older line
+        transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+        opacity: isLast ? 1 : 0.7,
+        border: isRaw ? '1px solid rgba(99,102,241,0.5)' : 'none',
     });
 
+
+    // ── Debug Views ───────────────────────────────────────────────────────────
     if (loading && isDebug) return <div className="text-black bg-white p-4">Loading Stream...</div>;
     if (error && isDebug) return <div className="text-red-500 bg-white p-4">Error: {error}</div>;
 
@@ -109,9 +117,9 @@ const OverlayView: React.FC = () => {
         return (
             <div style={{ width: '100vw', height: '100vh', background: '#0f0' }}>
                 <div style={containerStyle}>
-                    <div style={textStyle(true)}>
-                        [DEBUG: Waiting for subtitles...] <br/>
-                        Project: {activeProjectId} <br/>
+                    <div style={lineStyle(true, false)}>
+                        [DEBUG: Waiting for subtitles...] <br />
+                        Project: {activeProjectId} <br />
                         Lang: {activeLang}
                     </div>
                 </div>
@@ -121,14 +129,51 @@ const OverlayView: React.FC = () => {
 
     if (displayLines.length === 0) return <div style={{ width: '100vw', height: '100vh', background: 'transparent' }} />;
 
+    // ── Main Render ───────────────────────────────────────────────────────────
     return (
         <div style={{ width: '100vw', height: '100vh', background: 'transparent' }}>
+            <style>{`
+                @keyframes shimmer-overlay {
+                    0% { background-position: 200% 0; }
+                    100% { background-position: -200% 0; }
+                }
+                @keyframes fade-in-overlay {
+                    from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+                    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+                }
+                @keyframes blink-cursor-overlay {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0; }
+                }
+                @keyframes spin-overlay {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
+            `}</style>
+
+
+            {/* Subtitle Lines */}
             <div style={containerStyle}>
-                {displayLines.map((line, idx) => (
-                    <div key={line.id} className="animate-slide-up" style={textStyle(idx === displayLines.length - 1)}>
-                        {line.text}
-                    </div>
-                ))}
+                {displayLines.map((line, idx) => {
+                    const isLast = idx === displayLines.length - 1;
+                    return (
+                        <div key={line.id} style={lineStyle(isLast, line.isRaw)}>
+                            {line.text}
+                            {/* Blinking cursor for latest raw line */}
+                            {line.isRaw && isLast && (
+                                <span style={{
+                                    display: 'inline-block',
+                                    width: '3px',
+                                    height: '0.85em',
+                                    backgroundColor: '#818cf8',
+                                    marginLeft: '6px',
+                                    verticalAlign: 'text-bottom',
+                                    animation: 'blink-cursor-overlay 1s step-end infinite',
+                                }} />
+                            )}
+                        </div>
+                    );
+                })}
             </div>
         </div>
     );

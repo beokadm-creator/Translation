@@ -168,6 +168,15 @@ const AdminLanding: React.FC = () => {
       setConfProjects(prev => prev.filter(p => p.slug !== projectId));
   };
 
+  const handleDeleteConference = async (confId: string) => {
+      if (!window.confirm(`PERMANENTLY DELETE conference? All related projects will also be affected.`)) return;
+      await remove(ref(rtdb, `conferences/${confId}`));
+      
+      // Refresh list
+      setConferences(prev => prev.filter(c => c.id !== confId));
+      if (selectedConfId === confId) setSelectedConfId(null);
+  };
+
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="flex justify-between items-center mb-8 border-b border-gray-700 pb-4">
@@ -207,6 +216,12 @@ const AdminLanding: React.FC = () => {
                                   </button>
                                   {/* Edit button placeholder - logic can be added later */}
                                   <button className="text-xs bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded">✏️ Edit</button>
+                                  <button 
+                                      onClick={(e) => { e.stopPropagation(); handleDeleteConference(c.id); }}
+                                      className="text-xs bg-red-600 hover:bg-red-500 px-2 py-1 rounded"
+                                  >
+                                      🗑️ Delete
+                                  </button>
                               </div>
                           </div>
                       ))}

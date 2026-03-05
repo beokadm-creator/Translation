@@ -2,14 +2,26 @@ import * as functions from "firebase-functions/v1";
 import * as admin from "firebase-admin";
 
 export const archiveSession = functions.https.onRequest(async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "POST");
+  // CORS Handling
+  const origin = req.headers.origin as string;
+  const allowedOrigin = process.env.ALLOWED_ORIGIN || (functions.config()?.app?.allowed_origin as string) || "*";
+
+  if (allowedOrigin === "*" || allowedOrigin === origin) {
+    res.set("Access-Control-Allow-Origin", allowedOrigin === "*" ? "*" : origin);
+  } else if (origin && (origin.endsWith(".web.app") || origin.endsWith(".firebaseapp.com") || origin.includes("localhost"))) {
+    res.set("Access-Control-Allow-Origin", origin);
+  } else {
+    res.set("Access-Control-Allow-Origin", allowedOrigin);
+  }
+
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  
+
   if (req.method === "OPTIONS") {
     res.status(204).send("");
     return;
   }
+
 
   try {
     const authHeader = req.headers.authorization;
@@ -47,15 +59,15 @@ export const archiveSession = functions.https.onRequest(async (req, res) => {
     // 3. Clear Stream & State
     await streamRef.remove();
     await projectRef.child("state").set({
-        bufferText: "",
-        bufferIds: [],
-        lastGeminiTime: Date.now()
+      bufferText: "",
+      bufferIds: [],
+      lastGeminiTime: Date.now()
     });
 
     // 4. Reset Active Session if it matches
     const activeSnap = await projectRef.child("activeSessionId").get();
     if (activeSnap.exists() && activeSnap.val() === sessionId) {
-        await projectRef.child("activeSessionId").remove();
+      await projectRef.child("activeSessionId").remove();
     }
 
     functions.logger.info(`Archived session ${sessionId} for project ${projectId}`);

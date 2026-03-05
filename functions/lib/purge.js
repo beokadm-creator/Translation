@@ -39,7 +39,19 @@ const admin = __importStar(require("firebase-admin"));
 exports.purgeSession = functions
     .runWith({ timeoutSeconds: 60, memory: "512MB" })
     .https.onRequest(async (req, res) => {
-    res.set("Access-Control-Allow-Origin", "*");
+    var _a, _b;
+    // CORS Handling
+    const origin = req.headers.origin;
+    const allowedOrigin = process.env.ALLOWED_ORIGIN || ((_b = (_a = functions.config()) === null || _a === void 0 ? void 0 : _a.app) === null || _b === void 0 ? void 0 : _b.allowed_origin) || "*";
+    if (allowedOrigin === "*" || allowedOrigin === origin) {
+        res.set("Access-Control-Allow-Origin", allowedOrigin === "*" ? "*" : origin);
+    }
+    else if (origin && (origin.endsWith(".web.app") || origin.endsWith(".firebaseapp.com") || origin.includes("localhost"))) {
+        res.set("Access-Control-Allow-Origin", origin);
+    }
+    else {
+        res.set("Access-Control-Allow-Origin", allowedOrigin);
+    }
     res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
     res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
     if (req.method === "OPTIONS") {
@@ -53,14 +65,16 @@ exports.purgeSession = functions
             return;
         }
         await admin.auth().verifyIdToken(auth.split("Bearer ")[1]);
-        const projectId = (req.query.projectId || "").toString();
+        const projectId = (req.query.projectId || req.body.projectId || "").toString();
         if (projectId) {
-            await admin.database().ref(`sessions/${projectId}`).remove();
+            await admin.database().ref(`projects/${projectId}/stream`).remove();
+            await admin.database().ref(`projects/${projectId}/state`).update({
+                bufferText: "",
+                bufferIds: [],
+                lastGeminiTime: Date.now()
+            });
         }
-        else {
-            await admin.database().ref(`sessions`).remove();
-        }
-        res.status(200).json({ success: true, target: projectId || "all" });
+        res.status(200).json({ success: true, target: projectId || "none" });
     }
     catch (e) {
         res.status(500).json({ success: false, error: (e instanceof Error ? e.message : "Internal Error") || "Internal Error" });

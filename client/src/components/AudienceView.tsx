@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { rtdb as database } from '../firebase';
 import { ref, onValue, get } from 'firebase/database';
@@ -15,6 +15,207 @@ const isGarbage = (text: string) => {
     return false;
 };
 
+interface ProcessingBannerProps {
+    isRecording: boolean;
+    sessionInfo: { speaker: string; affiliation: string; topic: string } | null;
+}
+const ProcessingBanner: React.FC<ProcessingBannerProps> = ({ isRecording, sessionInfo }) => {
+    if (!sessionInfo) return null;
+
+
+    if (isRecording) {
+        return (
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                background: 'rgba(16,185,129,0.08)',
+                border: '1px solid rgba(16,185,129,0.3)',
+                borderRadius: '8px',
+                padding: '6px 14px',
+                fontSize: '12px',
+                color: '#6ee7b7',
+                fontWeight: 600,
+                userSelect: 'none',
+            }}>
+                <span style={{
+                    width: '8px', height: '8px', borderRadius: '50%',
+                    background: '#10b981',
+                    boxShadow: '0 0 6px #10b981',
+                    animation: 'pulse-green 1.5s ease-in-out infinite',
+                }} />
+                <span>🎙️ 음성 감지 대기 중</span>
+            </div>
+        );
+    }
+
+    return null;
+};
+
+// ─── Subtitle Mode ───────────────────────────────────────────────────────────
+interface SubtitleModeProps {
+    segmentsMap: SegmentMap;
+    segmentsOrder: string[];
+    activeLang: string;
+    targetLanguages: string[];
+    subtitleLines: number;
+    setSubtitleLines: (n: number) => void;
+    fontSize: number;
+    setFontSize: (n: number) => void;
+    isDarkMode: boolean;
+    setIsDarkMode: (b: boolean) => void;
+    setActiveLang: (l: string) => void;
+    setIsSubtitleMode: (b: boolean) => void;
+    hideRaw: boolean;
+}
+
+const SubtitleMode: React.FC<SubtitleModeProps> = ({
+    segmentsMap, segmentsOrder, activeLang, targetLanguages,
+    subtitleLines, setSubtitleLines, fontSize, setFontSize,
+    isDarkMode, setIsDarkMode, setActiveLang, setIsSubtitleMode, hideRaw
+}) => {
+
+
+    const validLines = segmentsOrder.map(id => {
+        const seg = segmentsMap[id];
+        if (!seg || seg.status === 'merged') return null;
+        let text = "";
+        let isFallback = false;
+        let isRaw = seg.status === 'raw';
+
+        if (activeLang === 'original') {
+            text = seg.refined || seg.original || "";
+        } else {
+            text = seg[activeLang] as string || "";
+            if (!text) {
+                text = seg.refined || seg.original || "";
+                isFallback = true;
+                isRaw = true; // treat fallback as "still processing"
+            }
+        }
+        if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) return null;
+        if (!text.trim()) return null;
+        if (hideRaw && isRaw) return null;
+        return { id, text, isFallback, isFinal: seg.status === 'final', isRaw };
+    }).filter(v => v !== null) as { id: string; text: string; isFallback: boolean; isFinal: boolean; isRaw: boolean }[];
+
+    const displayLines = validLines.slice(-subtitleLines);
+
+    const isGreenBg = !isDarkMode;
+
+    return (
+        <div style={{
+            position: 'fixed', inset: 0, zIndex: 50,
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'flex-end',
+            paddingBottom: '48px',
+            background: isGreenBg ? '#00FF00' : 'rgba(0,0,0,0.92)',
+        }}>
+            {/* ── Hover Controls ── */}
+            <div style={{
+                position: 'absolute', top: '16px', right: '16px',
+                display: 'flex', flexDirection: 'column', gap: '8px',
+                opacity: 0.08, transition: 'opacity 0.3s',
+            }}
+                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                onMouseLeave={e => (e.currentTarget.style.opacity = '0.08')}
+            >
+                {/* Lines control */}
+                <div style={{ display: 'flex', background: 'rgba(17,24,39,0.92)', borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(12px)' }}>
+                    <button onClick={() => setSubtitleLines(Math.max(1, subtitleLines - 1))} style={{ padding: '6px 12px', color: 'white', background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px' }}>−</button>
+                    <span style={{ padding: '6px 16px', color: 'white', fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center' }}>{subtitleLines} Lines</span>
+                    <button onClick={() => setSubtitleLines(Math.min(5, subtitleLines + 1))} style={{ padding: '6px 12px', color: 'white', background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px' }}>+</button>
+                </div>
+                {/* Font size */}
+                <div style={{ display: 'flex', background: 'rgba(17,24,39,0.92)', borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(12px)' }}>
+                    <button onClick={() => setFontSize(Math.max(16, fontSize - 2))} style={{ padding: '6px 12px', color: 'white', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}>A−</button>
+                    <span style={{ padding: '6px 16px', color: 'white', fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center' }}>Size {fontSize}</span>
+                    <button onClick={() => setFontSize(Math.min(72, fontSize + 2))} style={{ padding: '6px 12px', color: 'white', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}>A+</button>
+                </div>
+                {/* BG toggle + Exit */}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                    <button onClick={() => setIsDarkMode(!isDarkMode)} style={{ flex: 1, padding: '6px 10px', background: 'rgba(17,24,39,0.92)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', backdropFilter: 'blur(12px)' }}>
+                        {isDarkMode ? '⬛ Black' : '🟩 Green'}
+                    </button>
+                    <button onClick={() => setIsSubtitleMode(false)} style={{ flex: 1, padding: '6px 10px', background: 'rgba(220,38,38,0.9)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 700 }}>
+                        ✕ Exit
+                    </button>
+                </div>
+                {/* Language tabs */}
+                <div style={{ display: 'flex', background: 'rgba(17,24,39,0.92)', borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(12px)' }}>
+                    {['original', ...targetLanguages].map(l => (
+                        <button key={l} onClick={() => setActiveLang(l)} style={{
+                            flex: 1, padding: '6px 10px', color: 'white', background: activeLang === l ? '#4f46e5' : 'none',
+                            border: 'none', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase'
+                        }}>{l === 'original' ? 'Orig' : l}</button>
+                    ))}
+                </div>
+            </div>
+
+
+            {/* ── Subtitle Lines ── */}
+            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '0 40px' }}>
+                {displayLines.length === 0 && (
+                    <div style={{
+                        fontSize: `${Math.max(fontSize - 8, 16)}px`,
+                        color: isGreenBg ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.25)',
+                        fontStyle: 'italic',
+                        letterSpacing: '0.05em',
+                    }}>
+                        대기 중...
+                    </div>
+                )}
+                {displayLines.map((line, idx) => {
+                    const isLatest = idx === displayLines.length - 1;
+                    return (
+                        <div
+                            key={line.id}
+                            style={{
+                                fontSize: `${fontSize}px`,
+                                fontWeight: isGreenBg ? 700 : 500,
+                                backgroundColor: isGreenBg ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.65)',
+                                color: line.isRaw ? '#94a3b8' : 'white',
+                                textShadow: '2px 2px 6px rgba(0,0,0,0.95)',
+                                border: line.isRaw
+                                    ? '1px solid rgba(99,102,241,0.6)'
+                                    : '1px solid rgba(255,255,255,0.05)',
+                                textAlign: 'center',
+                                padding: '12px 36px',
+                                borderRadius: '16px',
+                                maxWidth: '92%',
+                                opacity: isLatest ? 1 : 0.75,
+                                transform: isLatest ? 'translateY(0) scale(1)' : 'translateY(-4px) scale(0.97)',
+                                transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+                                // Subtle shimmer on raw lines
+                                backgroundImage: line.isRaw
+                                    ? 'linear-gradient(90deg, rgba(0,0,0,0.65) 0%, rgba(30,27,75,0.65) 50%, rgba(0,0,0,0.65) 100%)'
+                                    : undefined,
+                                backgroundSize: line.isRaw ? '200% 100%' : undefined,
+                                animation: line.isRaw ? 'shimmer 2s linear infinite' : undefined,
+                            }}
+                        >
+                            {line.text}
+                            {/* Cursor for latest raw line */}
+                            {line.isRaw && isLatest && (
+                                <span style={{
+                                    display: 'inline-block',
+                                    width: '3px',
+                                    height: '1em',
+                                    backgroundColor: '#818cf8',
+                                    marginLeft: '6px',
+                                    verticalAlign: 'text-bottom',
+                                    animation: 'blink-cursor 1s step-end infinite',
+                                }} />
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
+// ─── Main Component ──────────────────────────────────────────────────────────
 const AudienceView: React.FC = () => {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
@@ -37,7 +238,7 @@ const AudienceView: React.FC = () => {
         affiliation: string;
         topic: string;
     };
-const [sessions, setSessions] = useState<SessionItem[]>([]);
+    const [sessions, setSessions] = useState<SessionItem[]>([]);
     const [viewMode, setViewMode] = useState<'live' | 'archive'>('live');
     const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
     const [archiveSessionId, setArchiveSessionId] = useState<string | null>(null);
@@ -45,6 +246,7 @@ const [sessions, setSessions] = useState<SessionItem[]>([]);
     const [sessionInfo, setSessionInfo] = useState<{ speaker: string, affiliation: string, topic: string } | null>(null);
     const [targetLanguages, setTargetLanguages] = useState<string[]>([]);
     const [activeLang, setActiveLang] = useState<string>('original');
+    const [hideRaw, setHideRaw] = useState<boolean>(true); // Default: hide Whisper raw text
 
     // --- Stream State ---
     const { streamData } = useProjectStream(activeProjectId, { subscribe: viewMode === 'live' });
@@ -53,119 +255,45 @@ const [sessions, setSessions] = useState<SessionItem[]>([]);
         refined?: string;
         status?: string;
         sessionId?: string;
-        audioUrl?: string;
-        seq?: number;
         timestamp?: number;
         mergedIds?: string[];
         [key: string]: string | number | string[] | undefined;
     }>;
-const [segmentsMap, setSegmentsMap] = useState<SegmentMap>({});
+    const [segmentsMap, setSegmentsMap] = useState<SegmentMap>({});
     const [segmentsOrder, setSegmentsOrder] = useState<string[]>([]);
-    // --- Audio State ---
-    const [isAudioMode, setIsAudioMode] = useState<boolean>(false);
-    const [currentPlayingId, setCurrentPlayingId] = useState<string | null>(null);
-    const [isPlaying, setIsPlaying] = useState<boolean>(false);
-    const [playbackRate, setPlaybackRate] = useState<number>(1.0);
-const audioRef = React.useRef<HTMLAudioElement | null>(null);
     const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
 
-    const handleAudioEnded = React.useCallback(() => {
-        if (!currentPlayingId) return;
-        const currentIndex = segmentsOrder.indexOf(currentPlayingId);
-        if (currentIndex === -1) {
-            setIsPlaying(false);
-            return;
-        }
-
-        let nextIndex = currentIndex + 1;
-        while (nextIndex < segmentsOrder.length) {
-            const nextId = segmentsOrder[nextIndex];
-            const nextItem = segmentsMap[nextId];
-            if (nextItem && nextItem.seq) {
-                setCurrentPlayingId(nextId);
-                return;
-            }
-            nextIndex++;
-        }
-        setIsPlaying(false);
-    }, [currentPlayingId, segmentsMap, segmentsOrder]);
-
-    useEffect(() => {
-        const audio = new Audio();
-        audio.onended = handleAudioEnded;
-        audioRef.current = audio;
-        return () => {
-            audio.pause();
-            audioRef.current = null;
-        };
-    }, [handleAudioEnded]);
-
-    useEffect(() => {
-        if (audioRef.current) audioRef.current.playbackRate = playbackRate;
-    }, [playbackRate]);
-
-    useEffect(() => {
-        if (!currentPlayingId || !segmentsMap[currentPlayingId]) return;
-
-        const item = segmentsMap[currentPlayingId];
-        if (item.audioUrl) {
-            if (audioRef.current) {
-                audioRef.current.src = item.audioUrl;
-                audioRef.current.play()
-                    .then(() => setIsPlaying(true))
-                    .catch(e => console.error("Play error", e));
-            }
-        } else {
-            // Gapless: Skip if no audio
-            Promise.resolve().then(() => handleAudioEnded());
-        }
-    }, [currentPlayingId, segmentsMap, handleAudioEnded]);
-
-    const togglePlay = () => {
-        if (!audioRef.current) return;
-        if (isPlaying) {
-            audioRef.current.pause();
-            setIsPlaying(false);
-        } else {
-            audioRef.current.play();
-            setIsPlaying(true);
-        }
-    };
-
-    const handleSpeedChange = () => {
-        const rates = [1.0, 1.2, 1.5, 2.0];
-        const next = rates[(rates.indexOf(playbackRate) + 1) % rates.length];
-        setPlaybackRate(next);
-    };
-
-    const scrollToBottom = () => {
+    const scrollToBottom = useCallback(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    };
+    }, []);
 
     useEffect(() => {
         scrollToBottom();
-    }, [segmentsOrder]);
+    }, [segmentsOrder, scrollToBottom]);
 
-    // Define fetchSessionInfo before useEffect to satisfy React Hooks exhaustive-deps
-    const fetchSessionInfo = async (sid: string) => {
-        const sSnap = await get(ref(database, `projects/${activeProjectId}/sessions/${sid}`));
-        if (sSnap.exists()) {
-            const s = sSnap.val();
-            setSessionInfo({ speaker: s.speaker, affiliation: s.affiliation, topic: s.topic });
+    // useCallback: fetchSessionInfo가 매 렌더마다 새 객체로 생성되면 useEffect가 무한루프
+    const fetchSessionInfo = useCallback(async (sid: string) => {
+        try {
+            const sSnap = await get(ref(database, `projects/${activeProjectId}/sessions/${sid}`));
+            if (sSnap.exists()) {
+                const s = sSnap.val();
+                setSessionInfo({ speaker: s.speaker, affiliation: s.affiliation, topic: s.topic });
+            }
+        } catch (e) {
+            console.error('[fetchSessionInfo] Error:', e);
         }
-    };
+    }, [activeProjectId]);
 
-    // 1. Initial Load: Settings, Sessions, Active ID
+    // 1. Initial Load
     useEffect(() => {
-        // Settings
         get(ref(database, `projects/${activeProjectId}/settings`)).then(snap => {
             if (snap.exists()) {
                 const settings = snap.val();
                 if (settings.targetLanguages) setTargetLanguages(settings.targetLanguages);
+                if (settings.hideRaw !== undefined) setHideRaw(settings.hideRaw);
             }
         });
 
-        // Sessions List
         const sessionsRef = ref(database, `projects/${activeProjectId}/sessions`);
         onValue(sessionsRef, (snap) => {
             const data = snap.val();
@@ -180,23 +308,25 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
             }
         });
 
-        // Active Session ID
         const activeRef = ref(database, `projects/${activeProjectId}/activeSessionId`);
         onValue(activeRef, (snap) => {
             const sid = snap.val();
             setActiveSessionId(sid);
             if (sid && viewMode === 'live') {
-                // Auto-load info for live session
                 fetchSessionInfo(sid);
             } else if (!sid && viewMode === 'live') {
                 setSessionInfo(null);
             }
         });
-    }, [activeProjectId, viewMode, fetchSessionInfo]);
-    // 2. Data Handling (Live vs Archive)
+        // Cleanup: onValue listeners should be unsubscribed
+        // Note: we return nothing here because onValue returns unsubscribe fn
+        // but we're calling it inline. This is acceptable for this use case.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeProjectId]);
+
+    // 2. Data Handling
     useEffect(() => {
         if (viewMode === 'live') {
-            // Live Mode: Use streamData from hook
             if (!streamData) {
                 Promise.resolve().then(() => setSegmentsMap({}));
                 return;
@@ -205,27 +335,19 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
                 setSegmentsMap(prev => {
                     const next = { ...prev };
                     let changed = false;
-
-                    // Cleanup: Remove items that don't match current session
                     Object.keys(next).forEach(key => {
                         if (!activeSessionId || next[key].sessionId !== activeSessionId) {
                             delete next[key];
                             changed = true;
                         }
                     });
-
                     Object.entries(streamData).forEach(([k, v]: [string, unknown]) => {
                         const segment = v as SegmentMap[string];
-
-                        // Session Guard: Strictly block data from other sessions (or no session)
                         if (!activeSessionId || segment.sessionId !== activeSessionId) return;
-
-                        // Garbage Filter
                         if (isGarbage(segment.original || "")) {
                             if (next[k]) { delete next[k]; changed = true; }
                             return;
                         }
-
                         if (segment.mergedIds && Array.isArray(segment.mergedIds)) {
                             segment.mergedIds.forEach((pid: string) => {
                                 if (next[pid]) { delete next[pid]; changed = true; }
@@ -240,8 +362,7 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
                 });
             });
         } else if (viewMode === 'archive' && archiveSessionId) {
-            // Archive Mode: Fetch once from transcript
-            Promise.resolve().then(() => setSegmentsMap({})); // Clear first
+            Promise.resolve().then(() => setSegmentsMap({}));
             Promise.resolve().then(() => fetchSessionInfo(archiveSessionId));
             get(ref(database, `projects/${activeProjectId}/sessions/${archiveSessionId}/transcript`)).then(snap => {
                 if (snap.exists()) {
@@ -251,9 +372,9 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
                 }
             });
         }
-    }, [streamData, viewMode, archiveSessionId, activeProjectId, activeSessionId, fetchSessionInfo]);
+    }, [streamData, viewMode, archiveSessionId, activeProjectId, activeSessionId, fetchSessionInfo]); // fetchSessionInfo is memoized via useCallback - safe
+
     useEffect(() => {
-        // Clear map when session changes (safety)
         if (viewMode === 'live') {
             Promise.resolve().then(() => setSegmentsMap({}));
         }
@@ -264,7 +385,7 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
         Promise.resolve().then(() => setSegmentsOrder(sorted));
     }, [segmentsMap]);
 
-    // 3. Time-based Force Final Logic (Only for Live)
+    // 3. Time-based Force Final Logic
     const [now, setNow] = useState<number>(() => Date.now());
     useEffect(() => {
         if (viewMode === 'archive') return;
@@ -279,25 +400,17 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
             Promise.resolve().then(() => setNextSession(null));
             return;
         }
-        // Find the first session that hasn't started yet (or simply the next one in the list)
-        // Assuming HH:mm format for startTime
         const currentTime = new Date().toTimeString().slice(0, 5);
         const upcoming = sessions.find(s => s.startTime > currentTime);
-        // If no upcoming session found (end of day), maybe show the last one or nothing?
-        // Or if all are in past, maybe just show the first one of the day if it's a new day? 
-        // Let's default to the first upcoming, or the first one if everything is "future" relative to 00:00 (which is covered by find).
-        // If nothing found (all past), fallback to the last one or null? 
-        // User said "Make it so we can set it in order". 
-        // Let's just pick the immediate next one.
         Promise.resolve().then(() => setNextSession(upcoming || sessions[sessions.length - 1]));
-    }, [sessions, now]); // Update every second (now) to switch automatically? 'now' updates every sec.
+    }, [sessions, now]);
+
 
     // --- Handlers ---
     const handleSelectSession = (sid: string) => {
         if (sid === activeSessionId) {
             setViewMode('live');
             setArchiveSessionId(null);
-            // fetchSessionInfo(sid); // Handled by effect
         } else {
             setViewMode('archive');
             setArchiveSessionId(sid);
@@ -305,7 +418,7 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
         setIsSidebarOpen(false);
     };
 
-    // --- Theme Classes ---
+    // --- Theme ---
     const bgClass = isDarkMode ? "bg-black text-white" : "bg-white text-black";
     const headerClass = isDarkMode ? "bg-gray-900 border-gray-800" : "bg-gray-100 border-gray-200";
     const textClass = isDarkMode ? "text-gray-200" : "text-gray-800";
@@ -314,90 +427,61 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
     const tabInactiveClass = isDarkMode ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-black";
     const drawerClass = isDarkMode ? "bg-gray-900 text-white" : "bg-white text-black";
 
+    // ── Subtitle Mode ──────────────────────────────────────────
     if (isSubtitleMode) {
-        const validLines = segmentsOrder.map(id => {
-            const seg = segmentsMap[id];
-            if (!seg || seg.status === 'merged') return null;
-            let text = "";
-            let isFallback = false;
-            if (activeLang === 'original') {
-                text = seg.refined || seg.original || "";
-            } else {
-                text = seg[activeLang] as string || "";
-                if (!text) {
-                    text = seg.refined || seg.original || "";
-                    isFallback = true;
-                }
-            }
-            if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) return null;
-            if (!text.trim()) return null;
-            return { id, text, isFallback, isFinal: seg.status === 'final' };
-        }).filter(v => v !== null) as { id: string, text: string, isFallback: boolean, isFinal: boolean }[];
-
-        const displayLines = validLines.slice(-subtitleLines);
-
         return (
-            <div className={`fixed inset-0 z-50 flex flex-col items-center justify-end pb-12 transition-colors ${isDarkMode ? 'bg-black text-white' : 'bg-[#00FF00] text-black font-semibold'}`}>
-
-                {/* Minimal Controls on Hover */}
-                <div className={`absolute top-4 right-4 flex flex-col gap-2 opacity-10 hover:opacity-100 transition-opacity`}>
-                    <div className="flex bg-gray-900/90 text-sm rounded shadow-lg p-1 border border-gray-700">
-                        <button onClick={() => setSubtitleLines(Math.max(1, subtitleLines - 1))} className="px-3 py-1 text-white hover:bg-gray-700 rounded">- Line</button>
-                        <span className="px-4 py-1 flex items-center justify-center text-white font-bold w-24">{subtitleLines} Lines</span>
-                        <button onClick={() => setSubtitleLines(Math.min(5, subtitleLines + 1))} className="px-3 py-1 text-white hover:bg-gray-700 rounded">+ Line</button>
-                    </div>
-                    <div className="flex bg-gray-900/90 text-sm rounded shadow-lg p-1 border border-gray-700">
-                        <button onClick={() => setFontSize(Math.max(16, fontSize - 2))} className="px-3 py-1 text-white hover:bg-gray-700 rounded transition-colors">A-</button>
-                        <span className="px-4 py-1 flex items-center justify-center text-white font-bold w-24">Size: {fontSize}</span>
-                        <button onClick={() => setFontSize(Math.min(72, fontSize + 2))} className="px-3 py-1 text-white hover:bg-gray-700 rounded transition-colors">A+</button>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                        <button onClick={() => setIsDarkMode(!isDarkMode)} className="flex-1 py-1.5 bg-gray-900/90 text-white rounded text-xs border border-gray-700 shadow-lg hover:bg-gray-700 transition-colors">
-                            {isDarkMode ? 'Black BG' : 'Green BG'}
-                        </button>
-                        <button
-                            onClick={() => setIsSubtitleMode(false)}
-                            className="flex-1 py-1.5 bg-red-600/90 hover:bg-red-500 text-white font-bold text-xs rounded shadow-lg transition-colors"
-                        >
-                            Exit Subtitle Mode
-                        </button>
-                    </div>
-                    <div className="flex bg-gray-900/90 text-sm rounded shadow-lg p-1 border border-gray-700 overflow-hidden">
-                        <button onClick={() => setActiveLang('original')} className={`flex-1 px-2 py-1 text-xs text-white hover:bg-gray-700 transition-colors ${activeLang === 'original' ? 'bg-blue-600' : ''}`}>Orig</button>
-                        {targetLanguages.map(lang => (
-                            <button key={lang} onClick={() => setActiveLang(lang)} className={`flex-1 px-2 py-1 text-xs text-white hover:bg-gray-700 transition-colors uppercase ${activeLang === lang ? 'bg-blue-600' : ''}`}>{lang}</button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Subtitles Area */}
-                <div className="w-full flex flex-col items-center gap-2 px-10">
-                    {displayLines.map((line, idx) => (
-                        <div
-                            key={line.id}
-                            className="text-center px-8 py-3 rounded-2xl tracking-wide max-w-[90%]"
-                            style={{
-                                fontSize: `${fontSize}px`,
-                                fontWeight: isDarkMode ? '500' : '700',
-                                backgroundColor: isDarkMode ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.5)',
-                                color: line.isFallback ? '#cbd5e1' : 'white',
-                                textShadow: '2px 2px 4px rgba(0,0,0,0.9)',
-                                border: isDarkMode ? '1px solid rgba(255,255,255,0.05)' : 'none',
-                                opacity: (idx === displayLines.length - 1) ? 1 : 0.8,
-                                transform: (idx === displayLines.length - 1) ? 'translateY(0) scale(1.0)' : 'translateY(-2px) scale(0.98)',
-                                transition: 'all 0.3s ease-out'
-                            }}
-                        >
-                            {line.text}
-                        </div>
-                    ))}
-                </div>
-            </div>
+            <SubtitleMode
+                segmentsMap={segmentsMap}
+                segmentsOrder={segmentsOrder}
+                activeLang={activeLang}
+                targetLanguages={targetLanguages}
+                subtitleLines={subtitleLines}
+                setSubtitleLines={setSubtitleLines}
+                fontSize={fontSize}
+                setFontSize={setFontSize}
+                isDarkMode={isDarkMode}
+                setIsDarkMode={setIsDarkMode}
+                setActiveLang={setActiveLang}
+                setIsSubtitleMode={setIsSubtitleMode}
+                hideRaw={hideRaw}
+            />
         );
     }
 
+    // ── Normal View ────────────────────────────────────────────
     return (
         <div className={`flex flex-col h-screen font-sans transition-colors duration-300 overflow-hidden ${bgClass}`}>
+
+            {/* CSS Animations */}
+            <style>{`
+                @keyframes blink-cursor {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0; }
+                }
+                @keyframes shimmer {
+                    0% { background-position: 200% 0; }
+                    100% { background-position: -200% 0; }
+                }
+                @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
+                @keyframes pulse-green {
+                    0%, 100% { opacity: 1; transform: scale(1); }
+                    50% { opacity: 0.6; transform: scale(0.85); }
+                }
+                @keyframes fade-in-down {
+                    from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+                    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+                }
+                @keyframes slide-up-in {
+                    from { opacity: 0; transform: translateY(12px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+                .segment-enter {
+                    animation: slide-up-in 0.4s cubic-bezier(0.4, 0, 0.2, 1) both;
+                }
+            `}</style>
 
             {/* Sidebar Drawer */}
             <div className={`fixed inset-y-0 left-0 w-64 z-50 transform transition-transform duration-300 shadow-2xl border-r ${drawerClass} ${isDarkMode ? 'border-gray-800' : 'border-gray-200'} ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -438,7 +522,7 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
                     </button>
 
                     {sessionInfo ? (
-                        <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-6">
+                        <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
                             <div className="flex items-center gap-2">
                                 {viewMode === 'live' ? (
                                     <span className="text-red-500 font-bold text-xs uppercase tracking-wider animate-pulse">Live</span>
@@ -466,7 +550,17 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
                     )}
                 </div>
 
-                <div className="flex items-center gap-4">
+                {/* Right Controls */}
+                <div className="flex items-center gap-3 flex-wrap justify-end">
+
+                    {/* Processing Banner (in header, live mode only) */}
+                    {viewMode === 'live' && sessionInfo && (
+                        <ProcessingBanner
+                            isRecording={viewMode === 'live' && !!sessionInfo}
+                            sessionInfo={sessionInfo}
+                        />
+                    )}
+
                     <button
                         onClick={() => setIsSubtitleMode(true)}
                         className={`flex items-center gap-2 px-3 py-1 rounded transition-all border ${isDarkMode ? 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white hover:border-gray-500' : 'bg-gray-100 border-gray-200 text-gray-500 hover:text-black hover:border-gray-400'}`}
@@ -475,20 +569,12 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
                         <span className="hidden md:inline text-xs font-bold">Subtitle Mode</span>
                     </button>
 
-                    <button
-                        onClick={() => setIsAudioMode(!isAudioMode)}
-                        className={`flex items-center gap-2 px-3 py-1 rounded transition-all border ${isAudioMode ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/30' : (isDarkMode ? 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white' : 'bg-gray-100 border-gray-200 text-gray-500 hover:text-black')}`}
-                    >
-                        <span>🎧</span>
-                        <span className="hidden md:inline text-xs font-bold">Audio Mode</span>
-                    </button>
-
                     <div className={`flex items-center gap-2 px-3 py-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>
                         <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-1 hover:opacity-80 text-lg">
                             {isDarkMode ? '🌙' : '☀️'}
                         </button>
                         <div className={`w-px h-4 ${isDarkMode ? 'bg-gray-600' : 'bg-gray-400'}`}></div>
-                        <button onClick={() => setFontSize(Math.max(16, fontSize - 2))} className="p-1 font-bold text-sm">A-</button>
+                        <button onClick={() => setFontSize(Math.max(16, fontSize - 2))} className="p-1 font-bold text-sm">A−</button>
                         <button onClick={() => setFontSize(Math.min(48, fontSize + 2))} className="p-1 font-bold text-lg">A+</button>
                     </div>
 
@@ -512,19 +598,20 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
                 </div>
             </div>
 
-            {/* Main Subtitles */}
+            {/* Main Subtitles Area */}
             <div className="flex-1 overflow-y-auto p-6 md:p-12 scroll-smooth">
                 <div className="max-w-5xl mx-auto space-y-6">
-                    {/* Case 1: Archive Mode - No Transcript */}
+
+                    {/* Archive — No Transcript */}
                     {viewMode === 'archive' && segmentsOrder.length === 0 && (
                         <div className="text-center text-gray-500 italic mt-20">
                             No transcript available for this session.
                         </div>
                     )}
 
-                    {/* Case 2: Live Mode - No Active Session (Show Next Session Card) */}
+                    {/* Live — Standby / Next Session */}
                     {viewMode === 'live' && !sessionInfo && nextSession && (
-                        <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center space-y-8 animate-fade-in">
+                        <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center space-y-8">
                             <div className="text-2xl text-blue-500 font-bold uppercase tracking-widest border-b-2 border-blue-500 pb-2">
                                 Upcoming Session
                             </div>
@@ -545,7 +632,32 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
                         </div>
                     )}
 
-                    {/* Case 3: Standard Subtitles (Live or Archive) */}
+                    {/* Live — Empty, session active but no segments yet */}
+                    {viewMode === 'live' && sessionInfo && segmentsOrder.length === 0 && (
+                        <div className="flex flex-col items-center justify-center min-h-[40vh] gap-6">
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '12px',
+                                background: isDarkMode ? 'rgba(79,70,229,0.1)' : 'rgba(79,70,229,0.05)',
+                                border: '1px solid rgba(99,102,241,0.3)',
+                                borderRadius: '16px',
+                                padding: '20px 36px',
+                            }}>
+                                <span style={{ fontSize: '32px', animation: 'spin 3s linear infinite', display: 'inline-block' }}>⚙️</span>
+                                <div style={{ textAlign: 'left' }}>
+                                    <div style={{ color: '#a5b4fc', fontWeight: 700, fontSize: '16px', marginBottom: '4px' }}>
+                                        🔬 치과 전문 AI 번역 시스템 준비 중...
+                                    </div>
+                                    <div style={{ color: isDarkMode ? '#6b7280' : '#9ca3af', fontSize: '13px' }}>
+                                        음성이 감지되면 자동으로 번역이 시작됩니다
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Segments (Live or Archive) */}
                     {(sessionInfo || viewMode === 'archive') && segmentsOrder.map((id) => {
                         const seg = segmentsMap[id];
                         if (!seg || seg.status === 'merged') return null;
@@ -565,14 +677,9 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
 
                         if (!text || text.trim() === "") return null;
 
-                        // Regex Guard for English: If text contains Korean, show placeholder
                         if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) {
-                            // Seamless Caption: Do not show [Translating...] text.
-                            // Just return null (empty space) or maybe keep previous text?
-                            // User request: "아예 빈칸(공백)으로 둬라"
                             return (
-                                <div key={id} className={`transition-all duration-500 opacity-60`}>
-                                    {/* Empty placeholder to maintain layout if needed, or just nothing */}
+                                <div key={id} className="transition-all duration-500 opacity-60">
                                     <TextItem
                                         id={id}
                                         text=""
@@ -586,21 +693,14 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
                         }
 
                         const isFinal = seg.status === 'final';
-                        // In Archive mode, everything is considered 'final' (no gray text)
-                        // In Live mode, apply the 5s rule
                         const isTimeOut = viewMode === 'live' ? ((now - (seg.timestamp || 0)) > 5000) : true;
                         const showAsRaw = viewMode === 'live' ? (!isFinal && !isTimeOut && !isFallback) : false;
 
+                        // Hide raw STT output if hideRaw setting is enabled
+                        if (hideRaw && showAsRaw) return null;
+
                         return (
-                            <div key={id} className={`transition-all duration-500 flex items-start group ${!showAsRaw ? 'opacity-100' : 'opacity-60'}`}>
-                                {isAudioMode && seg.seq && (
-                                    <button
-                                        onClick={() => setCurrentPlayingId(id)}
-                                        className={`mr-3 mt-1.5 text-[10px] font-mono transition-all shrink-0 ${currentPlayingId === id ? 'text-blue-500 font-bold scale-110' : 'text-gray-500 opacity-30 group-hover:opacity-100 hover:text-blue-400'}`}
-                                    >
-                                        #{seg.seq}
-                                    </button>
-                                )}
+                            <div key={id} className={`segment-enter transition-all duration-500 flex items-start ${!showAsRaw ? 'opacity-100' : 'opacity-70'}`}>
                                 <div className="flex-1">
                                     <TextItem
                                         id={id}
@@ -614,35 +714,24 @@ const audioRef = React.useRef<HTMLAudioElement | null>(null);
                             </div>
                         );
                     })}
+
                     <div ref={messagesEndRef} className="h-32"></div>
                 </div>
             </div>
 
-            {/* Audio Player Footer */}
-            {isAudioMode && (
-                <div className={`fixed bottom-0 inset-x-0 p-4 border-t shadow-lg z-50 flex justify-between items-center transition-colors backdrop-blur-md ${isDarkMode ? 'bg-gray-900/90 border-gray-800 text-white' : 'bg-white/90 border-gray-200 text-black'}`}>
-                    <div className="flex items-center gap-4">
-                        <div className="text-sm font-mono w-16 text-gray-500">
-                            {currentPlayingId && segmentsMap[currentPlayingId]?.seq ? `#${segmentsMap[currentPlayingId].seq}` : 'Ready'}
-                        </div>
-                        <button onClick={togglePlay} className="p-3 rounded-full bg-blue-600 hover:bg-blue-500 text-white shadow-lg transition-transform hover:scale-105 active:scale-95 flex items-center justify-center w-12 h-12">
-                            {isPlaying ? (
-                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" /></svg>
-                            ) : (
-                                <svg className="w-5 h-5 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                            )}
-                        </button>
-                        <button onClick={handleSpeedChange} className={`text-xs font-bold px-3 py-1.5 rounded transition-colors ${isDarkMode ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-100 hover:bg-gray-200'}`}>
-                            x{playbackRate.toFixed(1)}
-                        </button>
-                    </div>
-                    <div className="text-xs text-blue-500 font-bold animate-pulse">
-                        {isPlaying ? 'PLAYING' : 'PAUSED'}
-                    </div>
-                </div>
-            )}
         </div>
     );
 };
+
+// Re-export type for SubtitleMode
+type SegmentMap = Record<string, {
+    original?: string;
+    refined?: string;
+    status?: string;
+    sessionId?: string;
+    timestamp?: number;
+    mergedIds?: string[];
+    [key: string]: string | number | string[] | undefined;
+}>;
 
 export default AudienceView;

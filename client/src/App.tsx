@@ -7,8 +7,8 @@ import Login from './components/Login';
 import AdminLanding from './components/AdminLanding';
 import AdminDashboard from './components/AdminDashboard';
 import Landing from './components/Landing';
+import ConferenceDetail from './components/ConferenceDetail';
 import AudienceView from './components/AudienceView';
-
 import OverlayView from './components/OverlayView';
 
 const RequireAuth = ({ children }: { children: React.ReactNode }) => {
@@ -35,12 +35,11 @@ function App() {
         {/* Public: Root Landing */}
         <Route path="/" element={<Landing />} />
 
+        {/* Public: Conference Detail */}
+        <Route path="/conference/:conferenceId" element={<ConferenceDetail />} />
+
         {/* Public: Audience View (Direct Access like /hanwha) */}
         <Route path="/:projectId" element={<AudienceView />} />
-        
-        {/* Legacy Support */}
-        <Route path="/p/:projectId" element={<AudienceView />} />
-        
         {/* Public: Overlay View (For OBS) */}
         <Route path="/overlay/:projectId" element={<OverlayView />} />
         <Route path="/overlay/:projectId/:lang" element={<OverlayView />} />

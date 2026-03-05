@@ -6,14 +6,14 @@ import { getFunctions } from "firebase/functions";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyAc52CFyXU3BxI-yrORBb5asxsH5EEFnnU",
-  authDomain: "translation-comm.firebaseapp.com",
-  projectId: "translation-comm",
-  storageBucket: "translation-comm.firebasestorage.app",
-  messagingSenderId: "485369200558",
-  appId: "1:485369200558:web:1950dea22543d266b2923f",
-  measurementId: "G-BJS1NMLHC4",
-  databaseURL: "https://translation-comm-default-rtdb.firebaseio.com"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL
 };
 
 const app = initializeApp(firebaseConfig);

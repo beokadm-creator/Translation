@@ -2,32 +2,11 @@
 import * as functions from "firebase-functions";
 import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
-import serviceAccount from "../service-account.json";
-
 // Initialize Firebase Admin
-try {
-  // Check if running in Cloud Functions environment where config is auto-populated
-  if (process.env.FIREBASE_CONFIG) {
-       admin.initializeApp();
-       functions.logger.info("Initialized with FIREBASE_CONFIG");
-  } else {
-      // Local or fallback - service account import must be at top level
-      // This is handled by the top-level import below
-      functions.logger.info("Using service account from file");
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount as any),
-        databaseURL: "https://translation-comm-default-rtdb.firebaseio.com"
-      });
-      functions.logger.info("Initialized with service-account.json");
-  }
-} catch {
-  // Final Fallback: Just try default init (works in some emulators/cloud setups)
-  try {
-      admin.initializeApp();
-      functions.logger.info("Initialized with default (empty) config");
-  } catch(e) {
-      console.error("Failed to initialize Admin SDK:", e);
-  }
+// Cloud Functions auto-initialize correctly. 
+// For local emulators, no special config is needed if firebase-tools is logged in.
+if (!admin.apps.length) {
+  admin.initializeApp();
 }
 
 // Export functions
@@ -41,6 +20,6 @@ export { purgeSession } from "./purge";
 // https://firebase.google.com/docs/functions/typescript
 
 export const helloWorld = onRequest((request, response) => {
-  functions.logger.info("Hello logs!", {structuredData: true});
+  functions.logger.info("Hello logs!", { structuredData: true });
   response.send("Hello from Firebase!");
 });
