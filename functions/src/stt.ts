@@ -1,4 +1,4 @@
-// Version: v10.0 (Strict KO/EN-Only Purge)
+// Version: v11.0 (Stable - Medical/Dental Optimized)
 // KEY IMPROVEMENT:
 // 1. Every speech segment is written to DB IMMEDIATELY as 'translating'.
 // 2. Audience sees the raw text in ~2 seconds.
@@ -33,7 +33,7 @@ const PRO_URL = (key: string) =>
 
 // ── Hallucination 필터 ────────────────────────────────────────────────────────
 const HALLUCINATION_BLACKLIST = [
-    '자막제작', '자막 제작', 'Subtitles by', 'Provided by', 'Copyright', 'http://', 'https://', '.co.kr', 'www.',
+    '자막제작', '자막 제작', 'Subtitles by', 'Provided by', 'Copyright', 'http://', 'https://', '.co.kr',
     'Thank you for watching', 'Thanks for watching', 'Thank you for your attention',
     '시청해 주셔서 감사합니다', '시청해주셔서 감사합니다', '구독과 좋아요',
     'MBC 뉴스', 'SBS 뉴스', 'KBS 뉴스', 'YTN 뉴스', 'JTBC 뉴스', '연합뉴스',
@@ -42,23 +42,41 @@ const HALLUCINATION_BLACKLIST = [
     'sites.google.com', 'cst.eu.com', 'Amara.org', 'amara.org', 'disclaimer at'
 ]
 
+// 정적 URL 도메인만 필터 (www. 전체를 제거하면 정상 발화까지 삭제됨)
+const URL_FILTER_REGEX = /[^.?!;\n]*(?:sites\.google\.com|cst\.eu\.com|Amara\.org|amara\.org|youtube\.com|youtu\.be)[^.?!;\n]*(?:[.?!;\n])?/gi
+// 메타 언어 환각 필터 (유료광고, 면책조항 등)
+const META_FILTER_REGEX = /[^.?!;\n]*(?:Thank you for watching|Thanks for watching|시청해 주셔서 감사합니다|시청해주셔서 감사합니다|MBC 뉴스|SBS 뉴스|KBS 뉴스|YTN 뉴스|JTBC 뉴스|연합뉴스|유료광고|유료 광고|paid advertisement|disclaimer|면책 조항|면책조항)[^.?!;\n]*(?:[.?!;\n])?/gi
+
 const sanitize = (s: string): string => {
     let t = (s || "").toString()
     t = t.replace(/[`]{3,}/g, "").replace(/[`]/g, "")
     t = t.replace(/\bundefined\b/gi, "")
 
-    // 환각어 문장을 지워버리되 주변의 정상 문장은 살리도록 정규식 필터링
-    const filterRegex = /[^.?!;\n]*(?:sites\.google\.com|cst\.eu\.com|Amara\.org|amara\.org|youtube\.com|youtu\.be|Thank you for watching|Thanks for watching|시청해 주셔서 감사합니다|시청해주셔서 감사합니다|MBC 뉴스|SBS 뉴스|KBS 뉴스|YTN 뉴스|JTBC 뉴스|연합뉴스|유료광고|유료 광고|paid advertisement|disclaimer|면책 조항|면책조항|minutes)[^.?!;\n]*(?:[.?!;\n])?/gi;
-    t = t.replace(filterRegex, ' ')
+    t = t.replace(URL_FILTER_REGEX, ' ')
+    t = t.replace(META_FILTER_REGEX, ' ')
 
     return t.replace(/\s+/g, ' ').trim()
 }
 
-const isGarbage = (text: string, originalText?: string): boolean => {
-    if (!text) return false
-    if (/^(Implant, Surgery|임플란트, 보철)/i.test(text)) return true
+// 반복 루프 체크
+const hasRepetitionLoop = (text: string): boolean => {
+    const words = text.split(/[,. ]+/).filter(Boolean).slice(0, 40)
+    if (words.length < 8) return false
+    // 서로 다른 단어가 6개 이하이고 전체 길이가 80자 이상이면 반복으로 판단
+    const unique = new Set(words.map(w => w.toLowerCase()))
+    return unique.size <= 6 && text.length > 80
+}
 
-    // Drop if it's only punctuation/spaces
+const isGarbage = (text: string, _originalText?: string): boolean => {
+    if (!text) return false
+
+    if (hasRepetitionLoop(text)) return true
+
+    // 'minutes'와 같이 침묵 시 흔히 나오는 짧은 환각어만 필터
+    const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히)/i
+    if (filterGarbage.test(text.trim()) && text.length < 50) return true
+
+    // 성음만으로 된 건 버림
     const alphanumeric = text.replace(/[^a-zA-Z0-9가-힣ㄱ-ㅎㅏ-ㅣ]/g, '')
     if (alphanumeric.length < 2) return true
 
@@ -108,11 +126,12 @@ const translateWithFallback = async (
     const transFields = targets.map(l => `"${l}": "...${langNames[l] || l}..."`).join(', ')
 
     const prompt = [
-        `You are an expert live captioning AI for medical/dental conferences.`,
+        `You are a professional medical/dental translation AI.`,
+        `SESSION CONTEXT (CRITICAL): ${sessionContext || 'Live Medical/Dental Lecture'}`,
         `SOURCE: ${sourceLang} (${srcName})`,
         `INPUT: "${rawText}"`,
-        previousContext ? `CONTEXT: "${previousContext.split(' / ').slice(-1)[0]}"` : '',
-        `SESSION: ${sessionContext || 'Medical/Dental conference'}`,
+        previousContext ? `PREVIOUS: "${previousContext.split(' / ').slice(-1)[0]}"` : '',
+        `TASK: Refine/Fix the input in ${srcName} (especially technical terminology like Implant, Sinus, Bone Graft, etc.) and translate it accurately.`,
         ``,
         `TASKS:`,
         `1. REFINE: Fix errors in ${srcName}. Correct dental terms. Keep ${srcName} only.`,
@@ -192,8 +211,8 @@ const getOpenAI = (): OpenAI => {
     return _openai
 }
 
-const DENTAL_PROMPT_KO = "치과 학술대회 강의. 임플란트, 상악동, 골이식, 픽스처, 어버트먼트, 크라운, 보철. 발화 내용만 정확히 받아쓰세요."
-const DENTAL_PROMPT_EN = "Medical/dental academic conference lecture. Implant, Sinus, Bone Graft, Fixture, Abutment, Crown. Transcribe exactly what the speaker says."
+const DENTAL_PROMPT_KO = "임플란트, 상악동, 골이식, 픽스처, 어버트먼트, 크라운, 보철"
+const DENTAL_PROMPT_EN = "Implant, Sinus, Bone Graft, Fixture, Abutment, Crown"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. HTTP Trigger: Immediate Display + Progressive Buffering
@@ -201,7 +220,7 @@ const DENTAL_PROMPT_EN = "Medical/dental academic conference lecture. Implant, S
 export const processAudio = functions
     .runWith({ timeoutSeconds: 120, memory: "1GB" })
     .https.onRequest(async (req, res) => {
-        const versionTag = "v10.0_purge"
+        const versionTag = "v11.0_stable"
 
         // CORS
         const origin = req.headers.origin as string
@@ -241,7 +260,7 @@ export const processAudio = functions
             let sessionContext = ""
             let previousContext = ""
             let minLength = 30
-            let timeoutMs = 2000
+            let timeoutMs = 5000
             let sentenceEnd = true
 
             // 설정 로드
@@ -369,7 +388,7 @@ export const processAudio = functions
         }
     })
 
-// ── Legacy Triggers (Disabled for v10.0) ─────────────────────────────────────
+// ── Legacy Triggers (Disabled for v11.0) ─────────────────────────────────────
 export const onRefineRequest = functions.database.ref("projects/{projectId}/stream/{dataId}").onCreate(() => null)
 
 // ── Remaster ─────────────────────────────────────────────────────────────────
@@ -393,5 +412,5 @@ const runRemasterLogic = async (targetPid?: string) => {
 export const verifyGeminiPipeline = functions.https.onRequest(async (req, res) => {
     res.set("Access-Control-Allow-Origin", "*")
     const result = await translateWithFallback("Testing terminal connectivity.", "en", "", "")
-    res.json({ success: true, version: "v10.0", result })
+    res.json({ success: true, version: "v11.0", result })
 })

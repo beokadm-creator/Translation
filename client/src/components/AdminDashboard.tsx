@@ -64,7 +64,7 @@ const AdminDashboard: React.FC = () => {
         timeoutMs: 6000,
         sentenceEnd: true,
         vadMaxCutMs: 15000,
-        chunkInterval: 2000,
+        chunkInterval: 10000, // 10s for better Whisper context
         // Record Mode
         recordMode: 'chunk',
         // Display
