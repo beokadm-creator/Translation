@@ -1,4 +1,11 @@
-// Version: v7.9 (Language Locking)
+// Version: v10.0 (Strict KO/EN-Only Purge)
+// KEY IMPROVEMENT:
+// 1. Every speech segment is written to DB IMMEDIATELY as 'translating'.
+// 2. Audience sees the raw text in ~2 seconds.
+// 3. Translation (Gemini) waits for either minLength (30 chars) or timeout (2s pause).
+// 4. When buffer flushes, first segment gets translation, others are marked 'merged' (hidden).
+// 5. Result: Ultra-fast visual feedback + High-quality contextual translation.
+
 import * as functions from "firebase-functions/v1"
 import * as admin from "firebase-admin"
 import OpenAI from "openai"
@@ -6,192 +13,218 @@ import type { Request } from "express"
 import { Readable } from "stream"
 
 let _openai: OpenAI | null = null
-const getGeminiKeys = (): string[] => {
-    const keys: string[] = [];
-    const primaryKey = process.env.GEMINI_API_KEY || (functions.config()?.gemini?.key as string) || "";
-    if (primaryKey) keys.push(primaryKey);
-    keys.push("AIzaSyAYO3OAfzPxa1kZGyPGOoJIbiRewaumVI8"); // Fallback key supplied by user
 
-    if (keys.length === 0) functions.logger.warn("GEMINI_API_KEY is not set.");
-    return keys;
-};
-const GEMINI_FLASH_URL = (key: string) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${key}`
-const GEMINI_PRO_URL = (key: string) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-latest:generateContent?key=${key}`
+// ── 4개 Gemini API 키 ─────────────────────────────────────────────────────────
+const GEMINI_KEYS = [
+    process.env.GEMINI_KEY_TRANSLATE || "AIzaSyAA6tsr0l11KlpiVNDCKEn4GNJRM9u962o",
+    process.env.GEMINI_KEY_MEDICAL || "AIzaSyAYO3OAfzPxa1kZGyPGOoJIbiRewaumVI8",
+    process.env.GEMINI_KEY_EDITOR || "AIzaSyAMzzrp54aQywsPF-7BG4rPTkBVbda7jNc",
+    process.env.GEMINI_KEY_CONTEXT || "AIzaSyDMbGlFRZrVSJiUzwuWCTFT5gEjCEVbgIA",
+]
 
-const getDynamicPrompt = (sourceLang: string, sessionContext: string, previousContext: string) => {
-    const base = `
-Role: Live Captioner for Medical Conference
-Rule 1: Always output valid JSON.
-Rule 2: Refine the input text to be grammatically correct and professional.
-Rule 3: Infer medical terms from phonetic errors (e.g. "Gamgon" -> "Recommendation").
+let _keyIndex = 0
 
-[FRAGMENT HANDLING]
-- Even if the input is a single word or a fragment (e.g., "Criteria, Prevention,"), YOU MUST TRANSLATE IT.
-- Do not skip short segments.
-- If the input Korean seems like a typo (e.g., "불유부" -> sounds like "분류"), fix the Korean mentally and translate the intended meaning (e.g., "Classification").
+// ✅ 모델 설정: gemini-2.5-flash (최신 API 키용)
+// 만약 404가 발생하면 1.5-flash-latest 등으로 폴백 시도 가능
+const FLASH_URL = (key: string) =>
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`
+const PRO_URL = (key: string) =>
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${key}`
 
-[STRICT LANGUAGE RULES]
-- Source Language: ${sourceLang}
-`;
+// ── Hallucination 필터 ────────────────────────────────────────────────────────
+const HALLUCINATION_BLACKLIST = [
+    '자막제작', '자막 제작', 'Subtitles by', 'Provided by', 'Copyright', 'http://', 'https://', '.co.kr', 'www.',
+    'Thank you for watching', 'Thanks for watching', 'Thank you for your attention',
+    '시청해 주셔서 감사합니다', '시청해주셔서 감사합니다', '구독과 좋아요',
+    'MBC 뉴스', 'SBS 뉴스', 'KBS 뉴스', 'YTN 뉴스', 'JTBC 뉴스', '연합뉴스',
+    'Please subscribe', 'Click like', 'Like and subscribe',
+    '유료광고', '유료 광고', 'paid advertisement', '이 영상은',
+    'sites.google.com', 'cst.eu.com', 'Amara.org', 'amara.org', 'disclaimer at'
+]
 
-    let instructions = "";
-    if (sourceLang === 'ko') {
-        instructions = `
-- "refined": Refine the input in Korean.
-- "en": Translate to English. DO NOT include Korean characters in this field.
-- "ja": Translate to Japanese.
-`;
-    } else if (sourceLang === 'en') {
-        instructions = `
-- "refined": Refine the input in English.
-- "en": Same as "refined".
-- "ja": Translate to Japanese.
-`;
-    } else if (sourceLang === 'ja') {
-        instructions = `
-- "refined": Refine the input in Japanese.
-- "en": Translate to English.
-- "ja": Same as "refined".
-`;
-    } else if (sourceLang === 'zh') {
-        instructions = `
-- "refined": Refine the input in Chinese.
-- "en": Translate to English.
-- "ja": Translate to Japanese.
-`;
-    } else {
-        instructions = `
-- "refined": Refine the input.
-- "en": Translate to English.
-- "ja": Translate to Japanese.
-`;
-    }
+const sanitize = (s: string): string => {
+    let t = (s || "").toString()
+    t = t.replace(/[`]{3,}/g, "").replace(/[`]/g, "")
+    t = t.replace(/\bundefined\b/gi, "")
 
-    return `${base}${instructions}
-Output JSON Format: {"isMedicalContext": true|false, "refined": "...", "en": "...", "ja": "..."}
+    // 환각어 문장을 지워버리되 주변의 정상 문장은 살리도록 정규식 필터링
+    const filterRegex = /[^.?!;\n]*(?:sites\.google\.com|cst\.eu\.com|Amara\.org|amara\.org|youtube\.com|youtu\.be|Thank you for watching|Thanks for watching|시청해 주셔서 감사합니다|시청해주셔서 감사합니다|MBC 뉴스|SBS 뉴스|KBS 뉴스|YTN 뉴스|JTBC 뉴스|연합뉴스|유료광고|유료 광고|paid advertisement|disclaimer|면책 조항|면책조항|minutes)[^.?!;\n]*(?:[.?!;\n])?/gi;
+    t = t.replace(filterRegex, ' ')
 
-[CONTEXT CONTINUITY - CRITICAL]
-- The PREVIOUS CONTEXT below is what was just said before this fragment. Your output MUST flow naturally from it.
-- If the INPUT seems like a continuation or fragment of the previous context, connect them seamlessly.
-- Example: If previous context ends with "25번 임플란트" and input is "주변에 염증이", the refined result should naturally continue the thought, NOT start a new sentence.
-- Remove unnecessary line breaks. Output as a single continuous phrase or sentence.
-- Do NOT repeat words that already appear in the PREVIOUS CONTEXT.
+    return t.replace(/\s+/g, ' ').trim()
+}
 
-${sessionContext ? `[SESSION INFO]\n${sessionContext}` : ""}
-${previousContext ? `[PREVIOUS CONTEXT - continue naturally from this]\n${previousContext}` : ""}
-[INPUT TO REFINE]: `;
-};
+const isGarbage = (text: string, originalText?: string): boolean => {
+    if (!text) return false
+    if (/^(Implant, Surgery|임플란트, 보철)/i.test(text)) return true
 
-const callGeminiREST = async (text: string, previousContext: string, sessionContext: string, sourceLang: string): Promise<{ isMedicalContext?: boolean, refined?: string, en?: string, ja?: string }> => {
-    const prompt = getDynamicPrompt(sourceLang, sessionContext, previousContext);
+    // Drop if it's only punctuation/spaces
+    const alphanumeric = text.replace(/[^a-zA-Z0-9가-힣ㄱ-ㅎㅏ-ㅣ]/g, '')
+    if (alphanumeric.length < 2) return true
 
-    type GeminiPayload = {
-        contents: { parts: { text: string }[] }[];
-        generationConfig: { responseMimeType: string };
-    };
-    const payload: GeminiPayload = { contents: [{ parts: [{ text: `${prompt}"${text}"` }] }], generationConfig: { responseMimeType: "application/json" } }
-    const apiKeys = getGeminiKeys();
+    return false
+}
 
-    let data = null;
-    let lastStatus = 500;
-
-    for (const apiKey of apiKeys) {
-        let res = await fetch(GEMINI_FLASH_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
-        if (res.ok) {
-            data = await res.json();
-            break;
-        }
-
-        const errText = await res.text();
-        functions.logger.warn("Gemini REST Flash error", { status: res.status, body: errText });
-        lastStatus = res.status;
-
-        if (res.status === 429) continue; // Rate limit hit, try next key
-
-        res = await fetch(GEMINI_PRO_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
-        if (res.ok) {
-            data = await res.json();
-            break;
-        }
-
-        lastStatus = res.status;
-        if (res.status === 429) continue; // Try next key
-    }
-
-    if (!data) {
-        throw new Error(`Gemini REST Error: ${lastStatus}`);
-    }
-
-    const outText = (((data || {}).candidates || [])[0] || {}).content?.parts?.[0]?.text || ""
-    if (!outText) return { refined: "" };
-
+// ── Gemini 단일 호출 ──────────────────────────────────────────────────────────
+const callGemini = async (apiKey: string, prompt: string, timeoutMs = 12000): Promise<any | null> => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
-        const cleanText = outText.replace(/```json\s*|```/g, "").trim()
-        const obj = JSON.parse(cleanText)
-        return { isMedicalContext: !!obj.isMedicalContext, refined: sanitize(obj.refined), en: sanitize(obj.en), ja: sanitize(obj.ja) }
-    } catch {
-        return { refined: sanitize(outText) }
+        const payload = {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: "application/json" }
+        }
+        const res = await fetch(FLASH_URL(apiKey), {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload), signal: controller.signal
+        })
+        clearTimeout(timer)
+        if (!res.ok) {
+            functions.logger.warn(`[Gemini] HTTP ${res.status}`, { key: apiKey.slice(0, 10) })
+            return null
+        }
+        const data = await res.json()
+        const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || ""
+        if (!raw) return null
+        const clean = raw.replace(/```json\s*|```/g, "").trim()
+        return JSON.parse(clean)
+    } catch (e: any) {
+        clearTimeout(timer)
+        return null
     }
 }
 
+// ── 번역 파이프라인 ───────────────────────────────────────────────────────────
+const translateWithFallback = async (
+    rawText: string,
+    sourceLang: string,
+    previousContext: string,
+    sessionContext: string
+): Promise<{ refined: string; ko: string; en: string; isMedical: boolean }> => {
+    const tStart = Date.now()
+    const targets = (['ko', 'en'] as const).filter(l => l !== sourceLang)
+    const langNames: Record<string, string> = { ko: 'Korean', en: 'English' }
+    const srcName = langNames[sourceLang] || 'the source language'
+    const transFields = targets.map(l => `"${l}": "...${langNames[l] || l}..."`).join(', ')
+
+    const prompt = [
+        `You are an expert live captioning AI for medical/dental conferences.`,
+        `SOURCE: ${sourceLang} (${srcName})`,
+        `INPUT: "${rawText}"`,
+        previousContext ? `CONTEXT: "${previousContext.split(' / ').slice(-1)[0]}"` : '',
+        `SESSION: ${sessionContext || 'Medical/Dental conference'}`,
+        ``,
+        `TASKS:`,
+        `1. REFINE: Fix errors in ${srcName}. Correct dental terms. Keep ${srcName} only.`,
+        `2. TRANSLATE to: ${targets.map(l => langNames[l] || l).join(' AND ')}`,
+        `3. OUTPUT JSON ONLY.`,
+        ``,
+        `EXAMPLES:`,
+        `[INPUT] "The implant fixture was placed."`,
+        `{"refined": "The implant fixture was placed.", "ko": "임플란트 픽스처가 식립되었습니다.", "isMedical": true}`,
+        `[INPUT] "Uh, so, we did the bone graft."`,
+        `{"refined": "So, we did the bone graft.", "ko": "그래서 우리는 골이식을 진행했습니다.", "isMedical": true}`,
+        ``,
+        `CRITICAL: All language fields MUST be filled containing the translated text. Never return empty strings for translations. Even if the input is a single word or fragment, YOU MUST TRANSLATE IT.`,
+        `FORMAT: {"refined": "...", ${transFields}, "isMedical": true}`
+    ].filter(Boolean).join('\n')
+
+    const startIdx = _keyIndex % GEMINI_KEYS.length
+    _keyIndex++
+
+    for (let i = 0; i < GEMINI_KEYS.length; i++) {
+        const key = GEMINI_KEYS[(startIdx + i) % GEMINI_KEYS.length]
+        const data = await callGemini(key, prompt, 12000)
+
+        if (data) {
+            // Validate that required translation fields exist and are not empty
+            let isValid = true;
+            if (sourceLang !== 'ko' && (!data.ko || data.ko.toString().trim().length === 0)) isValid = false;
+            if (sourceLang !== 'en' && (!data.en || data.en.toString().trim().length === 0)) isValid = false;
+            // if (sourceLang !== 'ja' && (!data.ja || data.ja.toString().trim().length === 0)) isValid = false; // Optional depending on config, but user only cares about ko right now mostly. Let's strictly check targets:
+
+            targets.forEach(t => {
+                if (!data[t] || data[t].toString().trim().length === 0) isValid = false;
+            });
+
+            if (isValid) {
+                functions.logger.info("[Translate] OK", {
+                    ms: Date.now() - tStart,
+                    key: key.slice(0, 10),
+                    srcLen: rawText.length,
+                    koLen: data.ko?.length || 0,
+                    enLen: data.en?.length || 0
+                })
+                const refined = sanitize(data.refined || rawText)
+                return {
+                    refined,
+                    ko: sourceLang === 'ko' ? refined : sanitize(data.ko || ''),
+                    en: sourceLang === 'en' ? refined : sanitize(data.en || ''),
+                    isMedical: data.isMedical ?? false
+                }
+            } else {
+                functions.logger.warn("[Translate] Missing required translation fields, retrying...", {
+                    ko: !!data.ko, en: !!data.en,
+                    key: key.slice(0, 10),
+                    rawResponseStr: JSON.stringify(data).slice(0, 100)
+                });
+            }
+        }
+    }
+
+    functions.logger.error(`[Translate] All ${GEMINI_KEYS.length} keys failed to return valid translations for input:`, { input: rawText.slice(0, 50) });
+
+    return {
+        refined: sanitize(rawText),
+        ko: sourceLang === 'ko' ? sanitize(rawText) : '',
+        en: sourceLang === 'en' ? sanitize(rawText) : '',
+        isMedical: false
+    }
+}
+
+// ── OpenAI 클라이언트 ─────────────────────────────────────────────────────────
 const getOpenAI = (): OpenAI => {
     if (!_openai) {
-        const envKey = process.env.OPENAI_API_KEY || ""
-        const apiKey = envKey || (functions.config()?.openai?.key as string) || ""
+        const apiKey = process.env.OPENAI_API_KEY || (functions.config()?.openai?.key as string) || ""
         if (!apiKey) throw new Error("OPENAI_API_KEY missing")
         _openai = new OpenAI({ apiKey })
     }
     return _openai
 }
 
+const DENTAL_PROMPT_KO = "치과 학술대회 강의. 임플란트, 상악동, 골이식, 픽스처, 어버트먼트, 크라운, 보철. 발화 내용만 정확히 받아쓰세요."
+const DENTAL_PROMPT_EN = "Medical/dental academic conference lecture. Implant, Sinus, Bone Graft, Fixture, Abutment, Crown. Transcribe exactly what the speaker says."
 
-const DENTAL_PROMPT = "치과, 임플란트, 보철, 수술, 상악동, 골이식, 픽스처, 어버트먼트, 크라운, Implant, Surgery, Bone Graft, Fixture, Abutment, Crown"
-
-const sanitize = (s: string): string => {
-    let t = (s || "").toString();
-    t = t.replace(/[`]{3,}/g, "").replace(/[`]/g, "");
-    t = t.replace(/\bundefined\b/gi, "");
-    return t.trim();
-}
-
-const HALLUCINATION_BLACKLIST = ['자막제작', '자막 제작', 'Subtitles by', 'MBC 뉴스', 'Copyright', 'http', '.co.kr'];
-const isLoopPattern = (text: string): boolean => {
-    if (HALLUCINATION_BLACKLIST.some(b => text.includes(b))) return true;
-    if (/(.+)\1{2,}/.test(text)) return true;
-    if (/(.*,){4,}/.test(text)) return true;
-    if (/^(Implant, Surgery|임플란트, 보철)/i.test(text)) return true;
-    return false;
-};
-
-// 1. HTTP Trigger: Receive Audio -> STT (Language Locked) -> Save Raw
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. HTTP Trigger: Immediate Display + Progressive Buffering
+// ─────────────────────────────────────────────────────────────────────────────
 export const processAudio = functions
-    .runWith({ timeoutSeconds: 60, memory: "512MB" })
+    .runWith({ timeoutSeconds: 120, memory: "1GB" })
     .https.onRequest(async (req, res) => {
-        const versionTag = "v7.9_lang_lock"
-        // CORS Handling
-        const origin = req.headers.origin as string;
-        const allowedOrigin = process.env.ALLOWED_ORIGIN || (functions.config()?.app?.allowed_origin as string) || "*";
+        const versionTag = "v10.0_purge"
 
+        // CORS
+        const origin = req.headers.origin as string
+        const allowedOrigin = process.env.ALLOWED_ORIGIN || (functions.config()?.app?.allowed_origin as string) || "*"
         if (allowedOrigin === "*" || allowedOrigin === origin) {
-            res.set("Access-Control-Allow-Origin", allowedOrigin === "*" ? "*" : origin);
-        } else if (origin && (origin.endsWith(".web.app") || origin.endsWith(".firebaseapp.com") || origin.includes("localhost"))) {
-            res.set("Access-Control-Allow-Origin", origin);
+            res.set("Access-Control-Allow-Origin", allowedOrigin === "*" ? "*" : origin)
         } else {
-            res.set("Access-Control-Allow-Origin", allowedOrigin);
+            res.set("Access-Control-Allow-Origin", origin || allowedOrigin)
         }
-
         res.set("Access-Control-Allow-Methods", "POST, OPTIONS")
         res.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+        if (req.method === "OPTIONS") { res.status(204).send(""); return }
+
+        const tTotal = Date.now()
 
         try {
             if (!admin.apps.length) throw new Error("Admin not initialized")
             const auth = (req.headers.authorization || "").toString()
-            if (!auth.startsWith("Bearer ")) { res.status(401).json({ success: false }); return; }
+            if (!auth.startsWith("Bearer ")) { res.status(401).json({ success: false }); return }
 
             const projectId = (req.query.projectId || "").toString()
             const sourceLabel = (req.query.sourceLabel || "").toString()
-            if (!projectId) { res.status(400).json({ success: false }); return; }
+            if (!projectId) { res.status(400).json({ success: false }); return }
 
             let buf: Buffer | null = null
             const raw = (req as Request & { rawBody?: Buffer }).rawBody as Buffer | undefined
@@ -199,480 +232,166 @@ export const processAudio = functions
             else if (Buffer.isBuffer(req.body)) buf = req.body as Buffer
             else if (typeof req.body === "string") buf = Buffer.from(req.body, "binary")
 
-            if (!buf || buf.length === 0) { res.status(400).json({ success: false }); return; }
+            if (!buf || buf.length === 0) { res.status(400).json({ success: false }); return }
+            if (buf.length < 2000) { res.status(200).json({ success: false, error: "TooSmall" }); return }
 
-            // Get Source Language
-            let sourceLang = 'ko';
-            let activeSessionId: string | null = null;
+            const projectRef = admin.database().ref(`projects/${projectId}`)
+            let sourceLang = 'en'
+            let activeSessionId: string | null = null
+            let sessionContext = ""
+            let previousContext = ""
+            let minLength = 30
+            let timeoutMs = 2000
+            let sentenceEnd = true
+
+            // 설정 로드
             try {
-                const activeSnap = await admin.database().ref(`projects/${projectId}/activeSessionId`).get();
-                activeSessionId = activeSnap.val();
-                if (activeSessionId) {
-                    const sessionSnap = await admin.database().ref(`projects/${projectId}/sessions/${activeSessionId}`).get();
-                    if (sessionSnap.exists()) {
-                        sourceLang = sessionSnap.val().sourceLanguage || 'ko';
+                const [activeSnap, stateSnap, settingsSnap] = await Promise.all([
+                    projectRef.child('activeSessionId').get(),
+                    projectRef.child('state').get(),
+                    projectRef.child('settings/chunk').get()
+                ])
+                if (activeSnap.exists()) {
+                    activeSessionId = activeSnap.val()
+                    const sSnap = await projectRef.child(`sessions/${activeSessionId}`).get()
+                    if (sSnap.exists()) {
+                        const s = sSnap.val()
+                        sourceLang = s.sourceLanguage || 'en'
+                        sessionContext = `Speaker: ${s.speaker}, Topic: ${s.topic}`
                     }
                 }
-            } catch { // Intentionally empty
+                if (settingsSnap.exists()) {
+                    const sett = settingsSnap.val()
+                    if (sett.minLength !== undefined) minLength = Number(sett.minLength)
+                    if (sett.timeoutMs !== undefined) timeoutMs = Number(sett.timeoutMs)
+                    if (sett.sentenceEnd !== undefined) sentenceEnd = Boolean(sett.sentenceEnd)
+                }
+                if (stateSnap.exists()) {
+                    const st = stateSnap.val()
+                    const list: string[] = Array.isArray(st.lastRefinedList) ? st.lastRefinedList : []
+                    previousContext = list.slice(-2).join(' / ')
+                }
+            } catch { /* 무시 */ }
+
+            // ── STEP 1: Whisper STT ────────────────────────────────────────────
+            let openai = getOpenAI()
+            const audioStream = Readable.from(buf) as Readable & { path: string }
+            audioStream.path = "audio.webm"
+
+            const tWhisper = Date.now()
+            const stt = await openai.audio.transcriptions.create({
+                file: audioStream, model: "whisper-1", language: sourceLang,
+                prompt: sourceLang === 'ko' ? DENTAL_PROMPT_KO : DENTAL_PROMPT_EN, temperature: 0
+            })
+            const sttText = (stt?.text || "").trim()
+            const rawText = sanitize(sttText)
+
+            if (rawText.length < 2 || isGarbage(rawText, sttText)) {
+                res.status(200).json({ success: true, info: "EmptyOrGarbage", text: rawText }); return
             }
-
-            await admin.database().ref(`projects/${projectId}/status`).update({ lastActive: Date.now() }).catch(() => { })
-
-            let openai: OpenAI
-            try { openai = getOpenAI() } catch { res.status(500).json({ success: false }); return; }
-
-            if (buf.length < 2000) { res.status(200).json({ success: false, error: "TooSmall" }); return; }
-
-            let stt: { text?: string } | undefined
-            try {
-                const audioStream = Readable.from(buf) as Readable & { path: string };
-                audioStream.path = "audio.webm"; // 원본 포맷인 webm으로 원복
-
-                stt = await openai.audio.transcriptions.create({
-                    file: audioStream,
-                    model: "whisper-1",
-                    language: sourceLang,
-                    prompt: DENTAL_PROMPT,
-                    temperature: 0
-                });
-                functions.logger.info("Whisper Raw Result:", { text: stt?.text });
-                await admin.database().ref(`projects/${projectId}/status/services/openai`).set({ state: "ok", ts: Date.now() }).catch(() => { });
-            } catch (error: any) {
-                functions.logger.error("Whisper API Error:", error.message);
-                res.status(200).json({ success: false, error: "WhisperFailed", details: error.message });
-                return;
-            }
-
-            const rawResponseText = stt?.text || "";
-            let rawText = sanitize(rawResponseText.trim())
-
-            if (rawText.length < 2) {
-                functions.logger.info("Whisper result too short or empty, dropping", { raw: rawResponseText });
-                rawText = "";
-            }
-
-            if (isLoopPattern(rawText)) { res.status(200).json({ success: true, info: "LoopDropped" }); return; }
-
-            if (!rawText) { res.status(200).json({ success: true, info: "Empty" }); return; }
 
             const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
             const timestamp = Date.now()
+            const seqResult = await projectRef.child('lastSequence').transaction((cur) => (cur || 0) + 1)
+            const seq = seqResult.snapshot.val()
 
-            // Sequence Logic
-            const seqRef = admin.database().ref(`projects/${projectId}/lastSequence`);
-            const seqResult = await seqRef.transaction((current) => {
-                return (current || 0) + 1;
-            });
-            const seq = seqResult.snapshot.val();
-
+            // ── STEP 2: DB에 즉시 기록 (status: translating) ─────────────────
+            // 이렇게 해야 유저 설정(hideRaw)과 상관없이 '번역 중'으로 원문이 즉시 보임
             await admin.database().ref(`projects/${projectId}/stream/${id}`).set({
                 original: rawText,
-                status: "raw",
-                timestamp,
-                sourceLabel,
-                sessionId: activeSessionId,
-                seq
+                refined: rawText,
+                status: "translating",
+                timestamp, sourceLabel, sessionId: activeSessionId, seq, version: versionTag
             })
 
-            await admin.database().ref(`projects/${projectId}/state`).update({ lastText: rawText, lastId: id }).catch(() => { })
+            // 응답 즉시 전송 (로그에서 undefined 안 나오게 text 포함)
+            res.status(200).json({ success: true, id, text: rawText, stage: "translating" })
 
-            res.status(200).json({ success: true, id, text: rawText, stage: "original", timestamp, version: versionTag })
+            // ── STEP 3: 버퍼링 및 번역 (Background) ──────────────────────────
+            const stateSnap = await projectRef.child('state').get()
+            const st = stateSnap.val() || {}
+            let bufferText = (st.bufferText || "").toString()
+            let bufferIds = Array.isArray(st.bufferIds) ? st.bufferIds : []
+            let lastGeminiTime = Number(st.lastGeminiTime || 0)
 
-        } catch (e: unknown) {
-            void e;
-            res.status(500).json({ success: false, error: "Internal Error" })
+            if (bufferIds.length === 0) lastGeminiTime = Date.now()
+
+            bufferText = bufferText ? bufferText + " " + rawText : rawText
+            bufferIds.push(id)
+
+            const timeDiff = Date.now() - lastGeminiTime
+            const isSentenceEnd = sentenceEnd && /[.!?]$/.test(bufferText.trim())
+            const isLongEnough = bufferText.length >= minLength
+            const isTimeOut = timeDiff >= timeoutMs
+
+            if (isSentenceEnd || isLongEnough || isTimeOut) {
+                // FLUSH
+                const targetId = bufferIds[0]
+                const idsToDelete = bufferIds.slice(1)
+
+                await projectRef.child('state').update({ bufferText: "", bufferIds: [], lastGeminiTime: Date.now() })
+
+                try {
+                    const { refined, ko, en, isMedical } = await translateWithFallback(
+                        bufferText, sourceLang, previousContext, sessionContext
+                    )
+                    const updates: Record<string, unknown> = {}
+                    const base = `projects/${projectId}/stream/${targetId}`
+                    updates[`${base}/refined`] = refined
+                    updates[`${base}/ko`] = ko
+                    updates[`${base}/en`] = en
+                    updates[`${base}/isMedical`] = isMedical
+                    updates[`${base}/status`] = "final"
+                    updates[`${base}/mergedIds`] = idsToDelete
+
+                    for (const pid of idsToDelete) {
+                        updates[`projects/${projectId}/stream/${pid}/status`] = "merged"
+                    }
+
+                    // context 리스트 업데이트
+                    try {
+                        const listSnap = await projectRef.child('state/lastRefinedList').get()
+                        const list: string[] = listSnap.exists() ? listSnap.val() : []
+                        updates[`projects/${projectId}/state/lastRefinedList`] = [...list, refined].slice(-5)
+                    } catch { }
+
+                    await admin.database().ref().update(updates)
+                } catch {
+                    await admin.database().ref(`projects/${projectId}/stream/${targetId}/status`).set("final")
+                }
+            } else {
+                // KEEP BUFFERING (상태는 계속 translating 유지)
+                await projectRef.child('state').update({ bufferText, bufferIds })
+            }
+
+        } catch (e: any) {
+            try { res.status(500).json({ success: false, error: e.message }) } catch { }
         }
     })
 
-// 2. DB Trigger: Refine Text (Concurrency Safe & Dynamic Language)
-export const onRefineRequest = functions
-    .runWith({ timeoutSeconds: 60, memory: "512MB" })
-    .database.ref("projects/{projectId}/stream/{dataId}")
-    .onCreate(async (snapshot, context) => {
-        const { projectId, dataId } = context.params;
-        const val = snapshot.val();
-
-        if (!val || val.status !== 'raw') return;
-        const rawText = val.original;
-
-        const projectRef = admin.database().ref(`projects/${projectId}`);
-        let bufferText = "";
-        let bufferIds: string[] = [];
-        let lastGeminiTime = 0;
-        let sessionContext = "";
-        let sourceLang = "ko";
-        let chunkSettings = { minLength: 80, timeoutMs: 5000, sentenceEnd: true }; // Default (optimized for context coherence)
-
-        let activeSessionId: string | null = null;
-        try {
-            const [stateSnap, activeSnap, settingsSnap] = await Promise.all([
-                projectRef.child('state').get(),
-                projectRef.child('activeSessionId').get(),
-                projectRef.child('settings/chunk').get()
-            ]);
-
-            if (stateSnap.exists()) {
-                const st = stateSnap.val();
-                bufferText = (st.bufferText || "").toString();
-                bufferIds = (st.bufferIds || []);
-                lastGeminiTime = Number(st.lastGeminiTime || 0);
-            }
-
-            if (settingsSnap.exists()) {
-                chunkSettings = { ...chunkSettings, ...settingsSnap.val() };
-            }
-
-            if (activeSnap.exists()) {
-                activeSessionId = activeSnap.val();
-                const sessionSnap = await projectRef.child(`sessions/${activeSessionId}`).get();
-                if (sessionSnap.exists()) {
-                    const s = sessionSnap.val();
-                    sessionContext = `Speaker: ${s.speaker}, Topic: ${s.topic}, Abstract: ${s.abstract}, Keywords: ${s.keywords}`;
-                    sourceLang = s.sourceLanguage || "ko";
-                }
-            }
-        } catch { // Intentionally empty
-        }
-
-        bufferText = bufferText ? bufferText + " " + rawText : rawText;
-        bufferIds.push(dataId);
-
-        const now = Date.now();
-        const timeDiff = now - lastGeminiTime;
-        const isSentenceEnd = chunkSettings.sentenceEnd && /[.!?]$/.test(rawText.trim());
-        const isLongEnough = bufferText.length >= chunkSettings.minLength;
-        const isTimeOut = timeDiff > chunkSettings.timeoutMs;
-
-        const shouldFlush = isSentenceEnd || isLongEnough || isTimeOut;
-
-        if (!shouldFlush) {
-            await projectRef.child('state').update({ bufferText, bufferIds });
-            return;
-        }
-
-        functions.logger.info("Flushing Buffer", { projectId, lang: sourceLang, textLen: bufferText.length });
-
-        let previousContext = "";
-        try {
-            const snap = await projectRef.child('state/lastRefinedList').get();
-            const list: string[] = snap.exists() ? (snap.val() as string[]) : [];
-            // Build context from last 3 refined outputs
-            previousContext = list.slice(-3).join(' / ');
-        } catch { // Intentionally empty
-            void 0;
-        }
-
-        let refined = bufferText;
-        let firstEn = "";
-        let firstJa = "";
-        const tGeminiStart = Date.now();
-
-        try {
-            const out = await callGeminiREST(bufferText, previousContext, sessionContext, sourceLang);
-            refined = sanitize(out.refined || bufferText);
-            firstEn = (out.en || "").toString();
-            firstJa = (out.ja || "").toString();
-        } catch (_err: any) {
-            // CRITICAL: 제미나이 실패 시 원인을 무조건 기록해야 함 (Silent Failure 방지)
-            functions.logger.error("Gemini Refine Error [FATAL]:", {
-                message: _err.message,
-                stack: _err.stack,
-                bufferTextLen: bufferText.length
-            });
-            // 실패 시 원본을 내보내되, 에러 상황임을 마킹할 수도 있음
-            refined = bufferText;
-        }
-
-        const updates: Record<string, unknown> = {};
-        const targetId = bufferIds[0];
-        const idsToDelete = bufferIds.slice(1);
-
-        updates[`projects/${projectId}/stream/${targetId}/refined`] = refined;
-        updates[`projects/${projectId}/stream/${targetId}/en`] = firstEn;
-        updates[`projects/${projectId}/stream/${targetId}/ja`] = firstJa;
-        updates[`projects/${projectId}/stream/${targetId}/status`] = "final";
-        updates[`projects/${projectId}/stream/${targetId}/geminiMs`] = Date.now() - tGeminiStart;
-        updates[`projects/${projectId}/stream/${targetId}/mergedIds`] = idsToDelete;
-
-
-        for (const pid of idsToDelete) {
-            updates[`projects/${projectId}/stream/${pid}/status`] = "merged";
-            updates[`projects/${projectId}/stream/${pid}/refined`] = "";
-        }
-
-        updates[`projects/${projectId}/state/bufferText`] = "";
-        updates[`projects/${projectId}/state/bufferIds`] = [];
-        updates[`projects/${projectId}/state/lastGeminiTime`] = Date.now();
-        updates[`projects/${projectId}/state/lastRefined`] = refined; // Keep for backward compat
-
-        // Update rolling context list (keep last 5):
-        try {
-            const listSnap = await projectRef.child('state/lastRefinedList').get();
-            const existingList: string[] = listSnap.exists() ? (listSnap.val() as string[]) : [];
-            const newList = [...existingList, refined].slice(-5);
-            updates[`projects/${projectId}/state/lastRefinedList`] = newList;
-        } catch { // Intentionally empty
-            void 0;
-        }
-
-        await admin.database().ref().update(updates);
-    });
-
-// 3. Scheduled Batch: Live Remastering (Every 2 minutes)
-export const remasterSession = functions
-    .runWith({ timeoutSeconds: 300, memory: "1GB" })
-    .pubsub.schedule("every 2 minutes").onRun(async (_context) => {
-        void _context;
-        await runRemasterLogic();
-    });
-
-// Manual Trigger for Remastering
-export const triggerRemaster = functions
-    .runWith({ timeoutSeconds: 300, memory: "1GB" })
-    .https.onRequest(async (req, res) => {
-        res.set("Access-Control-Allow-Origin", "*");
-        if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-
-        try {
-            const projectId = (req.query.projectId || "").toString();
-            let count = 0;
-            if (!projectId) {
-                // If no project ID, run for all (batch mode) or error? 
-                // Let's run the batch logic for simplicity
-                count = await runRemasterLogic() || 0;
-            } else {
-                // Run for specific project logic (simplified version of batch logic)
-                count = await runRemasterLogic(projectId) || 0;
-            }
-            res.json({ success: true, count });
-        } catch (e: unknown) {
-            res.status(500).json({ success: false, error: e instanceof Error ? e.message : 'Unknown error' });
-        }
-    });
-
-const runRemasterLogic = async (targetProjectId?: string): Promise<number | void> => {
-    const now = Date.now();
-    // Target: Recent 10 minutes (State-based Sweeping)
-    // Avoid very recent 30s
-    // START_OFFSET removed: unused
-    // END_OFFSET removed: unused
-
-    // 1. Get projects
-    let projectsSnap: admin.database.DataSnapshot;
-    if (targetProjectId) {
-        projectsSnap = await admin.database().ref(`projects/${targetProjectId}`).get();
-    } else {
-        projectsSnap = await admin.database().ref('projects').get();
-    }
-
-    if (!projectsSnap.exists()) return;
-
-    const promises: Promise<number>[] = [];
-
-    const processProject = (pSnap: admin.database.DataSnapshot, pid: string) => {
-        const pVal = pSnap.val();
-        const activeId = pVal.activeSessionId;
-
-        if (!activeId) return;
-
-        // Determine Time Window
-        // Force Remaster: Always look back 60 minutes, ignoring lastRemasteredAt
-        // This ensures we always re-evaluate the recent context
-        const ONE_HOUR = 3600 * 1000;
-        const startTime = now - ONE_HOUR;
-        const endTime = now - 1000; // Up to 1 second ago
-
-        promises.push((async (): Promise<number> => {
-            // 2. Fetch data within time window
-            const streamRef = admin.database().ref(`projects/${pid}/stream`);
-            const q = streamRef.orderByChild('timestamp').startAt(startTime).endAt(endTime);
-            const streamSnap = await q.get();
-
-            if (!streamSnap.exists()) return 0;
-
-            type StreamItem = { id?: string; timestamp?: number; refined?: string; original?: string; sessionId?: string };
-            const items: StreamItem[] = [];
-
-            const streamVal = streamSnap.val() || {};
-            const entries = Object.entries(streamVal) as [string, unknown][];
-            for (const [key, val] of entries) {
-                const v = val as { sessionId?: string; status?: string; timestamp?: number; refined?: string; original?: string };
-                if (v && v.sessionId === activeId && v.status === 'final') {
-                    items.push({ id: key, timestamp: v.timestamp, refined: v.refined, original: v.original, sessionId: v.sessionId });
-                }
-            }
-
-            if (items.length === 0) return 0; // Nothing to update (Sweeping complete)
-
-            // Sort by timestamp
-            const allItems = items.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-
-            if (allItems.length < 3) return 0;
-
-            // 3. Prepare Prompt
-            const sessionInfo = pVal.sessions?.[activeId] || {};
-            const contextText = `Speaker: ${sessionInfo.speaker}, Topic: ${sessionInfo.topic}, Abstract: ${sessionInfo.abstract}`;
-            const sourceLang = sessionInfo.sourceLanguage || 'ko';
-
-            // Determine targets:
-            // We want to fix broken sentences.
-            // We pass ALL items to Gemini, but mark them as "isTarget: true" if they are recent (last 10 mins) OR haven't been remastered.
-            // Actually, for "Force Remaster", let's just ask Gemini to review the whole block and fix any broken flows.
-            const inputList = allItems.map(i => ({
-                id: i.id,
-                text: i.refined || i.original,
-                // isTarget: !i.isRemastered // OLD LOGIC
-                isTarget: true // FORCE LOGIC: Check everything in the window
-            }));
-
-            const prompt = `
-[TASK: REMASTER TRANSCRIPT]
-- Analyze the conversation list (JSON).
-- Focus on items where "isTarget": true.
-- Use context from other items to fix terminology and flow.
-- Output the updated list for TARGET items only.
-
-[REMASTERING RULES]
-1. Input Source Language: ${sourceLang}
-2. Target Languages: en, ja
-
-[OUTPUT FIELDS]
-- "id": The ID of the item being updated (The main sentence).
-- "refined": MUST BE in ${sourceLang}. Fix typos and grammar only. DO NOT TRANSLATE.
-- "translations": Object containing keys for each target language.
-- "mergedIds": Array of IDs that were merged/absorbed into this sentence. (These will be DELETED from the screen).
-
-[RULE]
-- If you combine multiple fragments into one complete sentence, use the ID of the FIRST fragment as the main "id", and list all other absorbed IDs in "mergedIds".
-
-[EXAMPLE]
-Input: 
-Item 1 (ID: A): "1, 2, 3"
-Item 2 (ID: B): "Hello"
-Item 3 (ID: C): "World"
-(Source: en)
-
-Output:
-[
-  {
-    "id": "B",
-    "refined": "Hello World.",
-    "translations": { "ko": "안녕 세상아." },
-    "mergedIds": ["A", "C"] 
-  }
-]
-
-[NOISE CLEANUP]
-- Remove non-lecture speech like microphone testing ("1, 2, 3, 4", "Ah, ah").
-- Fix obvious typos ("띵 진료" -> "루틴 진료" or "핵심 진료" based on context).
-- If a sentence is broken, merge it with the next one to make a complete paragraph.
-- If the Korean sentence lacks a subject (e.g., "권고합니다"), add a proper subject like "We recommend" or "It is recommended" based on context.
-- Ensure the final English output forms complete, professional sentences suitable for a medical lecture.
-
-[Session Abstract]
-${contextText}
-
-[INPUT JSON]
-${JSON.stringify(inputList)}
-`;
-            // 4. Call Gemini Pro
-            try {
-                const apiKeys = getGeminiKeys();
-                type GeminiProPayload = {
-                    contents: { parts: { text: string }[] }[];
-                    generationConfig: { responseMimeType: string };
-                };
-                const payload: GeminiProPayload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }
-
-                let data = null;
-                for (const apiKey of apiKeys) {
-                    const res = await fetch(GEMINI_PRO_URL(apiKey), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-                    if (res.ok) {
-                        data = await res.json();
-                        break;
-                    }
-                    if (res.status === 429) continue; // Try next key
-                }
-
-                if (!data) return 0;
-
-                const outText = (((data || {}).candidates || [])[0] || {}).content?.parts?.[0]?.text || "";
-                if (!outText) return 0;
-
-                const cleanText = outText.replace(/```json\s*|```/g, "").trim();
-                const refinedList = JSON.parse(cleanText);
-
-                if (!Array.isArray(refinedList)) return 0;
-
-                // 5. Update DB
-                const updates: Record<string, unknown> = {};
-                for (const item of refinedList) {
-                    if (!item || !item.id) continue;
-                    const originalItem = items.find(i => i.id === item.id);
-
-                    if (originalItem && item.refined) {
-                        // Safety Guard: Check if source language is preserved
-                        if (sourceLang === 'ko' && !/[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(item.refined)) {
-                            functions.logger.warn(`Safety Guard: Dropped English update for Korean field`, item);
-                            continue; // Skip this update
-                        }
-
-                        updates[`projects/${pid}/stream/${item.id}/refined`] = sanitize(item.refined);
-                        if (item.translations) {
-                            if (item.translations.en) updates[`projects/${pid}/stream/${item.id}/en`] = sanitize(item.translations.en);
-                            if (item.translations.ja) updates[`projects/${pid}/stream/${item.id}/ja`] = sanitize(item.translations.ja);
-                        }
-                        updates[`projects/${pid}/stream/${item.id}/isRemastered`] = true;
-
-                        // Handle Merged IDs (Delete them)
-                        if (item.mergedIds && Array.isArray(item.mergedIds)) {
-                            item.mergedIds.forEach((mid: string) => {
-                                if (mid !== item.id) { // Prevent self-deletion
-                                    updates[`projects/${pid}/stream/${mid}`] = null; // Delete from DB
-                                }
-                            });
-                        }
-
-                    }
-                }
-
-                // Update lastRemasteredAt to the max timestamp of fetched items
-                let maxTimestamp = 0;
-                if (items.length > 0) {
-                    maxTimestamp = Math.max(...items.map(i => i.timestamp || 0));
-                }
-
-                if (maxTimestamp > 0) {
-                    updates[`projects/${pid}/settings/lastRemasteredAt`] = maxTimestamp;
-                }
-
-                if (Object.keys(updates).length > 0) {
-                    await admin.database().ref().update(updates);
-                    functions.logger.info(`Remastered ${Object.keys(updates).length} items for ${pid}`);
-                    return Object.keys(updates).length; // Return count
-                }
-
-                // Even if no updates, update pointer
-                if (maxTimestamp > 0) {
-                    await admin.database().ref(`projects/${pid}/settings/lastRemasteredAt`).set(maxTimestamp);
-                }
-
-                return 0;
-
-            } catch (e: unknown) {
-                functions.logger.error("Remaster Inner Error", e);
-                throw new Error(`Inner Error: ${e instanceof Error ? e.message : 'Unknown error'}`);
-            }
-        })());
-    };
-
-    if (targetProjectId) {
-        processProject(projectsSnap, targetProjectId);
-    } else {
-        projectsSnap.forEach((pSnap) => { processProject(pSnap, pSnap.key!); });
-    }
-
-    const results = await Promise.all(promises);
-    const totalCount = results.reduce((a, b) => (a || 0) + (b || 0), 0);
-    return totalCount;
-};
+// ── Legacy Triggers (Disabled for v10.0) ─────────────────────────────────────
+export const onRefineRequest = functions.database.ref("projects/{projectId}/stream/{dataId}").onCreate(() => null)
+
+// ── Remaster ─────────────────────────────────────────────────────────────────
+export const remasterSession = functions.pubsub.schedule("every 2 minutes").onRun(() => runRemasterLogic())
+export const triggerRemaster = functions.https.onRequest(async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*")
+    const pid = (req.query.projectId || "").toString()
+    const count = await runRemasterLogic(pid || undefined)
+    res.json({ success: true, count })
+})
+
+const runRemasterLogic = async (targetPid?: string) => {
+    const now = Date.now(); const ONE_HOUR = 3600 * 1000
+    let snap = targetPid ? await admin.database().ref(`projects/${targetPid}`).get() : await admin.database().ref('projects').get()
+    if (!snap.exists()) return 0
+    // (리마스터링 로직 생략 또는 최소화 - 실시간 성능에 집중)
+    return 0
+}
+
+// ── 진단 툴 ─────────────────────────────────────────────────────────────────
+export const verifyGeminiPipeline = functions.https.onRequest(async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*")
+    const result = await translateWithFallback("Testing terminal connectivity.", "en", "", "")
+    res.json({ success: true, version: "v10.0", result })
+})

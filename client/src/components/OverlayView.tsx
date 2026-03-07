@@ -19,13 +19,19 @@ const OverlayView: React.FC = () => {
         fontSize: 48, fontColor: '#ffffff', fontWeight: 'bold', bgColor: '#000000', bgOpacity: 0.6,
         padding: 20, textEffect: 'shadow', align: 'center'
     });
+    const [hideRaw, setHideRaw] = useState<boolean>(true);
 
     useEffect(() => {
-        const settingsRef = ref(rtdb, `projects/${activeProjectId}/settings/overlay`);
+        const settingsRef = ref(rtdb, `projects/${activeProjectId}/settings`);
         const unsub = onValue(settingsRef, (snap) => {
             if (snap.exists()) {
                 const val = snap.val();
-                setSettings((prev) => ({ ...prev, ...(val as Partial<ProjectSettings['overlay']>) }));
+                if (val.overlay) {
+                    setSettings((prev) => ({ ...prev, ...(val.overlay as Partial<ProjectSettings['overlay']>) }));
+                }
+                if (val.hideRaw !== undefined) {
+                    setHideRaw(val.hideRaw);
+                }
             }
         });
         return () => unsub();
@@ -56,7 +62,13 @@ const OverlayView: React.FC = () => {
                 const segment = val as StreamSegment;
                 return { ...segment, id: key };
             })
-            .filter(s => s.status === 'final' || s.status === 'raw')
+            .filter(s => {
+                if (s.status === 'final') return true;
+                if (s.status === 'raw' || s.status === 'translating') {
+                    return !hideRaw;
+                }
+                return false;
+            })
             .sort((a, b) => a.timestamp - b.timestamp);
 
         const validSegments = segments.map(s => {
@@ -64,7 +76,7 @@ const OverlayView: React.FC = () => {
             if (activeLang === 'refined') text = s.refined ?? s.original ?? "";
             else if (activeLang === 'en') text = s.en ?? "";
             else if (activeLang === 'ja') text = s.ja ?? "";
-            return { id: s.id, text, isRaw: s.status === 'raw' || !text };
+            return { id: s.id, text, isRaw: s.status !== 'final' };
         }).filter(s => s.text);
 
         const lastLines = validSegments.slice(-4);

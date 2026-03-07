@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { rtdb as database, auth } from '../firebase';
 import { ref, onValue, push, set, update, get } from 'firebase/database';
 import { useParams } from 'react-router-dom';
@@ -19,11 +19,12 @@ interface Session {
     keywords: string;
     startTime: string;
     orderIndex?: number;
-    sourceLanguage?: 'ko' | 'en' | 'ja' | 'zh';
+    sourceLanguage?: 'ko' | 'en';
+    targetLanguages?: string[];
 }
 
 const LANG_FLAGS: Record<string, string> = {
-    ko: '🇰🇷', en: '🇺🇸', ja: '🇯🇵', zh: '🇨🇳'
+    ko: '🇰🇷', en: '🇺🇸'
 };
 
 const AdminDashboard: React.FC = () => {
@@ -48,8 +49,10 @@ const AdminDashboard: React.FC = () => {
         minLength: number;
         timeoutMs: number;
         sentenceEnd: boolean;
+        vadMaxCutMs: number;
         recordMode: 'chunk' | 'vad';
         hideRaw: boolean;
+        chunkInterval: number;
     }
 
     const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
@@ -60,6 +63,8 @@ const AdminDashboard: React.FC = () => {
         minLength: 50,
         timeoutMs: 6000,
         sentenceEnd: true,
+        vadMaxCutMs: 15000,
+        chunkInterval: 2000,
         // Record Mode
         recordMode: 'chunk',
         // Display
@@ -79,6 +84,8 @@ const AdminDashboard: React.FC = () => {
                     ...prev,
                     ...(val.overlay || {}),
                     ...(val.chunk || {}),
+                    vadMaxCutMs: val.chunk?.vadMaxCutMs || 15000,
+                    chunkInterval: val.chunk?.chunkInterval || 2000,
                     recordMode: val.recordMode || 'chunk',
                     hideRaw: val.hideRaw !== undefined ? val.hideRaw : true,
                 }));
@@ -101,7 +108,9 @@ const AdminDashboard: React.FC = () => {
         updates[`projects/${activeProjectId}/settings/chunk`] = {
             minLength: Number(projectSettings.minLength),
             timeoutMs: Number(projectSettings.timeoutMs),
-            sentenceEnd: Boolean(projectSettings.sentenceEnd)
+            sentenceEnd: Boolean(projectSettings.sentenceEnd),
+            vadMaxCutMs: Number(projectSettings.vadMaxCutMs),
+            chunkInterval: Number(projectSettings.chunkInterval)
         };
         updates[`projects/${activeProjectId}/settings/recordMode`] = projectSettings.recordMode;
         updates[`projects/${activeProjectId}/settings/hideRaw`] = Boolean(projectSettings.hideRaw);
@@ -119,36 +128,6 @@ const AdminDashboard: React.FC = () => {
     const [isRecording, setIsRecording] = useState(false);
     const [status, setStatus] = useState<string>("idle");
     const [currentDb, setCurrentDb] = useState<number>(-90);
-    const [remasterStatus, setRemasterStatus] = useState<string>("idle"); // idle, processing, done
-
-    const triggerRemaster = async () => {
-        if (!activeSessionId) return;
-        if (remasterStatus === 'processing') return; // Prevent double click
-
-        setRemasterStatus("processing");
-        try {
-            const res = await fetch(`https://us-central1-translation-comm.cloudfunctions.net/triggerRemaster?projectId=${activeProjectId}`);
-            if (!res.ok) throw new Error("Network error");
-            const data = await res.json();
-            setRemasterStatus("done");
-
-            if (data.success) {
-                if (data.count > 0) {
-                    alert(`신규 자막 ${data.count}개에 대한 클랜지(리마스터링)이 완료되었습니다.`);
-                } else {
-                    alert("클랜징 완료: 현재 상태가 최적화되어 있어 변경할 내용이 없습니다.");
-                }
-            } else {
-                alert("클랜징 요청 실패: " + (data.error || "알 수 없는 오류"));
-            }
-        } catch (e: any) {
-            console.error("Remaster Failed:", e);
-            alert("클랜징 실패: " + e.message);
-            setRemasterStatus("error");
-        } finally {
-            setTimeout(() => setRemasterStatus("idle"), 3000);
-        }
-    };
 
     const triggerPurge = async () => {
         if (!activeProjectId) return;
@@ -298,7 +277,8 @@ const AdminDashboard: React.FC = () => {
             keywords: "keyword1, keyword2",
             startTime: "09:00",
             orderIndex: maxOrder + 1,
-            sourceLanguage: 'ko'
+            sourceLanguage: 'ko',
+            targetLanguages: ['en']
         };
         set(newRef, newSession);
         setSelectedSessionId(newSession.id);
@@ -436,12 +416,14 @@ const AdminDashboard: React.FC = () => {
             }).then(async r => {
                 const data = await r.json().catch(() => ({}));
                 if (r.ok && data.success) {
-                    setStatus('streaming');
-                    console.log(`[Upload] ✅ OK - "${data.text?.slice(0, 50)}"`);
+                    if (data.info || data.error === 'TooSmall') {
+                        console.log(`[Upload] CF filtered: ${data.error || data.info}`);
+                    } else {
+                        setStatus('streaming');
+                        console.log(`[Upload] ✅ OK - "${data.text ? data.text.slice(0, 50) : 'empty/filtered'}"`);
+                    }
                 } else if (r.status === 401) {
                     console.error('[Upload] ❌ 401 Unauthorized');
-                } else if (data.error === 'TooSmall' || data.info) {
-                    console.log('[Upload] CF filtered:', data.error || data.info);
                 } else {
                     console.warn('[Upload] CF error:', data);
                     setStatus('error');
@@ -491,6 +473,14 @@ const AdminDashboard: React.FC = () => {
             setIsRecording(true);
             setStatus("recording");
 
+            const scheduleNextCut = (ms: number) => {
+                if (segmentTimerRef.current) window.clearTimeout(segmentTimerRef.current);
+                segmentTimerRef.current = window.setTimeout(() => {
+                    console.log("Forced Timeout -> Cutting");
+                    switchRecorders();
+                }, ms);
+            };
+
             const switchRecorders = () => {
                 const nextIndex = activeIndexRef.current === 0 ? 1 : 0;
                 const nextMR = nextIndex === 0 ? mr1Ref.current : mr2Ref.current;
@@ -498,6 +488,10 @@ const AdminDashboard: React.FC = () => {
                 if (nextMR && nextMR.state === 'inactive') nextMR.start();
                 if (currentMR && currentMR.state === 'recording') currentMR.stop();
                 activeIndexRef.current = nextIndex;
+
+                const currentMode = recordModeRef.current || 'chunk';
+                const interval = projectSettings.chunkInterval || 2000;
+                scheduleNextCut(currentMode === 'vad' ? projectSettings.vadMaxCutMs : interval);
             };
 
             const currentMode = recordModeRef.current || 'chunk';
@@ -510,12 +504,13 @@ const AdminDashboard: React.FC = () => {
                     console.log("VAD: Silence Detected -> Cutting");
                     switchRecorders();
                 });
-                // Safety: Force cut every 10s if no silence
-                segmentTimerRef.current = window.setInterval(switchRecorders, 10000);
+                // Safety: Force cut every configured ms if no silence
+                scheduleNextCut(projectSettings.vadMaxCutMs);
             } else {
-                // Chunk Mode: Switch every 2s
-                console.log("Starting Chunk Mode (2s)");
-                segmentTimerRef.current = window.setInterval(switchRecorders, 2000);
+                // Chunk Mode: Switch every N ms
+                const interval = projectSettings.chunkInterval || 2000;
+                console.log(`Starting Chunk Mode (${interval}ms)`);
+                scheduleNextCut(interval);
             }
 
             const buf = new Float32Array(analyser.fftSize);
@@ -533,7 +528,7 @@ const AdminDashboard: React.FC = () => {
     };
 
     const stopRecording = useCallback(() => {
-        if (segmentTimerRef.current) clearInterval(segmentTimerRef.current);
+        if (segmentTimerRef.current) window.clearTimeout(segmentTimerRef.current);
         if (vadRef.current) {
             vadRef.current.destroy();
             vadRef.current = null;
@@ -557,7 +552,7 @@ const AdminDashboard: React.FC = () => {
             return () => clearTimeout(t);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [projectSettings.recordMode]);
+    }, [projectSettings.recordMode, projectSettings.chunkInterval]);
 
     return (
         <div className="flex h-screen bg-gray-900 text-white overflow-hidden">
@@ -620,12 +615,35 @@ const AdminDashboard: React.FC = () => {
                                 </div>
                                 <div className="col-span-2">
                                     <label className="block text-xs text-gray-400">Source Language (Speaker's Language)</label>
-                                    <select className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.sourceLanguage || 'ko'} onChange={e => setFormData({ ...formData, sourceLanguage: e.target.value as 'ko' | 'en' | 'ja' | 'zh' })}>
+                                    <select
+                                        className="w-full bg-gray-800 border border-gray-600 rounded p-2"
+                                        value={formData.sourceLanguage || 'ko'}
+                                        onChange={e => {
+                                            const src = e.target.value as 'ko' | 'en';
+                                            const tgt = src === 'ko' ? ['en'] : ['ko'];
+                                            setFormData({ ...formData, sourceLanguage: src, targetLanguages: tgt });
+                                        }}
+                                    >
                                         <option value="ko">Korean (한국어)</option>
                                         <option value="en">English (영어)</option>
-                                        <option value="ja">Japanese (일본어)</option>
-                                        <option value="zh">Chinese (중국어)</option>
                                     </select>
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="block text-xs text-gray-400">Target Languages (Automatically mapped)</label>
+                                    <div className="flex gap-4 p-2 bg-gray-800 rounded border border-gray-600 opacity-70">
+                                        {['ko', 'en'].map(l => (
+                                            <label key={l} className="flex items-center gap-2 cursor-not-allowed">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={(formData.targetLanguages || []).includes(l)}
+                                                    disabled
+                                                    className="cursor-not-allowed"
+                                                />
+                                                <span className="uppercase font-bold text-sm">{l}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                    <p className="text-[10px] text-gray-500 mt-1">※ Target language is automatically set based on the source language.</p>
                                 </div>
                                 <div className="col-span-2">
                                     <label className="block text-xs text-gray-400">Affiliation</label>
@@ -688,13 +706,6 @@ const AdminDashboard: React.FC = () => {
                                 {viewMode === 'live' && activeSessionId && (
                                     <div className="flex gap-1">
                                         <button
-                                            onClick={triggerRemaster}
-                                            disabled={remasterStatus === 'processing'}
-                                            className={`px-2 py-1 text-xs rounded flex items-center gap-1 transition-all ${remasterStatus === 'processing' ? 'bg-yellow-600 cursor-not-allowed opacity-80' : 'bg-purple-600 hover:bg-purple-500 hover:shadow-lg'}`}
-                                        >
-                                            {remasterStatus === 'processing' ? '⏳ Cleaning...' : (remasterStatus === 'done' ? '✅ Done!' : '✨ Remaster Now')}
-                                        </button>
-                                        <button
                                             onClick={triggerPurge}
                                             className="px-2 py-1 text-xs rounded bg-red-900/50 hover:bg-red-800 border border-red-700 text-red-100 flex items-center gap-1"
                                             title="완전 삭제 (클랜징)"
@@ -734,155 +745,182 @@ const AdminDashboard: React.FC = () => {
                 </div>
             </div>
             {/* Settings Modal */}
-            {showProjectSettings && (
-                <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-                    <div className="bg-gray-800 p-6 rounded-lg w-full max-w-lg space-y-4 border border-gray-600">
-                        <h2 className="text-xl font-bold">Project Settings</h2>
+            {
+                showProjectSettings && (
+                    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+                        <div className="bg-gray-800 p-6 rounded-lg w-full max-w-lg space-y-4 border border-gray-600">
+                            <h2 className="text-xl font-bold">Project Settings</h2>
 
-                        {/* Tabs */}
-                        <div className="flex border-b border-gray-600 mb-4">
-                            <button className="px-4 py-2 text-sm font-bold border-b-2 border-blue-500 text-blue-400">Overlay Design</button>
-                            <button className="px-4 py-2 text-sm font-bold text-gray-400 hover:text-white">AI Tuning (Chunking)</button>
-                        </div>
+                            {/* Tabs */}
+                            <div className="flex border-b border-gray-600 mb-4">
+                                <button className="px-4 py-2 text-sm font-bold border-b-2 border-blue-500 text-blue-400">Overlay Design</button>
+                                <button className="px-4 py-2 text-sm font-bold text-gray-400 hover:text-white">AI Tuning (Chunking)</button>
+                            </div>
 
-                        <div className="space-y-6 overflow-y-auto max-h-[60vh]">
-                            {/* Section 0: Audio Engine */}
-                            <div className="bg-gray-700 p-4 rounded-lg">
-                                <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-                                    🎙️ Audio Engine <span className="text-xs font-normal text-gray-400">(Live Switchable)</span>
-                                </h3>
-                                <div className="flex gap-4">
-                                    <label className={`flex-1 p-3 rounded border cursor-pointer transition-all ${projectSettings.recordMode === 'chunk' ? 'bg-blue-600 border-blue-400' : 'bg-gray-800 border-gray-600 hover:bg-gray-600'}`}>
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <input type="radio" name="recordMode" value="chunk" checked={projectSettings.recordMode === 'chunk'} onChange={() => setProjectSettings({ ...projectSettings, recordMode: 'chunk' })} className="hidden" />
-                                            <span className="font-bold text-white">🔵 Speed (Chunk)</span>
+                            <div className="space-y-6 overflow-y-auto max-h-[60vh]">
+                                {/* Section 0: Audio Engine */}
+                                <div className="bg-gray-700 p-4 rounded-lg">
+                                    <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+                                        🎙️ Audio Engine <span className="text-xs font-normal text-gray-400">(Live Switchable)</span>
+                                    </h3>
+                                    <div className="flex gap-4">
+                                        <label className={`flex-1 p-3 rounded border cursor-pointer transition-all ${projectSettings.recordMode === 'chunk' ? 'bg-blue-600 border-blue-400' : 'bg-gray-800 border-gray-600 hover:bg-gray-600'}`}>
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <input type="radio" name="recordMode" value="chunk" checked={projectSettings.recordMode === 'chunk'} onChange={() => setProjectSettings({ ...projectSettings, recordMode: 'chunk' })} className="hidden" />
+                                                <span className="font-bold text-white">🔵 Speed (Chunk)</span>
+                                            </div>
+                                            <p className="text-[10px] text-gray-300 leading-tight">
+                                                Sends audio periodically. Best for fast-paced Q&A.
+                                            </p>
+                                        </label>
+
+                                        <label className={`flex-1 p-3 rounded border cursor-pointer transition-all ${projectSettings.recordMode === 'vad' ? 'bg-green-600 border-green-400' : 'bg-gray-800 border-gray-600 hover:bg-gray-600'}`}>
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <input type="radio" name="recordMode" value="vad" checked={projectSettings.recordMode === 'vad'} onChange={() => setProjectSettings({ ...projectSettings, recordMode: 'vad' })} className="hidden" />
+                                                <span className="font-bold text-white">🟢 Precision (VAD)</span>
+                                            </div>
+                                            <p className="text-[10px] text-gray-300 leading-tight">
+                                                Sends when you stop talking. Best for Keynotes.
+                                            </p>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                {/* Section 1: Overlay */}
+                                <div>
+                                    <h3 className="text-sm font-bold text-gray-300 mb-2">Overlay Appearance</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs text-gray-400 block">Font Size (px)</label>
+                                            <input type="number" className="w-full bg-gray-700 p-2 rounded" value={projectSettings.fontSize} onChange={e => setProjectSettings({ ...projectSettings, fontSize: Number(e.target.value) })} />
                                         </div>
-                                        <p className="text-[10px] text-gray-300 leading-tight">
-                                            Sends audio every 2 seconds. Best for fast-paced Q&A.
-                                        </p>
-                                    </label>
-
-                                    <label className={`flex-1 p-3 rounded border cursor-pointer transition-all ${projectSettings.recordMode === 'vad' ? 'bg-green-600 border-green-400' : 'bg-gray-800 border-gray-600 hover:bg-gray-600'}`}>
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <input type="radio" name="recordMode" value="vad" checked={projectSettings.recordMode === 'vad'} onChange={() => setProjectSettings({ ...projectSettings, recordMode: 'vad' })} className="hidden" />
-                                            <span className="font-bold text-white">🟢 Precision (VAD)</span>
+                                        <div>
+                                            <label className="text-xs text-gray-400 block">Font Color</label>
+                                            <input type="color" className="w-full h-10 bg-gray-700 rounded cursor-pointer" value={projectSettings.fontColor} onChange={e => setProjectSettings({ ...projectSettings, fontColor: e.target.value })} />
                                         </div>
-                                        <p className="text-[10px] text-gray-300 leading-tight">
-                                            Sends when you stop talking. Best for Keynotes.
-                                        </p>
-                                    </label>
+                                        <div>
+                                            <label className="text-xs text-gray-400 block">Font Weight</label>
+                                            <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.fontWeight} onChange={e => setProjectSettings({ ...projectSettings, fontWeight: e.target.value as 'normal' | 'bold' | '800' })}>
+                                                <option value="normal">Normal</option>
+                                                <option value="bold">Bold</option>
+                                                <option value="800">Extra Bold</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-400 block">Alignment</label>
+                                            <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.align} onChange={e => setProjectSettings({ ...projectSettings, align: e.target.value as 'left' | 'center' | 'right' })}>
+                                                <option value="left">Left</option>
+                                                <option value="center">Center</option>
+                                                <option value="right">Right</option>
+                                            </select>
+                                        </div>
+                                        <div className="col-span-2">
+                                            <div className="text-[10px] text-gray-500 mt-1">※ Subtitle appearance settings are applied globally.</div>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-400 block">Background Color</label>
+                                            <input type="color" className="w-full h-10 bg-gray-700 rounded cursor-pointer" value={projectSettings.bgColor} onChange={e => setProjectSettings({ ...projectSettings, bgColor: e.target.value })} />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-400 block">Opacity (0.0 - 1.0)</label>
+                                            <input type="number" step="0.1" min="0" max="1" className="w-full bg-gray-700 p-2 rounded" value={projectSettings.bgOpacity} onChange={e => setProjectSettings({ ...projectSettings, bgOpacity: Number(e.target.value) })} />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-400 block">Text Effect</label>
+                                            <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.textEffect} onChange={e => setProjectSettings({ ...projectSettings, textEffect: e.target.value as 'none' | 'shadow' | 'stroke' })}>
+                                                <option value="none">None</option>
+                                                <option value="shadow">Drop Shadow</option>
+                                                <option value="stroke">Outline (Stroke)</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-400 block">Padding (px)</label>
+                                            <input type="number" className="w-full bg-gray-700 p-2 rounded" value={projectSettings.padding} onChange={e => setProjectSettings({ ...projectSettings, padding: Number(e.target.value) })} />
+                                        </div>
+                                    </div>
+                                </div>
+
+
+                                {/* Section 2: AI Tuning */}
+                                <div className="border-t border-gray-700 pt-4">
+                                    <h3 className="text-sm font-bold text-gray-300 mb-2">AI Processing Tuning</h3>
+                                    <p className="text-xs text-gray-500 mb-4">Adjust these values to control when the AI refines the text. Useful for fast/slow speakers.</p>
+
+                                    <div className="grid grid-cols-1 gap-4">
+                                        <div>
+                                            <label className="text-xs text-gray-400 block flex justify-between">
+                                                <span>Chunk Interval (Speed Mode)</span>
+                                                <span className="text-white font-bold">{projectSettings.chunkInterval} ms</span>
+                                            </label>
+                                            <input type="range" min="500" max="5000" step="100" className="w-full mt-1"
+                                                value={projectSettings.chunkInterval}
+                                                onChange={e => setProjectSettings({ ...projectSettings, chunkInterval: Number(e.target.value) })} />
+                                            <p className="text-[10px] text-gray-500">Audio is sent every N ms regardless of silence.</p>
+                                        </div>
+
+                                        <div>
+                                            <label className="text-xs text-gray-400 block flex justify-between">
+                                                <span>Minimum Chunk Length (Characters)</span>
+                                                <span className="text-white font-bold">{projectSettings.minLength} chars</span>
+                                            </label>
+                                            <input type="range" min="20" max="200" step="10" className="w-full mt-1"
+                                                value={projectSettings.minLength}
+                                                onChange={e => setProjectSettings({ ...projectSettings, minLength: Number(e.target.value) })} />
+                                            <p className="text-[10px] text-gray-500">Wait until at least this many characters are collected.</p>
+                                        </div>
+
+                                        <div>
+                                            <label className="text-xs text-gray-400 block flex justify-between">
+                                                <span>Max Wait Time (Timeout)</span>
+                                                <span className="text-white font-bold">{projectSettings.timeoutMs} ms</span>
+                                            </label>
+                                            <input type="range" min="1000" max="10000" step="500" className="w-full mt-1"
+                                                value={projectSettings.timeoutMs}
+                                                onChange={e => setProjectSettings({ ...projectSettings, timeoutMs: Number(e.target.value) })} />
+                                            <p className="text-[10px] text-gray-500">Force processing if silence lasts longer than this.</p>
+                                        </div>
+
+                                        <div>
+                                            <label className="text-xs text-gray-400 block flex justify-between">
+                                                <span>VAD Mode Max Forced Cutoff</span>
+                                                <span className="text-white font-bold">{projectSettings.vadMaxCutMs} ms</span>
+                                            </label>
+                                            <input type="range" min="2000" max="25000" step="1000" className="w-full mt-1"
+                                                value={projectSettings.vadMaxCutMs}
+                                                onChange={e => setProjectSettings({ ...projectSettings, vadMaxCutMs: Number(e.target.value) })} />
+                                            <p className="text-[10px] text-gray-500">When using Precision (VAD) mode, force a chunk cut if the speaker does not stop talking for this long.</p>
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                            <input type="checkbox" id="chkSentence"
+                                                checked={projectSettings.sentenceEnd}
+                                                onChange={e => setProjectSettings({ ...projectSettings, sentenceEnd: e.target.checked })} />
+                                            <label htmlFor="chkSentence" className="text-sm text-gray-300">Split by Sentence (. ! ?)</label>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 pt-2 border-t border-gray-700">
+                                            <input type="checkbox" id="chkHideRaw"
+                                                checked={projectSettings.hideRaw}
+                                                onChange={e => setProjectSettings({ ...projectSettings, hideRaw: e.target.checked })} />
+                                            <label htmlFor="chkHideRaw" className="text-sm text-gray-300">
+                                                🔒 Hide Raw STT (Whisper 원문 숨김)
+                                            </label>
+                                        </div>
+                                        <p className="text-[10px] text-gray-500 ml-6">체크 시 Gemini가 정제한 텍스트만 표시됩니다. "쭈꾸미" 같은 오인식 단어가 화면에 노출되지 않습니다.</p>
+                                    </div>
                                 </div>
                             </div>
 
-                            {/* Section 1: Overlay */}
-                            <div>
-                                <h3 className="text-sm font-bold text-gray-300 mb-2">Overlay Appearance</h3>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-xs text-gray-400 block">Font Size (px)</label>
-                                        <input type="number" className="w-full bg-gray-700 p-2 rounded" value={projectSettings.fontSize} onChange={e => setProjectSettings({ ...projectSettings, fontSize: Number(e.target.value) })} />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-gray-400 block">Font Color</label>
-                                        <input type="color" className="w-full h-10 bg-gray-700 rounded cursor-pointer" value={projectSettings.fontColor} onChange={e => setProjectSettings({ ...projectSettings, fontColor: e.target.value })} />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-gray-400 block">Font Weight</label>
-                                        <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.fontWeight} onChange={e => setProjectSettings({ ...projectSettings, fontWeight: e.target.value as 'normal' | 'bold' | '800' })}>
-                                            <option value="normal">Normal</option>
-                                            <option value="bold">Bold</option>
-                                            <option value="800">Extra Bold</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-gray-400 block">Alignment</label>
-                                        <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.align} onChange={e => setProjectSettings({ ...projectSettings, align: e.target.value as 'left' | 'center' | 'right' })}>
-                                            <option value="left">Left</option>
-                                            <option value="center">Center</option>
-                                            <option value="right">Right</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-gray-400 block">Background Color</label>
-                                        <input type="color" className="w-full h-10 bg-gray-700 rounded cursor-pointer" value={projectSettings.bgColor} onChange={e => setProjectSettings({ ...projectSettings, bgColor: e.target.value })} />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-gray-400 block">Opacity (0.0 - 1.0)</label>
-                                        <input type="number" step="0.1" min="0" max="1" className="w-full bg-gray-700 p-2 rounded" value={projectSettings.bgOpacity} onChange={e => setProjectSettings({ ...projectSettings, bgOpacity: Number(e.target.value) })} />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-gray-400 block">Text Effect</label>
-                                        <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.textEffect} onChange={e => setProjectSettings({ ...projectSettings, textEffect: e.target.value as 'none' | 'shadow' | 'stroke' })}>
-                                            <option value="none">None</option>
-                                            <option value="shadow">Drop Shadow</option>
-                                            <option value="stroke">Outline (Stroke)</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-gray-400 block">Padding (px)</label>
-                                        <input type="number" className="w-full bg-gray-700 p-2 rounded" value={projectSettings.padding} onChange={e => setProjectSettings({ ...projectSettings, padding: Number(e.target.value) })} />
-                                    </div>
-                                </div>
+                            <div className="flex justify-end gap-2 mt-4">
+                                <button onClick={() => setShowProjectSettings(false)} className="px-4 py-2 text-gray-400">Cancel</button>
+                                <button onClick={saveProjectSettings} className="px-4 py-2 bg-blue-600 rounded font-bold">Save Apply</button>
                             </div>
-
-
-                            {/* Section 2: AI Tuning */}
-                            <div className="border-t border-gray-700 pt-4">
-                                <h3 className="text-sm font-bold text-gray-300 mb-2">AI Processing Tuning</h3>
-                                <p className="text-xs text-gray-500 mb-4">Adjust these values to control when the AI refines the text. Useful for fast/slow speakers.</p>
-
-                                <div className="grid grid-cols-1 gap-4">
-                                    <div>
-                                        <label className="text-xs text-gray-400 block flex justify-between">
-                                            <span>Minimum Chunk Length (Characters)</span>
-                                            <span className="text-white font-bold">{projectSettings.minLength} chars</span>
-                                        </label>
-                                        <input type="range" min="20" max="200" step="10" className="w-full mt-1"
-                                            value={projectSettings.minLength}
-                                            onChange={e => setProjectSettings({ ...projectSettings, minLength: Number(e.target.value) })} />
-                                        <p className="text-[10px] text-gray-500">Wait until at least this many characters are collected.</p>
-                                    </div>
-
-                                    <div>
-                                        <label className="text-xs text-gray-400 block flex justify-between">
-                                            <span>Max Wait Time (Timeout)</span>
-                                            <span className="text-white font-bold">{projectSettings.timeoutMs} ms</span>
-                                        </label>
-                                        <input type="range" min="1000" max="10000" step="500" className="w-full mt-1"
-                                            value={projectSettings.timeoutMs}
-                                            onChange={e => setProjectSettings({ ...projectSettings, timeoutMs: Number(e.target.value) })} />
-                                        <p className="text-[10px] text-gray-500">Force processing if silence lasts longer than this.</p>
-                                    </div>
-
-                                    <div className="flex items-center gap-2">
-                                        <input type="checkbox" id="chkSentence"
-                                            checked={projectSettings.sentenceEnd}
-                                            onChange={e => setProjectSettings({ ...projectSettings, sentenceEnd: e.target.checked })} />
-                                        <label htmlFor="chkSentence" className="text-sm text-gray-300">Split by Sentence (. ! ?)</label>
-                                    </div>
-
-                                    <div className="flex items-center gap-2 pt-2 border-t border-gray-700">
-                                        <input type="checkbox" id="chkHideRaw"
-                                            checked={projectSettings.hideRaw}
-                                            onChange={e => setProjectSettings({ ...projectSettings, hideRaw: e.target.checked })} />
-                                        <label htmlFor="chkHideRaw" className="text-sm text-gray-300">
-                                            🔒 Hide Raw STT (Whisper 원문 숨김)
-                                        </label>
-                                    </div>
-                                    <p className="text-[10px] text-gray-500 ml-6">체크 시 Gemini가 정제한 텍스트만 표시됩니다. "쭈꾸미" 같은 오인식 단어가 화면에 노출되지 않습니다.</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex justify-end gap-2 mt-4">
-                            <button onClick={() => setShowProjectSettings(false)} className="px-4 py-2 text-gray-400">Cancel</button>
-                            <button onClick={saveProjectSettings} className="px-4 py-2 bg-blue-600 rounded font-bold">Save Apply</button>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-        </div>
+        </div >
     );
 };
 

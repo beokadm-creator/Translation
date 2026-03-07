@@ -79,25 +79,29 @@ const SubtitleMode: React.FC<SubtitleModeProps> = ({
     const validLines = segmentsOrder.map(id => {
         const seg = segmentsMap[id];
         if (!seg || seg.status === 'merged') return null;
+        const isTranslating = seg.status === 'translating';
         let text = "";
         let isFallback = false;
-        let isRaw = seg.status === 'raw';
+        let isRaw = seg.status === 'raw' || isTranslating;
 
         if (activeLang === 'original') {
             text = seg.refined || seg.original || "";
         } else {
             text = seg[activeLang] as string || "";
             if (!text) {
+                // 번역 중이면 원본 텍스트를 임시로 표시
                 text = seg.refined || seg.original || "";
                 isFallback = true;
-                isRaw = true; // treat fallback as "still processing"
+                isRaw = true;
             }
         }
         if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) return null;
         if (!text.trim()) return null;
-        if (hideRaw && isRaw) return null;
-        return { id, text, isFallback, isFinal: seg.status === 'final', isRaw };
-    }).filter(v => v !== null) as { id: string; text: string; isFallback: boolean; isFinal: boolean; isRaw: boolean }[];
+        // translating 상태는 원본 언어 탭에서는 항상 표시, 다른 탭에서는 반투명으로 표시
+        if (hideRaw && isRaw && !isTranslating) return null;
+        return { id, text, isFallback, isFinal: seg.status === 'final', isRaw, isTranslating };
+    }).filter(v => v !== null) as { id: string; text: string; isFallback: boolean; isFinal: boolean; isRaw: boolean; isTranslating: boolean }[];
+
 
     const displayLines = validLines.slice(-subtitleLines);
 
@@ -237,16 +241,42 @@ const AudienceView: React.FC = () => {
         speaker: string;
         affiliation: string;
         topic: string;
+        sourceLanguage?: string;
+        targetLanguages?: string[];
     };
     const [sessions, setSessions] = useState<SessionItem[]>([]);
     const [viewMode, setViewMode] = useState<'live' | 'archive'>('live');
     const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
     const [archiveSessionId, setArchiveSessionId] = useState<string | null>(null);
+
+    // --- Derived Session Info ---
+    const activeOrArchiveId = viewMode === 'live' ? activeSessionId : archiveSessionId;
+    const currentSession = sessions.find(s => s.id === activeOrArchiveId);
+
+    const sessionInfo = currentSession ? {
+        speaker: currentSession.speaker,
+        affiliation: currentSession.affiliation,
+        topic: currentSession.topic,
+        sourceLanguage: currentSession.sourceLanguage
+    } : null;
+
+    const targetLanguages = currentSession?.targetLanguages?.length ? currentSession.targetLanguages : ['ko', 'en', 'ja'];
+
     // --- Display Info ---
-    const [sessionInfo, setSessionInfo] = useState<{ speaker: string, affiliation: string, topic: string } | null>(null);
-    const [targetLanguages, setTargetLanguages] = useState<string[]>([]);
-    const [activeLang, setActiveLang] = useState<string>('original');
+    // 기본 언어: 세션의 첫 번째 타겟 언어 (원본 언어 제외)
+    // 세션 로드 전까지는 'en'을 기본으로 사용
+    const [activeLang, setActiveLang] = useState<string>('en');
     const [hideRaw, setHideRaw] = useState<boolean>(true); // Default: hide Whisper raw text
+
+    // 세션 정보가 로드되면 기본 언어 자동 전환 (원본 언어가 아닌 첫 번째 타겟 언어)
+    useEffect(() => {
+        if (currentSession) {
+            const sourceLang = currentSession.sourceLanguage || 'ko';
+            const targets = currentSession.targetLanguages?.filter(l => l !== sourceLang) || [];
+            const firstTarget = targets[0] || (sourceLang === 'ko' ? 'en' : 'ko');
+            setActiveLang(firstTarget);
+        }
+    }, [currentSession?.id]);
 
     // --- Stream State ---
     const { streamData } = useProjectStream(activeProjectId, { subscribe: viewMode === 'live' });
@@ -271,25 +301,11 @@ const AudienceView: React.FC = () => {
         scrollToBottom();
     }, [segmentsOrder, scrollToBottom]);
 
-    // useCallback: fetchSessionInfo가 매 렌더마다 새 객체로 생성되면 useEffect가 무한루프
-    const fetchSessionInfo = useCallback(async (sid: string) => {
-        try {
-            const sSnap = await get(ref(database, `projects/${activeProjectId}/sessions/${sid}`));
-            if (sSnap.exists()) {
-                const s = sSnap.val();
-                setSessionInfo({ speaker: s.speaker, affiliation: s.affiliation, topic: s.topic });
-            }
-        } catch (e) {
-            console.error('[fetchSessionInfo] Error:', e);
-        }
-    }, [activeProjectId]);
-
     // 1. Initial Load
     useEffect(() => {
         get(ref(database, `projects/${activeProjectId}/settings`)).then(snap => {
             if (snap.exists()) {
                 const settings = snap.val();
-                if (settings.targetLanguages) setTargetLanguages(settings.targetLanguages);
                 if (settings.hideRaw !== undefined) setHideRaw(settings.hideRaw);
             }
         });
@@ -312,11 +328,6 @@ const AudienceView: React.FC = () => {
         onValue(activeRef, (snap) => {
             const sid = snap.val();
             setActiveSessionId(sid);
-            if (sid && viewMode === 'live') {
-                fetchSessionInfo(sid);
-            } else if (!sid && viewMode === 'live') {
-                setSessionInfo(null);
-            }
         });
         // Cleanup: onValue listeners should be unsubscribed
         // Note: we return nothing here because onValue returns unsubscribe fn
@@ -328,7 +339,6 @@ const AudienceView: React.FC = () => {
     useEffect(() => {
         if (viewMode === 'live') {
             if (!streamData) {
-                Promise.resolve().then(() => setSegmentsMap({}));
                 return;
             }
             Promise.resolve().then(() => {
@@ -363,7 +373,6 @@ const AudienceView: React.FC = () => {
             });
         } else if (viewMode === 'archive' && archiveSessionId) {
             Promise.resolve().then(() => setSegmentsMap({}));
-            Promise.resolve().then(() => fetchSessionInfo(archiveSessionId));
             get(ref(database, `projects/${activeProjectId}/sessions/${archiveSessionId}/transcript`)).then(snap => {
                 if (snap.exists()) {
                     setSegmentsMap(snap.val());
@@ -372,13 +381,7 @@ const AudienceView: React.FC = () => {
                 }
             });
         }
-    }, [streamData, viewMode, archiveSessionId, activeProjectId, activeSessionId, fetchSessionInfo]); // fetchSessionInfo is memoized via useCallback - safe
-
-    useEffect(() => {
-        if (viewMode === 'live') {
-            Promise.resolve().then(() => setSegmentsMap({}));
-        }
-    }, [activeSessionId, viewMode]);
+    }, [streamData, viewMode, archiveSessionId, activeProjectId, activeSessionId]);
 
     useEffect(() => {
         const sorted = Object.keys(segmentsMap).sort((a, b) => Number(a.split('_')[0]) - Number(b.split('_')[0]));
@@ -585,15 +588,17 @@ const AudienceView: React.FC = () => {
                         >
                             Original
                         </button>
-                        {targetLanguages.map(lang => (
-                            <button
-                                key={lang}
-                                onClick={() => setActiveLang(lang)}
-                                className={`px-3 py-1 text-sm rounded transition-all uppercase ${activeLang === lang ? tabActiveClass : tabInactiveClass}`}
-                            >
-                                {lang}
-                            </button>
-                        ))}
+                        {targetLanguages
+                            .filter(lang => lang !== sessionInfo?.sourceLanguage) // Filter out the speaker's language
+                            .map(lang => (
+                                <button
+                                    key={lang}
+                                    onClick={() => setActiveLang(lang)}
+                                    className={`px-3 py-1 text-sm rounded transition-all uppercase ${activeLang === lang ? tabActiveClass : tabInactiveClass}`}
+                                >
+                                    {lang}
+                                </button>
+                            ))}
                     </div>
                 </div>
             </div>
@@ -661,6 +666,7 @@ const AudienceView: React.FC = () => {
                     {(sessionInfo || viewMode === 'archive') && segmentsOrder.map((id) => {
                         const seg = segmentsMap[id];
                         if (!seg || seg.status === 'merged') return null;
+                        const isTranslating = seg.status === 'translating';
 
                         let text = "";
                         let isFallback = false;
@@ -670,6 +676,7 @@ const AudienceView: React.FC = () => {
                         } else {
                             text = seg[activeLang] as string || "";
                             if (!text) {
+                                // 번역 중: 원본 텍스트를 임시로 표시 (반투명)
                                 text = seg.refined || seg.original || "";
                                 isFallback = true;
                             }
@@ -700,7 +707,7 @@ const AudienceView: React.FC = () => {
                         if (hideRaw && showAsRaw) return null;
 
                         return (
-                            <div key={id} className={`segment-enter transition-all duration-500 flex items-start ${!showAsRaw ? 'opacity-100' : 'opacity-70'}`}>
+                            <div key={id} className={`segment-enter transition-all duration-500 flex items-start ${!showAsRaw && !isTranslating ? 'opacity-100' : 'opacity-70'}`}>
                                 <div className="flex-1">
                                     <TextItem
                                         id={id}
@@ -719,7 +726,7 @@ const AudienceView: React.FC = () => {
                 </div>
             </div>
 
-        </div>
+        </div >
     );
 };
 

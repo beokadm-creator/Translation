@@ -30,13 +30,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ project, onUpdate, onClos
   const SUPPORTED_LANGS = [
     { code: 'ko', label: 'Korean (한국어)' },
     { code: 'en', label: 'English (영어)' },
-    { code: 'ja', label: 'Japanese (일본어)' },
-    { code: 'zh', label: 'Chinese Simplified (중국어 간체)' },
-    { code: 'zh-TW', label: 'Chinese Traditional (중국어 번체)' },
-    { code: 'fr', label: 'French (프랑스어)' },
-    { code: 'de', label: 'German (독일어)' },
-    { code: 'es', label: 'Spanish (스페인어)' },
-    { code: 'vi', label: 'Vietnamese (베트남어)' },
   ];
 
   // Appearance State
@@ -123,7 +116,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ project, onUpdate, onClos
   };
 
   const getFontSizePx = (size: string) => {
-    switch(size) {
+    switch (size) {
       case 'small': return '18px';
       case 'medium': return '24px';
       case 'large': return '36px';
@@ -147,18 +140,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ project, onUpdate, onClos
           <h3 className="font-bold text-gray-500 text-xs uppercase tracking-wider mb-4">Settings</h3>
           <button
             onClick={() => setActiveTab('general')}
-            className={`flex items-center px-4 py-3 rounded-lg text-sm font-medium mb-2 transition-colors ${
-              activeTab === 'general' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'
-            }`}
+            className={`flex items-center px-4 py-3 rounded-lg text-sm font-medium mb-2 transition-colors ${activeTab === 'general' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'
+              }`}
           >
             <Layout className="w-4 h-4 mr-3" />
             General & Parking
           </button>
           <button
             onClick={() => setActiveTab('appearance')}
-            className={`flex items-center px-4 py-3 rounded-lg text-sm font-medium mb-2 transition-colors ${
-              activeTab === 'appearance' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'
-            }`}
+            className={`flex items-center px-4 py-3 rounded-lg text-sm font-medium mb-2 transition-colors ${activeTab === 'appearance' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'
+              }`}
           >
             <Type className="w-4 h-4 mr-3" />
             Subtitle Appearance
@@ -183,21 +174,21 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ project, onUpdate, onClos
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                     Custom URL Slug (Optional)
-                     <span className="text-gray-400 text-xs ml-2 font-normal">e.g. my-event-2024</span>
+                    Custom URL Slug (Optional)
+                    <span className="text-gray-400 text-xs ml-2 font-normal">e.g. my-event-2024</span>
                   </label>
                   <div className="flex">
-                     <span className="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-sm">
-                       /p/
-                     </span>
+                    <span className="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-sm">
+                      /p/
+                    </span>
                     <input
                       type="text"
                       name="slug"
                       value={generalData.slug}
                       onChange={(e) => {
-                         // Simple slug validation: lowercase, numbers, hyphens only
-                         const val = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '');
-                         setGeneralData(prev => ({...prev, slug: val}));
+                        // Simple slug validation: lowercase, numbers, hyphens only
+                        const val = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '');
+                        setGeneralData(prev => ({ ...prev, slug: val }));
                       }}
                       placeholder="my-event-name"
                       className="flex-1 border border-gray-300 rounded-r-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -234,7 +225,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ project, onUpdate, onClos
                     />
                   </div>
                   <div>
-                     <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
                       <Lock className="w-4 h-4 inline mr-1" />
                       Access Code (Optional)
                     </label>
@@ -277,11 +268,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ project, onUpdate, onClos
                   <label className="block text-sm font-medium text-gray-700 mb-3">Target Languages</label>
                   <div className="grid grid-cols-2 gap-3">
                     {SUPPORTED_LANGS.map(lang => (
-                      <label key={lang.code} className={`flex items-center space-x-3 p-3 border rounded-lg cursor-pointer transition-all ${
-                        generalData.targetLangs.includes(lang.code) 
-                          ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-200' 
+                      <label key={lang.code} className={`flex items-center space-x-3 p-3 border rounded-lg cursor-pointer transition-all ${generalData.targetLangs.includes(lang.code)
+                          ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-200'
                           : 'hover:bg-gray-50 border-gray-200'
-                      }`}>
+                        }`}>
                         <input
                           type="checkbox"
                           checked={generalData.targetLangs.includes(lang.code)}
@@ -388,10 +378,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ project, onUpdate, onClos
 
                 {/* Live Preview */}
                 <div className="flex-1 bg-gray-900 rounded-xl overflow-hidden relative flex flex-col justify-end p-8 bg-[url('https://images.unsplash.com/photo-1524178232363-1fb2b075b655?ixlib=rb-1.2.1&auto=format&fit=crop&w=1950&q=80')] bg-cover bg-center">
-                   <div className="absolute inset-0 bg-black bg-opacity-40"></div>
-                   <div className="relative z-10 w-full text-center">
-                     <p className="text-white/50 text-xs mb-4">Audience View Simulation</p>
-                     <div 
+                  <div className="absolute inset-0 bg-black bg-opacity-40"></div>
+                  <div className="relative z-10 w-full text-center">
+                    <p className="text-white/50 text-xs mb-4">Audience View Simulation</p>
+                    <div
                       style={{
                         backgroundColor: hexToRgba(appearance.backgroundColor, appearance.opacity),
                         color: appearance.textColor,
@@ -403,10 +393,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ project, onUpdate, onClos
                         maxWidth: '80%',
                         transition: 'all 0.2s ease'
                       }}
-                     >
-                       This is how your subtitles will appear to the audience.
-                     </div>
-                   </div>
+                    >
+                      This is how your subtitles will appear to the audience.
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

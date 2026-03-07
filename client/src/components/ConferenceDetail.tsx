@@ -210,9 +210,7 @@ const ConferenceDetail: React.FC = () => {
                             className="text-xs uppercase bg-gray-900 text-gray-300 px-3 py-1 rounded-full border border-gray-700"
                           >
                             {lang === 'ko' ? '🇰🇷 Korean' :
-                             lang === 'en' ? '🇺🇸 English' :
-                             lang === 'ja' ? '🇯🇵 Japanese' :
-                             lang === 'zh' ? '🇨🇳 Chinese' : lang}
+                              lang === 'en' ? '🇺🇸 English' : lang}
                           </span>
                         ))}
                       </div>
