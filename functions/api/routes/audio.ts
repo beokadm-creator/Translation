@@ -52,12 +52,21 @@ const DENTAL_STT_PROMPT =
   '치과 전문 학술 강연. 임플란트, 상악동 거상술, Sinus Graft, 픽스처, 어버트먼트, 크라운, 브릿지, 파절, 치주염, GBR, BMP, PRP, 골이식, Osstem, 스트라우만, 노벨.'
 
 // Hallucination blacklist
-const HALLUCINATION_BLACKLIST = ['자막제작', '자막 제작', 'Subtitles by', 'MBC 뉴스', 'Copyright', 'http', '.co.kr']
+const HALLUCINATION_BLACKLIST = ['자막제작', '자막 제작', 'Subtitles by', 'MBC 뉴스', '시청해 주셔서 감사합니다']
 const isGarbage = (text: string): boolean => {
   if (!text) return false
-  if (HALLUCINATION_BLACKLIST.some((b) => text.includes(b))) return true
-  if (/(.+)\1{2,}/.test(text)) return true
-  if (/(.*,){4,}/.test(text)) return true
+
+  // Only drop if the ENTIRE chunk is exactly a hallucination, not just containing it
+  const trimmed = text.trim()
+  if (HALLUCINATION_BLACKLIST.some((b) => trimmed === b)) return true
+
+  // Add regex for quick drops of short common YT/speech hallucination phrases
+  const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독|좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사)/i
+  if (filterGarbage.test(trimmed) && trimmed.length < 60) return true
+
+  // Drop obvious repetition loops: e.g., "Hello Hello Hello Hello"
+  if (/(.+)\1{3,}/.test(text) && text.length > 50) return true
+
   return false
 }
 

@@ -407,8 +407,10 @@ const AdminDashboard: React.FC = () => {
                 return;
             }
             const buf = await blob.arrayBuffer();
-            const url = `https://us-central1-translation-comm.cloudfunctions.net/processAudio?projectId=${encodeURIComponent(activeProjectId)}&sourceLabel=admin`;
-            console.log(`[Upload] Sending ${blob.size}B → CF (project=${activeProjectId})`);
+            const activeSession = sessions.find(s => s.id === activeSessionId);
+            const currentLang = activeSession?.sourceLanguage || 'ko';
+            const url = `https://us-central1-translation-comm.cloudfunctions.net/processAudio?projectId=${encodeURIComponent(activeProjectId)}&sourceLabel=admin&sourceLang=${currentLang}`;
+            console.log(`[Upload] Sending ${blob.size}B → CF (project=${activeProjectId}, lang=${currentLang})`);
             fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${token}` },

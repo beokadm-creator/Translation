@@ -663,64 +663,62 @@ const AudienceView: React.FC = () => {
                     )}
 
                     {/* Segments (Live or Archive) */}
-                    {(sessionInfo || viewMode === 'archive') && segmentsOrder.map((id) => {
-                        const seg = segmentsMap[id];
-                        if (!seg || seg.status === 'merged') return null;
-                        const isTranslating = seg.status === 'translating';
+                    <div className="leading-[1.8] text-justify whitespace-pre-wrap break-words">
+                        {(sessionInfo || viewMode === 'archive') && segmentsOrder.map((id) => {
+                            const seg = segmentsMap[id]
+                            if (!seg || seg.status === 'merged') return null
+                            const isTranslating = seg.status === 'translating'
 
-                        let text = "";
-                        let isFallback = false;
+                            let text = ""
+                            let isFallback = false
 
-                        if (activeLang === 'original') {
-                            text = seg.refined || seg.original || "";
-                        } else {
-                            text = seg[activeLang] as string || "";
-                            if (!text) {
-                                // 번역 중: 원본 텍스트를 임시로 표시 (반투명)
-                                text = seg.refined || seg.original || "";
-                                isFallback = true;
+                            if (activeLang === 'original') {
+                                text = seg.refined || seg.original || ""
+                            } else {
+                                text = seg[activeLang] as string || ""
+                                if (!text) {
+                                    text = seg.refined || seg.original || ""
+                                    isFallback = true
+                                }
                             }
-                        }
 
-                        if (!text || text.trim() === "") return null;
+                            if (!text || text.trim() === "") return null
 
-                        if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) {
-                            return (
-                                <div key={id} className="transition-all duration-500 opacity-60">
+                            if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) {
+                                return (
                                     <TextItem
+                                        key={id}
                                         id={id}
                                         text=""
                                         isRaw={true}
                                         targetLang={activeLang}
                                         fontSize={`${fontSize}px`}
                                         color={isDarkMode ? "#6b7280" : "#9ca3af"}
+                                        opacity={0.6}
                                     />
-                                </div>
-                            );
-                        }
+                                )
+                            }
 
-                        const isFinal = seg.status === 'final';
-                        const isTimeOut = viewMode === 'live' ? ((now - (seg.timestamp || 0)) > 5000) : true;
-                        const showAsRaw = viewMode === 'live' ? (!isFinal && !isTimeOut && !isFallback) : false;
+                            const isFinal = seg.status === 'final'
+                            const isTimeOut = viewMode === 'live' ? ((now - (seg.timestamp || 0)) > 5000) : true
+                            const showAsRaw = viewMode === 'live' ? (!isFinal && !isTimeOut && !isFallback) : false
 
-                        // Hide raw STT output if hideRaw setting is enabled
-                        if (hideRaw && showAsRaw) return null;
+                            if (hideRaw && showAsRaw) return null
 
-                        return (
-                            <div key={id} className={`segment-enter transition-all duration-500 flex items-start ${!showAsRaw && !isTranslating ? 'opacity-100' : 'opacity-70'}`}>
-                                <div className="flex-1">
-                                    <TextItem
-                                        id={id}
-                                        text={text}
-                                        isRaw={showAsRaw}
-                                        targetLang={activeLang}
-                                        fontSize={`${fontSize}px`}
-                                        color={isFallback ? (isDarkMode ? "#6b7280" : "#9ca3af") : (isDarkMode ? "white" : "black")}
-                                    />
-                                </div>
-                            </div>
-                        );
-                    })}
+                            return (
+                                <TextItem
+                                    key={id}
+                                    id={id}
+                                    text={text}
+                                    isRaw={showAsRaw}
+                                    targetLang={activeLang}
+                                    fontSize={`${fontSize}px`}
+                                    color={isFallback ? (isDarkMode ? "#6b7280" : "#9ca3af") : (isDarkMode ? "white" : "black")}
+                                    opacity={!showAsRaw && !isTranslating ? 1 : 0.7}
+                                />
+                            )
+                        })}
+                    </div>
 
                     <div ref={messagesEndRef} className="h-32"></div>
                 </div>

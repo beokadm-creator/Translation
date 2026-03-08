@@ -71,10 +71,10 @@ const HALLUCINATION_BLACKLIST = [
     '유료광고', '유료 광고', 'paid advertisement', '이 영상은',
     'sites.google.com', 'cst.eu.com', 'Amara.org', 'amara.org', 'disclaimer at'
 ];
-// 정적 URL 도메인만 필터 (www. 전체를 제거하면 정상 발화까지 삭제됨)
-const URL_FILTER_REGEX = /[^.?!;\n]*(?:sites\.google\.com|cst\.eu\.com|Amara\.org|amara\.org|youtube\.com|youtu\.be)[^.?!;\n]*(?:[.?!;\n])?/gi;
-// 메타 언어 환각 필터 (유료광고, 면책조항 등)
-const META_FILTER_REGEX = /[^.?!;\n]*(?:Thank you for watching|Thanks for watching|시청해 주셔서 감사합니다|시청해주셔서 감사합니다|MBC 뉴스|SBS 뉴스|KBS 뉴스|YTN 뉴스|JTBC 뉴스|연합뉴스|유료광고|유료 광고|paid advertisement|disclaimer|면책 조항|면책조항)[^.?!;\n]*(?:[.?!;\n])?/gi;
+// 정적 URL 도메인만 핀포인트로 필터 (전체 문장 삭제 방지)
+const URL_FILTER_REGEX = /(?:https?:\/\/)?(?:www\.)?(?:sites\.google\.com|cst\.eu\.com|Amara\.org|amara\.org|youtube\.com|youtu\.be)\S*/gi;
+// 메타 언어 단어만 핀포인트로 필터
+const META_FILTER_REGEX = /(?:Thank you for watching\.?|Thanks for watching\.?|Thank you\.?|시청해 주셔서 감사합니다\.?|시청해주셔서 감사합니다\.?|MBC 뉴스|SBS 뉴스|KBS 뉴스|YTN 뉴스|JTBC 뉴스|연합뉴스|유료광고|유료 광고|paid advertisement|disclaimer|면책 조항|면책조항)/gi;
 const sanitize = (s) => {
     let t = (s || "").toString();
     t = t.replace(/[`]{3,}/g, "").replace(/[`]/g, "");
@@ -97,9 +97,9 @@ const isGarbage = (text, _originalText) => {
         return false;
     if (hasRepetitionLoop(text))
         return true;
-    // 'minutes'와 같이 침묵 시 흔히 나오는 짧은 환각어만 필터
-    const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히)/i;
-    if (filterGarbage.test(text.trim()) && text.length < 50)
+    // 침묵 시 흔히 나오는 짧은 환각어 필터 (짧은 문구에서만 발동, 긴 정상 발화는 보존)
+    const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독|좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사)/i;
+    if (filterGarbage.test(text.trim()) && text.length < 60)
         return true;
     // 성음만으로 된 건 버림
     const alphanumeric = text.replace(/[^a-zA-Z0-9가-힣ㄱ-ㅎㅏ-ㅣ]/g, '');
@@ -261,6 +261,7 @@ exports.processAudio = functions
         }
         const projectId = (req.query.projectId || "").toString();
         const sourceLabel = (req.query.sourceLabel || "").toString();
+        const queryLang = (req.query.sourceLang || "").toString();
         if (!projectId) {
             res.status(400).json({ success: false });
             return;
@@ -282,31 +283,53 @@ exports.processAudio = functions
             return;
         }
         const projectRef = admin.database().ref(`projects/${projectId}`);
-        let sourceLang = 'en';
+        let sourceLang = queryLang || 'ko'; // Use query param if provided, otherwise default 'ko'
         let activeSessionId = null;
         let sessionContext = "";
         let previousContext = "";
+        let customKeywords = "";
         let minLength = 30;
         let timeoutMs = 5000;
         let sentenceEnd = true;
         // 설정 로드
         try {
-            const [activeSnap, stateSnap, settingsSnap] = await Promise.all([
+            const [activeSnap, stateSnap, chunkSnap, projectSettingsSnap] = await Promise.all([
                 projectRef.child('activeSessionId').get(),
                 projectRef.child('state').get(),
-                projectRef.child('settings/chunk').get()
+                projectRef.child('settings/chunk').get(),
+                projectRef.child('settings').get()
             ]);
+            const projectSettings = projectSettingsSnap.val() || {};
+            // Fallback: If no active session, try to guess from project's primary target
+            if (projectSettings.targetLanguages === 'ko' || (Array.isArray(projectSettings.targetLanguages) && projectSettings.targetLanguages.includes('ko'))) {
+                sourceLang = 'en';
+            }
+            else if (projectSettings.targetLanguages === 'en' || (Array.isArray(projectSettings.targetLanguages) && projectSettings.targetLanguages.includes('en'))) {
+                sourceLang = 'ko';
+            }
             if (activeSnap.exists()) {
                 activeSessionId = activeSnap.val();
+                console.log(`[STT] Active Session found: ${activeSessionId}`);
                 const sSnap = await projectRef.child(`sessions/${activeSessionId}`).get();
                 if (sSnap.exists()) {
                     const s = sSnap.val();
-                    sourceLang = s.sourceLanguage || 'en';
-                    sessionContext = `Speaker: ${s.speaker}, Topic: ${s.topic}`;
+                    sourceLang = s.sourceLanguage || sourceLang;
+                    console.log(`[STT] Session language: ${sourceLang}`);
+                    const affiliationStr = s.affiliation ? `, Affiliation: ${s.affiliation}` : '';
+                    const abstractStr = s.abstract ? `, Abstract: ${s.abstract}` : '';
+                    const keywordsStr = s.keywords ? `, Keywords: ${s.keywords}` : '';
+                    sessionContext = `Speaker: ${s.speaker}${affiliationStr}, Topic: ${s.topic}${abstractStr}${keywordsStr}`;
+                    customKeywords = s.keywords || "";
+                }
+                else {
+                    console.warn(`[STT] Active Session ${activeSessionId} data missing in DB`);
                 }
             }
-            if (settingsSnap.exists()) {
-                const sett = settingsSnap.val();
+            else {
+                console.log(`[STT] No Active Session in RTDB, using fallback lang: ${sourceLang}`);
+            }
+            if (chunkSnap.exists()) {
+                const sett = chunkSnap.val();
                 if (sett.minLength !== undefined)
                     minLength = Number(sett.minLength);
                 if (sett.timeoutMs !== undefined)
@@ -326,9 +349,11 @@ exports.processAudio = functions
         const audioStream = stream_1.Readable.from(buf);
         audioStream.path = "audio.webm";
         const tWhisper = Date.now();
+        const basePrompt = sourceLang === 'ko' ? DENTAL_PROMPT_KO : DENTAL_PROMPT_EN;
+        const whisperPrompt = customKeywords ? `${basePrompt}, ${customKeywords}` : basePrompt;
         const stt = await openai.audio.transcriptions.create({
             file: audioStream, model: "whisper-1", language: sourceLang,
-            prompt: sourceLang === 'ko' ? DENTAL_PROMPT_KO : DENTAL_PROMPT_EN, temperature: 0
+            prompt: whisperPrompt, temperature: 0
         });
         const sttText = (stt?.text || "").trim();
         const rawText = sanitize(sttText);
@@ -342,7 +367,7 @@ exports.processAudio = functions
         const seq = seqResult.snapshot.val();
         // ── STEP 2: DB에 즉시 기록 (status: translating) ─────────────────
         // 이렇게 해야 유저 설정(hideRaw)과 상관없이 '번역 중'으로 원문이 즉시 보임
-        await admin.database().ref(`projects/${projectId}/stream/${id}`).set({
+        await projectRef.child(`stream/${id}`).set({
             original: rawText,
             refined: rawText,
             status: "translating",
