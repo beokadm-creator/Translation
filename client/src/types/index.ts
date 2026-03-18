@@ -12,19 +12,37 @@ export interface ProjectSettings {
   logoUrl?: string;
   date: string;
   accessCode: string; // (Legacy? Or specific to hall?)
-  targetLanguages: string[]; // e.g., ["en", "ja", "zh"]
+  targetLanguages: string[]; // e.g., ["en", "ko"]
   parkingMessage?: string;
+  recordMode?: 'chunk' | 'vad';
+  hideRaw?: boolean;
   // Overlay Settings
   overlay?: {
-      fontSize: number; // px
-      fontColor: string; // hex
+      fontSize: number;
+      fontColor: string;
       fontWeight: 'normal' | 'bold' | '800';
-      bgColor: string; // hex
-      bgOpacity: number; // 0.0 ~ 1.0
-      padding: number; // px
+      bgColor: string;
+      bgOpacity: number;
+      padding: number;
       textEffect: 'none' | 'shadow' | 'stroke';
       align: 'left' | 'center' | 'right';
-  }
+      // v2
+      displayStyle: 'youtube' | 'typing';
+      letterSpacing: number;  // px
+      maxLines: number;       // 1-5
+      lineHeight: number;
+      fontFamily: string;
+      typingSpeed: number;    // chars/sec
+      bottomOffset: number;   // px from bottom
+  };
+  // AI Chunking & Buffering Settings
+  chunk?: {
+      minLength: number;    // 버퍼 flush 최소 글자 수
+      timeoutMs: number;    // flush 강제 타임아웃 (ms)
+      sentenceEnd: boolean; // . ! ? 기준 flush 여부
+      vadMaxCutMs: number;  // VAD 모드 최대 강제 컷 (ms)
+      chunkInterval: number; // Chunk 모드 인터벌 (ms)
+  };
 }
 
 export interface Session {
@@ -33,17 +51,19 @@ export interface Session {
   affiliation: string;
   topic: string;
   abstract: string; // Core for RAG
-  keywords: string[];
+  keywords: string; // comma-separated string (e.g. "implant, sinus, bone graft")
   startTime: string; // HH:MM
 }
 
 export interface StreamSegment {
   original: string;
   refined?: string;
+  ko?: string;
   en?: string;
   ja?: string;
-  status: 'raw' | 'final' | 'merged';
+  status: 'raw' | 'translating' | 'final' | 'merged';
   timestamp: number;
+  seq?: number;
   mergedIds?: string[];
 }
 

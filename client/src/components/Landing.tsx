@@ -14,14 +14,15 @@ const Landing: React.FC = () => {
     const [conference, setConference] = useState<{title: string, id: string} | null>(null);
     const [projects, setProjects] = useState<ProjectSettings[]>([]);
     // Define loadProjects before autoLogin since it's used in autoLogin
-    const loadProjects = useCallback(async (confId: string) => {
+    // confId=undefined → load all projects (no filter)
+    const loadProjects = useCallback(async (confId?: string) => {
         const projSnap = await get(ref(rtdb, 'projects'));
         if (projSnap.exists()) {
             const data = projSnap.val();
             const list = Object.keys(data).map(k => {
                 const s = data[k].settings || {};
                 return { ...s, slug: k } as ProjectSettings & { slug: string };
-            }).filter((p) => p.conferenceId === confId);
+            }).filter((p) => !confId || p.conferenceId === confId);
             setProjects(list);
         }
     }, []);
@@ -45,13 +46,37 @@ const Landing: React.FC = () => {
             setStatus('error');
         }
     }, [loadProjects]);
-    // Auto-login via URL Query ?conf={id}
+    // Auto-login via URL Query ?conf={id}, or load all projects directly if they exist
     useEffect(() => {
         const confId = searchParams.get('conf');
         if (confId) {
-            // Wrap in setTimeout to avoid calling setState synchronously in effect
             Promise.resolve().then(() => autoLogin(confId));
+            return;
         }
+
+        // No conf param — load all projects directly. Show access code only if no projects found.
+        const checkAndAutoLoad = async () => {
+            setStatus('loading');
+            try {
+                const projSnap = await get(ref(rtdb, 'projects'));
+                if (projSnap.exists()) {
+                    const data = projSnap.val();
+                    const list = Object.keys(data).map(k => {
+                        const s = data[k].settings || {};
+                        return { ...s, slug: k } as ProjectSettings & { slug: string };
+                    });
+                    setProjects(list);
+                    setConference({ id: 'default', title: 'Live Translation' });
+                    setStatus('success');
+                } else {
+                    setStatus('idle');
+                }
+            } catch {
+                setStatus('idle');
+            }
+        };
+
+        Promise.resolve().then(checkAndAutoLoad);
     }, [searchParams, autoLogin]);
     const handleEnter = async () => {
         if (!accessCode) return;
@@ -77,7 +102,7 @@ const Landing: React.FC = () => {
             }
 
             setConference(foundConf);
-            await loadProjects(foundConf.id);
+            await loadProjects(foundConf.id); // filter to this conference
             setStatus('success');
         } catch (e) {
             console.error(e);
@@ -92,8 +117,13 @@ const Landing: React.FC = () => {
 
             <div className="z-10 w-full max-w-md space-y-8 text-center">
                 
+                {/* Initial loading check */}
+                {status === 'loading' && accessCode === '' && (
+                    <div className="text-gray-400 text-sm animate-pulse">Loading...</div>
+                )}
+
                 {/* Stage 1: Access Code Input */}
-                {status !== 'success' && (
+                {status !== 'success' && !(status === 'loading' && accessCode === '') && (
                     <div className="animate-fade-in-up space-y-6">
                         <h1 className="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500 tracking-tight">
                             HONG COMM.
@@ -150,7 +180,7 @@ const Landing: React.FC = () => {
                                     <div>
                                         <h3 className="text-xl font-bold text-white group-hover:text-blue-400 transition-colors">{p.name}</h3>
                                         <div className="flex gap-2 mt-2">
-                                            {p.targetLanguages.map(l => (
+                                            {(p.targetLanguages ?? []).map(l => (
                                                 <span key={l} className="text-[10px] uppercase bg-gray-900 text-gray-400 px-2 py-1 rounded border border-gray-700">
                                                     {l === 'ko' ? '🇰🇷 KO' : l === 'en' ? '🇺🇸 EN' : l === 'ja' ? '🇯🇵 JA' : l}
                                                 </span>

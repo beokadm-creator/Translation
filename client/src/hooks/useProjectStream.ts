@@ -4,7 +4,7 @@ import { ref, onValue, off } from 'firebase/database';
 
 export const useProjectStream = (projectIdOrSlug: string | undefined, options: { subscribe?: boolean } = { subscribe: true }) => {
   const [realProjectId, setRealProjectId] = useState<string | null>(null);
-  const [streamData, setStreamData] = useState<Record<string, { original: string; refined?: string; en?: string; ja?: string; status: 'raw' | 'final' | 'merged'; timestamp: number; mergedIds?: string[] } | null> | null>(null);
+  const [streamData, setStreamData] = useState<Record<string, { original: string; refined?: string; ko?: string; en?: string; ja?: string; status: 'raw' | 'translating' | 'final' | 'merged'; timestamp: number; seq?: number; mergedIds?: string[] } | null> | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 

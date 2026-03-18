@@ -81,7 +81,10 @@ const callGemini = async (apiKey: string, prompt: string, timeoutMs = 12000): Pr
     try {
         const payload = {
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: "application/json" }
+            generationConfig: {
+                responseMimeType: "application/json",
+                thinkingConfig: { thinkingBudget: 0 }
+            }
         }
         const res = await fetch(FLASH_URL(apiKey), {
             method: "POST", headers: { "Content-Type": "application/json" },

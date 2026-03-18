@@ -24,209 +24,6 @@ const isGarbage = (text: string) => {
     return false;
 };
 
-interface ProcessingBannerProps {
-    isRecording: boolean;
-    sessionInfo: { speaker: string; affiliation: string; topic: string } | null;
-}
-const ProcessingBanner: React.FC<ProcessingBannerProps> = ({ isRecording, sessionInfo }) => {
-    if (!sessionInfo) return null;
-
-
-    if (isRecording) {
-        return (
-            <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                background: 'rgba(16,185,129,0.08)',
-                border: '1px solid rgba(16,185,129,0.3)',
-                borderRadius: '8px',
-                padding: '6px 14px',
-                fontSize: '12px',
-                color: '#6ee7b7',
-                fontWeight: 600,
-                userSelect: 'none',
-            }}>
-                <span style={{
-                    width: '8px', height: '8px', borderRadius: '50%',
-                    background: '#10b981',
-                    boxShadow: '0 0 6px #10b981',
-                    animation: 'pulse-green 1.5s ease-in-out infinite',
-                }} />
-                <span>🎙️ 음성 감지 대기 중</span>
-            </div>
-        );
-    }
-
-    return null;
-};
-
-// ─── Subtitle Mode ───────────────────────────────────────────────────────────
-interface SubtitleModeProps {
-    segmentsMap: SegmentMap;
-    segmentsOrder: string[];
-    activeLang: string;
-    targetLanguages: string[];
-    subtitleLines: number;
-    setSubtitleLines: (n: number) => void;
-    fontSize: number;
-    setFontSize: (n: number) => void;
-    isDarkMode: boolean;
-    setIsDarkMode: (b: boolean) => void;
-    setActiveLang: (l: string) => void;
-    setIsSubtitleMode: (b: boolean) => void;
-    hideRaw: boolean;
-}
-
-const SubtitleMode: React.FC<SubtitleModeProps> = ({
-    segmentsMap, segmentsOrder, activeLang, targetLanguages,
-    subtitleLines, setSubtitleLines, fontSize, setFontSize,
-    isDarkMode, setIsDarkMode, setActiveLang, setIsSubtitleMode, hideRaw
-}) => {
-
-
-    const validLines = segmentsOrder.map(id => {
-        const seg = segmentsMap[id];
-        if (!seg || seg.status === 'merged') return null;
-        const isTranslating = seg.status === 'translating';
-        let text = "";
-        let isFallback = false;
-        let isRaw = seg.status === 'raw' || isTranslating;
-
-        if (activeLang === 'original') {
-            text = seg.refined || seg.original || "";
-        } else {
-            text = seg[activeLang] as string || "";
-            if (!text) {
-                // 번역 중이면 원본 텍스트를 임시로 표시
-                text = seg.refined || seg.original || "";
-                isFallback = true;
-                isRaw = true;
-            }
-        }
-        if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) return null;
-        if (!text.trim()) return null;
-        // translating 상태는 원본 언어 탭에서는 항상 표시, 다른 탭에서는 반투명으로 표시
-        if (hideRaw && isRaw && !isTranslating) return null;
-        return { id, text, isFallback, isFinal: seg.status === 'final', isRaw, isTranslating };
-    }).filter(v => v !== null) as { id: string; text: string; isFallback: boolean; isFinal: boolean; isRaw: boolean; isTranslating: boolean }[];
-
-
-    const displayLines = validLines.slice(-subtitleLines);
-
-    const isGreenBg = !isDarkMode;
-
-    return (
-        <div style={{
-            position: 'fixed', inset: 0, zIndex: 50,
-            display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'flex-end',
-            paddingBottom: '48px',
-            background: isGreenBg ? '#00FF00' : 'rgba(0,0,0,0.92)',
-        }}>
-            {/* ── Hover Controls ── */}
-            <div style={{
-                position: 'absolute', top: '16px', right: '16px',
-                display: 'flex', flexDirection: 'column', gap: '8px',
-                opacity: 0.08, transition: 'opacity 0.3s',
-            }}
-                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                onMouseLeave={e => (e.currentTarget.style.opacity = '0.08')}
-            >
-                {/* Lines control */}
-                <div style={{ display: 'flex', background: 'rgba(17,24,39,0.92)', borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(12px)' }}>
-                    <button onClick={() => setSubtitleLines(Math.max(1, subtitleLines - 1))} style={{ padding: '6px 12px', color: 'white', background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px' }}>−</button>
-                    <span style={{ padding: '6px 16px', color: 'white', fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center' }}>{subtitleLines} Lines</span>
-                    <button onClick={() => setSubtitleLines(Math.min(5, subtitleLines + 1))} style={{ padding: '6px 12px', color: 'white', background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px' }}>+</button>
-                </div>
-                {/* Font size */}
-                <div style={{ display: 'flex', background: 'rgba(17,24,39,0.92)', borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(12px)' }}>
-                    <button onClick={() => setFontSize(Math.max(16, fontSize - 2))} style={{ padding: '6px 12px', color: 'white', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}>A−</button>
-                    <span style={{ padding: '6px 16px', color: 'white', fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center' }}>Size {fontSize}</span>
-                    <button onClick={() => setFontSize(Math.min(72, fontSize + 2))} style={{ padding: '6px 12px', color: 'white', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}>A+</button>
-                </div>
-                {/* BG toggle + Exit */}
-                <div style={{ display: 'flex', gap: '6px' }}>
-                    <button onClick={() => setIsDarkMode(!isDarkMode)} style={{ flex: 1, padding: '6px 10px', background: 'rgba(17,24,39,0.92)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', backdropFilter: 'blur(12px)' }}>
-                        {isDarkMode ? '⬛ Black' : '🟩 Green'}
-                    </button>
-                    <button onClick={() => setIsSubtitleMode(false)} style={{ flex: 1, padding: '6px 10px', background: 'rgba(220,38,38,0.9)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 700 }}>
-                        ✕ Exit
-                    </button>
-                </div>
-                {/* Language tabs */}
-                <div style={{ display: 'flex', background: 'rgba(17,24,39,0.92)', borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(12px)' }}>
-                    {['original', ...targetLanguages].map(l => (
-                        <button key={l} onClick={() => setActiveLang(l)} style={{
-                            flex: 1, padding: '6px 10px', color: 'white', background: activeLang === l ? '#4f46e5' : 'none',
-                            border: 'none', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase'
-                        }}>{l === 'original' ? 'Orig' : l}</button>
-                    ))}
-                </div>
-            </div>
-
-
-            {/* ── Subtitle Lines ── */}
-            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '0 40px' }}>
-                {displayLines.length === 0 && (
-                    <div style={{
-                        fontSize: `${Math.max(fontSize - 8, 16)}px`,
-                        color: isGreenBg ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.25)',
-                        fontStyle: 'italic',
-                        letterSpacing: '0.05em',
-                    }}>
-                        대기 중...
-                    </div>
-                )}
-                {displayLines.map((line, idx) => {
-                    const isLatest = idx === displayLines.length - 1;
-                    return (
-                        <div
-                            key={line.id}
-                            style={{
-                                fontSize: `${fontSize}px`,
-                                fontWeight: isGreenBg ? 700 : 500,
-                                backgroundColor: isGreenBg ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.65)',
-                                color: line.isRaw ? '#94a3b8' : 'white',
-                                textShadow: '2px 2px 6px rgba(0,0,0,0.95)',
-                                border: line.isRaw
-                                    ? '1px solid rgba(99,102,241,0.6)'
-                                    : '1px solid rgba(255,255,255,0.05)',
-                                textAlign: 'center',
-                                padding: '12px 36px',
-                                borderRadius: '16px',
-                                maxWidth: '92%',
-                                opacity: isLatest ? 1 : 0.75,
-                                transform: isLatest ? 'translateY(0) scale(1)' : 'translateY(-4px) scale(0.97)',
-                                transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-                                // Subtle shimmer on raw lines
-                                backgroundImage: line.isRaw
-                                    ? 'linear-gradient(90deg, rgba(0,0,0,0.65) 0%, rgba(30,27,75,0.65) 50%, rgba(0,0,0,0.65) 100%)'
-                                    : undefined,
-                                backgroundSize: line.isRaw ? '200% 100%' : undefined,
-                                animation: line.isRaw ? 'shimmer 2s linear infinite' : undefined,
-                            }}
-                        >
-                            {line.text}
-                            {/* Cursor for latest raw line */}
-                            {line.isRaw && isLatest && (
-                                <span style={{
-                                    display: 'inline-block',
-                                    width: '3px',
-                                    height: '1em',
-                                    backgroundColor: '#818cf8',
-                                    marginLeft: '6px',
-                                    verticalAlign: 'text-bottom',
-                                    animation: 'blink-cursor 1s step-end infinite',
-                                }} />
-                            )}
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
-    );
-};
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 const AudienceView: React.FC = () => {
@@ -236,12 +33,10 @@ const AudienceView: React.FC = () => {
 
     // --- UI State ---
     const [fontSize, setFontSize] = useState<number>(24);
+    const [letterSpacing, setLetterSpacing] = useState<number>(0);
+    const [lineHeight, setLineHeight] = useState<number>(1.8);
     const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
     const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
-
-    // --- Subtitle Overlay Mode ---
-    const [isSubtitleMode, setIsSubtitleMode] = useState<boolean>(false);
-    const [subtitleLines, setSubtitleLines] = useState<number>(2);
 
     // --- Session & Mode State ---
     type SessionItem = {
@@ -269,7 +64,7 @@ const AudienceView: React.FC = () => {
         sourceLanguage: currentSession.sourceLanguage
     } : null;
 
-    const targetLanguages = currentSession?.targetLanguages?.length ? currentSession.targetLanguages : ['ko', 'en', 'ja'];
+    const targetLanguages = currentSession?.targetLanguages?.length ? currentSession.targetLanguages : ['ko', 'en'];
 
     // --- Display Info ---
     // 기본 언어: 세션의 첫 번째 타겟 언어 (원본 언어 제외)
@@ -439,27 +234,6 @@ const AudienceView: React.FC = () => {
     const tabInactiveClass = isDarkMode ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-black";
     const drawerClass = isDarkMode ? "bg-gray-900 text-white" : "bg-white text-black";
 
-    // ── Subtitle Mode ──────────────────────────────────────────
-    if (isSubtitleMode) {
-        return (
-            <SubtitleMode
-                segmentsMap={segmentsMap}
-                segmentsOrder={segmentsOrder}
-                activeLang={activeLang}
-                targetLanguages={targetLanguages}
-                subtitleLines={subtitleLines}
-                setSubtitleLines={setSubtitleLines}
-                fontSize={fontSize}
-                setFontSize={setFontSize}
-                isDarkMode={isDarkMode}
-                setIsDarkMode={setIsDarkMode}
-                setActiveLang={setActiveLang}
-                setIsSubtitleMode={setIsSubtitleMode}
-                hideRaw={hideRaw}
-            />
-        );
-    }
-
     // ── Normal View ────────────────────────────────────────────
     return (
         <div className={`flex flex-col h-screen font-sans transition-colors duration-300 overflow-hidden ${bgClass}`}>
@@ -565,22 +339,6 @@ const AudienceView: React.FC = () => {
                 {/* Right Controls */}
                 <div className="flex items-center gap-3 flex-wrap justify-end">
 
-                    {/* Processing Banner (in header, live mode only) */}
-                    {viewMode === 'live' && sessionInfo && (
-                        <ProcessingBanner
-                            isRecording={viewMode === 'live' && !!sessionInfo}
-                            sessionInfo={sessionInfo}
-                        />
-                    )}
-
-                    <button
-                        onClick={() => setIsSubtitleMode(true)}
-                        className={`flex items-center gap-2 px-3 py-1 rounded transition-all border ${isDarkMode ? 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white hover:border-gray-500' : 'bg-gray-100 border-gray-200 text-gray-500 hover:text-black hover:border-gray-400'}`}
-                    >
-                        <span>📺</span>
-                        <span className="hidden md:inline text-xs font-bold">Subtitle Mode</span>
-                    </button>
-
                     <div className={`flex items-center gap-2 px-3 py-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>
                         <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-1 hover:opacity-80 text-lg">
                             {isDarkMode ? '🌙' : '☀️'}
@@ -588,6 +346,12 @@ const AudienceView: React.FC = () => {
                         <div className={`w-px h-4 ${isDarkMode ? 'bg-gray-600' : 'bg-gray-400'}`}></div>
                         <button onClick={() => setFontSize(Math.max(16, fontSize - 2))} className="p-1 font-bold text-sm">A−</button>
                         <button onClick={() => setFontSize(Math.min(48, fontSize + 2))} className="p-1 font-bold text-lg">A+</button>
+                        <div className={`w-px h-4 ${isDarkMode ? 'bg-gray-600' : 'bg-gray-400'}`}></div>
+                        <button onClick={() => setLetterSpacing(v => Math.max(-1, parseFloat((v - 0.5).toFixed(1))))} className="p-1 font-bold text-sm">자−</button>
+                        <button onClick={() => setLetterSpacing(v => Math.min(8, parseFloat((v + 0.5).toFixed(1))))} className="p-1 font-bold text-sm">자+</button>
+                        <div className={`w-px h-4 ${isDarkMode ? 'bg-gray-600' : 'bg-gray-400'}`}></div>
+                        <button onClick={() => setLineHeight(v => Math.max(1.0, parseFloat((v - 0.1).toFixed(1))))} className="p-1 font-bold text-sm">행−</button>
+                        <button onClick={() => setLineHeight(v => Math.min(4.0, parseFloat((v + 0.1).toFixed(1))))} className="p-1 font-bold text-sm">행+</button>
                     </div>
 
                     <div className={`flex rounded p-1 ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>
@@ -672,7 +436,7 @@ const AudienceView: React.FC = () => {
                     )}
 
                     {/* Segments (Live or Archive) */}
-                    <div className="leading-[1.8] text-justify whitespace-pre-wrap break-words">
+                    <div className="leading-[1.8] text-justify whitespace-pre-wrap break-words" style={{ letterSpacing: `${letterSpacing}px`, lineHeight }}>
                         {(sessionInfo || viewMode === 'archive') && segmentsOrder.map((id) => {
                             const seg = segmentsMap[id]
                             if (!seg || seg.status === 'merged') return null
@@ -736,16 +500,5 @@ const AudienceView: React.FC = () => {
         </div >
     );
 };
-
-// Re-export type for SubtitleMode
-type SegmentMap = Record<string, {
-    original?: string;
-    refined?: string;
-    status?: string;
-    sessionId?: string;
-    timestamp?: number;
-    mergedIds?: string[];
-    [key: string]: string | number | string[] | undefined;
-}>;
 
 export default AudienceView;

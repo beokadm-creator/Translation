@@ -105,8 +105,8 @@ const AdminLanding: React.FC = () => {
 
   const handleCreateConf = async () => {
       console.log("Create Conference Clicked", confForm);
-      if (!confForm.title || !confForm.accessCode || !confForm.startDate || !confForm.endDate) {
-          return alert("All fields (Title, Code, Dates) are required.");
+      if (!confForm.title || !confForm.startDate || !confForm.endDate) {
+          return alert("Title and Dates are required.");
       }
       
       const id = `conf_${Date.now()}`;
@@ -303,7 +303,7 @@ const AdminLanding: React.FC = () => {
               <div className="bg-gray-800 p-6 rounded-lg w-full max-w-md space-y-4 border border-gray-600">
                   <h2 className="text-xl font-bold">Create Conference</h2>
                   <input className="w-full bg-gray-700 p-2 rounded" placeholder="Conference Title" value={confForm.title} onChange={e => setConfForm({...confForm, title: e.target.value})} />
-                  <input className="w-full bg-gray-700 p-2 rounded" placeholder="Access Code (for Audience)" value={confForm.accessCode} onChange={e => setConfForm({...confForm, accessCode: e.target.value})} />
+                  <input className="w-full bg-gray-700 p-2 rounded" placeholder="Access Code (선택사항 - 없으면 누구나 접근 가능)" value={confForm.accessCode} onChange={e => setConfForm({...confForm, accessCode: e.target.value})} />
                   <div className="flex gap-2">
                       <div className="flex-1">
                           <label className="text-xs text-gray-400 block mb-1">Start Date</label>
