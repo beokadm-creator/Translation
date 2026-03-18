@@ -27,6 +27,8 @@ const LANG_FLAGS: Record<string, string> = {
     ko: '🇰🇷', en: '🇺🇸'
 };
 
+const CF_BASE = import.meta.env.VITE_CF_BASE_URL || 'https://us-central1-translation-comm.cloudfunctions.net';
+
 const AdminDashboard: React.FC = () => {
     const { projectId } = useParams<{ projectId: string }>();
     const activeProjectId = projectId || "default";
@@ -36,6 +38,7 @@ const AdminDashboard: React.FC = () => {
     const [activeSessionId, setActiveSessionId] = useState<string>("");
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [showProjectSettings, setShowProjectSettings] = useState(false);
+    const [settingsTab, setSettingsTab] = useState<'overlay' | 'ai'>('overlay');
 
     interface ProjectSettings {
         fontSize: number;
@@ -46,6 +49,13 @@ const AdminDashboard: React.FC = () => {
         padding: number;
         textEffect: string;
         align: string;
+        displayStyle: 'youtube' | 'typing';
+        letterSpacing: number;
+        maxLines: number;
+        lineHeight: number;
+        fontFamily: string;
+        typingSpeed: number;
+        bottomOffset: number;
         minLength: number;
         timeoutMs: number;
         sentenceEnd: boolean;
@@ -56,19 +66,12 @@ const AdminDashboard: React.FC = () => {
     }
 
     const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
-        // Overlay Defaults
         fontSize: 48, fontColor: '#ffffff', fontWeight: 'bold', bgColor: '#000000', bgOpacity: 0.6,
-        padding: 20, textEffect: 'shadow', align: 'center',
-        // AI Tuning Defaults
-        minLength: 50,
-        timeoutMs: 6000,
-        sentenceEnd: true,
-        vadMaxCutMs: 15000,
-        chunkInterval: 10000, // 10s for better Whisper context
-        // Record Mode
-        recordMode: 'chunk',
-        // Display
-        hideRaw: true,
+        padding: 40, textEffect: 'shadow', align: 'center',
+        displayStyle: 'youtube', letterSpacing: 0, maxLines: 2, lineHeight: 1.5,
+        fontFamily: 'sans-serif', typingSpeed: 35, bottomOffset: 60,
+        minLength: 20, timeoutMs: 3000, sentenceEnd: true, vadMaxCutMs: 15000, chunkInterval: 4000,
+        recordMode: 'chunk', hideRaw: true,
     });
 
     // Load Project Settings
@@ -85,7 +88,7 @@ const AdminDashboard: React.FC = () => {
                     ...(val.overlay || {}),
                     ...(val.chunk || {}),
                     vadMaxCutMs: val.chunk?.vadMaxCutMs || 15000,
-                    chunkInterval: val.chunk?.chunkInterval || 2000,
+                    chunkInterval: val.chunk?.chunkInterval || 4000,
                     recordMode: val.recordMode || 'chunk',
                     hideRaw: val.hideRaw !== undefined ? val.hideRaw : true,
                 }));
@@ -103,7 +106,14 @@ const AdminDashboard: React.FC = () => {
             bgOpacity: projectSettings.bgOpacity,
             padding: projectSettings.padding,
             textEffect: projectSettings.textEffect,
-            align: projectSettings.align
+            align: projectSettings.align,
+            displayStyle: projectSettings.displayStyle,
+            letterSpacing: projectSettings.letterSpacing,
+            maxLines: projectSettings.maxLines,
+            lineHeight: projectSettings.lineHeight,
+            fontFamily: projectSettings.fontFamily,
+            typingSpeed: projectSettings.typingSpeed,
+            bottomOffset: projectSettings.bottomOffset,
         };
         updates[`projects/${activeProjectId}/settings/chunk`] = {
             minLength: Number(projectSettings.minLength),
@@ -135,7 +145,7 @@ const AdminDashboard: React.FC = () => {
 
         try {
             const token = await auth.currentUser?.getIdToken();
-            const res = await fetch(`https://us-central1-translation-comm.cloudfunctions.net/purgeSession?projectId=${activeProjectId}`, {
+            const res = await fetch(`${CF_BASE}/purgeSession?projectId=${activeProjectId}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -169,11 +179,19 @@ const AdminDashboard: React.FC = () => {
     const [sourceType, setSourceType] = useState<'mic' | 'system'>('mic');
     const vadRef = useRef<VADRecorder | null>(null);
 
-    // Ref to track latest recordMode to avoid closure staleness in startRecording
+    // Ref로 최신 설정값 추적 (startRecording 클로저 stale 방지)
     const recordModeRef = useRef(projectSettings.recordMode);
+    const chunkIntervalRef = useRef(projectSettings.chunkInterval);
+    const vadMaxCutMsRef = useRef(projectSettings.vadMaxCutMs);
     useEffect(() => {
         recordModeRef.current = projectSettings.recordMode;
     }, [projectSettings.recordMode]);
+    useEffect(() => {
+        chunkIntervalRef.current = projectSettings.chunkInterval;
+    }, [projectSettings.chunkInterval]);
+    useEffect(() => {
+        vadMaxCutMsRef.current = projectSettings.vadMaxCutMs;
+    }, [projectSettings.vadMaxCutMs]);
 
     // --- Isolation View State ---
     const [viewMode, setViewMode] = useState<'live' | 'archive'>('live');
@@ -273,8 +291,8 @@ const AdminDashboard: React.FC = () => {
             speaker: "New Speaker",
             affiliation: "Affiliation",
             topic: "New Topic",
-            abstract: "Abstract here...",
-            keywords: "keyword1, keyword2",
+            abstract: "",
+            keywords: "",
             startTime: "09:00",
             orderIndex: maxOrder + 1,
             sourceLanguage: 'ko',
@@ -321,7 +339,7 @@ const AdminDashboard: React.FC = () => {
     const triggerArchive = async (sessionIdToArchive: string) => {
         try {
             const token = await auth.currentUser?.getIdToken();
-            await fetch(`https://us-central1-translation-comm.cloudfunctions.net/archiveSession`, {
+            await fetch(`${CF_BASE}/archiveSession`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -353,6 +371,13 @@ const AdminDashboard: React.FC = () => {
 
     const handleGoLive = async () => {
         if (!selectedSessionId) return;
+
+        if (activeSessionId !== selectedSessionId) {
+            const s = sessions.find(s => s.id === selectedSessionId);
+            if (s && !s.abstract?.trim()) {
+                if (!window.confirm("⚠️ Abstract(초록)가 비어있습니다.\nAI 번역 품질이 낮아질 수 있습니다.\n그래도 라이브를 시작하시겠습니까?")) return;
+            }
+        }
 
         if (activeSessionId === selectedSessionId) {
             if (!window.confirm("Stop Live Broadcast? This will archive the current session.")) return;
@@ -409,7 +434,7 @@ const AdminDashboard: React.FC = () => {
             const buf = await blob.arrayBuffer();
             const activeSession = sessions.find(s => s.id === activeSessionId);
             const currentLang = activeSession?.sourceLanguage || 'ko';
-            const url = `https://us-central1-translation-comm.cloudfunctions.net/processAudio?projectId=${encodeURIComponent(activeProjectId)}&sourceLabel=admin&sourceLang=${currentLang}`;
+            const url = `${CF_BASE}/processAudio?projectId=${encodeURIComponent(activeProjectId)}&sourceLabel=admin&sourceLang=${currentLang}`;
             console.log(`[Upload] Sending ${blob.size}B → CF (project=${activeProjectId}, lang=${currentLang})`);
             fetch(url, {
                 method: 'POST',
@@ -492,8 +517,8 @@ const AdminDashboard: React.FC = () => {
                 activeIndexRef.current = nextIndex;
 
                 const currentMode = recordModeRef.current || 'chunk';
-                const interval = projectSettings.chunkInterval || 2000;
-                scheduleNextCut(currentMode === 'vad' ? projectSettings.vadMaxCutMs : interval);
+                const interval = chunkIntervalRef.current || 2000;
+                scheduleNextCut(currentMode === 'vad' ? vadMaxCutMsRef.current : interval);
             };
 
             const currentMode = recordModeRef.current || 'chunk';
@@ -507,10 +532,10 @@ const AdminDashboard: React.FC = () => {
                     switchRecorders();
                 });
                 // Safety: Force cut every configured ms if no silence
-                scheduleNextCut(projectSettings.vadMaxCutMs);
+                scheduleNextCut(vadMaxCutMsRef.current);
             } else {
                 // Chunk Mode: Switch every N ms
-                const interval = projectSettings.chunkInterval || 2000;
+                const interval = chunkIntervalRef.current || 2000;
                 console.log(`Starting Chunk Mode (${interval}ms)`);
                 scheduleNextCut(interval);
             }
@@ -584,7 +609,18 @@ const AdminDashboard: React.FC = () => {
                                 <div className="text-xs text-gray-500 truncate">{s.topic}</div>
                                 {activeSessionId === s.id && <span className="text-xs text-red-400 font-bold animate-pulse">● LIVE</span>}
                             </div>
-                            <button onClick={(e) => { e.stopPropagation(); handleDeleteSession(s); }} className="text-gray-600 hover:text-red-500 p-1">🗑️</button>
+                            <div className="flex flex-col gap-1">
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const tgtLang = s.sourceLanguage === 'en' ? 'ko' : 'en';
+                                        window.open(`/overlay/${activeProjectId}/${tgtLang}`, '_blank');
+                                    }}
+                                    title="오버레이 열기 (번역 언어)"
+                                    className="text-gray-500 hover:text-blue-400 text-sm p-1 leading-none"
+                                >🖥️</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleDeleteSession(s); }} className="text-gray-600 hover:text-red-500 p-1 text-sm leading-none">🗑️</button>
+                            </div>
                         </div>
                     ))}
                 </div>
@@ -596,7 +632,7 @@ const AdminDashboard: React.FC = () => {
                 <div className="h-1/2 p-6 border-b border-gray-700 bg-gray-900 overflow-y-auto">
                     {selectedSessionId ? (
                         <div className="max-w-3xl mx-auto space-y-4">
-                            <div className="flex justify-between items-center mb-4">
+                            <div className="flex justify-between items-center mb-3">
                                 <h2 className="text-xl font-bold">Edit Session</h2>
                                 <div className="flex gap-2">
                                     <button onClick={() => { if (window.confirm("Archive this session?")) triggerArchive(selectedSessionId); }} className="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600 text-sm">Force Archive</button>
@@ -606,6 +642,44 @@ const AdminDashboard: React.FC = () => {
                                     </button>
                                 </div>
                             </div>
+
+                            {/* Overlay Links */}
+                            {(() => {
+                                const srcLang = (formData.sourceLanguage || 'ko') as 'ko' | 'en';
+                                const tgtLang = srcLang === 'ko' ? 'en' : 'ko';
+                                const origin = window.location.origin;
+                                const links = [
+                                    { lang: tgtLang, label: tgtLang === 'en' ? '🇺🇸 English Overlay' : '🇰🇷 Korean Overlay', primary: true },
+                                    { lang: 'refined', label: srcLang === 'ko' ? '🇰🇷 Korean (Raw)' : '🇺🇸 English (Raw)', primary: false },
+                                ];
+                                return (
+                                    <div className="flex gap-2 mb-4 p-3 bg-gray-800/60 rounded-lg border border-gray-700 flex-wrap">
+                                        <span className="text-xs text-gray-500 self-center mr-1 font-bold">🖥️ Overlay</span>
+                                        {links.map(({ lang, label, primary }) => {
+                                            const url = `${origin}/overlay/${activeProjectId}/${lang}`;
+                                            return (
+                                                <div key={lang} className="flex items-center gap-1">
+                                                    <button
+                                                        onClick={() => window.open(url, '_blank')}
+                                                        className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${primary ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+                                                    >
+                                                        {label}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => { navigator.clipboard.writeText(url); }}
+                                                        title="URL 복사"
+                                                        className="text-gray-500 hover:text-gray-300 text-xs px-1"
+                                                    >📋</button>
+                                                </div>
+                                            );
+                                        })}
+                                        <button
+                                            onClick={() => window.open(`${origin}/overlay/${activeProjectId}/${tgtLang}?debug=true`, '_blank')}
+                                            className="px-2 py-1.5 rounded text-xs bg-gray-800 hover:bg-gray-700 text-gray-500 border border-gray-700 ml-auto"
+                                        >Debug</button>
+                                    </div>
+                                );
+                            })()}
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-xs text-gray-400">Speaker Name</label>
@@ -657,7 +731,7 @@ const AdminDashboard: React.FC = () => {
                                 </div>
                                 <div className="col-span-2">
                                     <label className="block text-xs text-gray-400">Abstract (Context for AI)</label>
-                                    <textarea className="w-full bg-gray-800 border border-gray-600 rounded p-2 h-32" value={formData.abstract || ''} onChange={e => setFormData({ ...formData, abstract: e.target.value })} />
+                                    <textarea className="w-full bg-gray-800 border border-gray-600 rounded p-2 h-32" placeholder="강연 초록 또는 발표 내용을 입력하세요 (입력할수록 AI 번역 정확도가 높아집니다)" value={formData.abstract || ''} onChange={e => setFormData({ ...formData, abstract: e.target.value })} />
                                 </div>
                                 <div className="col-span-2">
                                     <label className="block text-xs text-gray-400">Keywords (Comma separated)</label>
@@ -755,13 +829,13 @@ const AdminDashboard: React.FC = () => {
 
                             {/* Tabs */}
                             <div className="flex border-b border-gray-600 mb-4">
-                                <button className="px-4 py-2 text-sm font-bold border-b-2 border-blue-500 text-blue-400">Overlay Design</button>
-                                <button className="px-4 py-2 text-sm font-bold text-gray-400 hover:text-white">AI Tuning (Chunking)</button>
+                                <button onClick={() => setSettingsTab('overlay')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'overlay' ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}>Overlay Design</button>
+                                <button onClick={() => setSettingsTab('ai')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'ai' ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}>AI Tuning (Chunking)</button>
                             </div>
 
                             <div className="space-y-6 overflow-y-auto max-h-[60vh]">
                                 {/* Section 0: Audio Engine */}
-                                <div className="bg-gray-700 p-4 rounded-lg">
+                                {settingsTab === 'ai' && <div className="bg-gray-700 p-4 rounded-lg">
                                     <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
                                         🎙️ Audio Engine <span className="text-xs font-normal text-gray-400">(Live Switchable)</span>
                                     </h3>
@@ -786,65 +860,151 @@ const AdminDashboard: React.FC = () => {
                                             </p>
                                         </label>
                                     </div>
-                                </div>
+                                </div>}
 
                                 {/* Section 1: Overlay */}
-                                <div>
-                                    <h3 className="text-sm font-bold text-gray-300 mb-2">Overlay Appearance</h3>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="text-xs text-gray-400 block">Font Size (px)</label>
-                                            <input type="number" className="w-full bg-gray-700 p-2 rounded" value={projectSettings.fontSize} onChange={e => setProjectSettings({ ...projectSettings, fontSize: Number(e.target.value) })} />
+                                {settingsTab === 'overlay' && <div className="space-y-5">
+
+                                    {/* Display Style */}
+                                    <div>
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Display Style</h3>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {(['youtube', 'typing'] as const).map(style => (
+                                                <button key={style}
+                                                    onClick={() => setProjectSettings({ ...projectSettings, displayStyle: style })}
+                                                    className={`py-3 rounded-lg border text-sm font-bold transition-all ${projectSettings.displayStyle === style ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-400 hover:border-gray-400'}`}>
+                                                    {style === 'youtube' ? '🎬 YouTube 스타일' : '⌨️ 타이핑 스타일'}
+                                                </button>
+                                            ))}
                                         </div>
-                                        <div>
-                                            <label className="text-xs text-gray-400 block">Font Color</label>
-                                            <input type="color" className="w-full h-10 bg-gray-700 rounded cursor-pointer" value={projectSettings.fontColor} onChange={e => setProjectSettings({ ...projectSettings, fontColor: e.target.value })} />
-                                        </div>
-                                        <div>
-                                            <label className="text-xs text-gray-400 block">Font Weight</label>
-                                            <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.fontWeight} onChange={e => setProjectSettings({ ...projectSettings, fontWeight: e.target.value as 'normal' | 'bold' | '800' })}>
-                                                <option value="normal">Normal</option>
-                                                <option value="bold">Bold</option>
-                                                <option value="800">Extra Bold</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="text-xs text-gray-400 block">Alignment</label>
-                                            <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.align} onChange={e => setProjectSettings({ ...projectSettings, align: e.target.value as 'left' | 'center' | 'right' })}>
-                                                <option value="left">Left</option>
-                                                <option value="center">Center</option>
-                                                <option value="right">Right</option>
-                                            </select>
-                                        </div>
-                                        <div className="col-span-2">
-                                            <div className="text-[10px] text-gray-500 mt-1">※ Subtitle appearance settings are applied globally.</div>
-                                        </div>
-                                        <div>
-                                            <label className="text-xs text-gray-400 block">Background Color</label>
-                                            <input type="color" className="w-full h-10 bg-gray-700 rounded cursor-pointer" value={projectSettings.bgColor} onChange={e => setProjectSettings({ ...projectSettings, bgColor: e.target.value })} />
-                                        </div>
-                                        <div>
-                                            <label className="text-xs text-gray-400 block">Opacity (0.0 - 1.0)</label>
-                                            <input type="number" step="0.1" min="0" max="1" className="w-full bg-gray-700 p-2 rounded" value={projectSettings.bgOpacity} onChange={e => setProjectSettings({ ...projectSettings, bgOpacity: Number(e.target.value) })} />
-                                        </div>
-                                        <div>
-                                            <label className="text-xs text-gray-400 block">Text Effect</label>
-                                            <select className="w-full bg-gray-700 p-2 rounded" value={projectSettings.textEffect} onChange={e => setProjectSettings({ ...projectSettings, textEffect: e.target.value as 'none' | 'shadow' | 'stroke' })}>
-                                                <option value="none">None</option>
-                                                <option value="shadow">Drop Shadow</option>
-                                                <option value="stroke">Outline (Stroke)</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="text-xs text-gray-400 block">Padding (px)</label>
-                                            <input type="number" className="w-full bg-gray-700 p-2 rounded" value={projectSettings.padding} onChange={e => setProjectSettings({ ...projectSettings, padding: Number(e.target.value) })} />
+                                        {projectSettings.displayStyle === 'typing' && (
+                                            <div className="mt-3">
+                                                <label className="text-xs text-gray-400 block flex justify-between">
+                                                    <span>타이핑 속도 (글자/초)</span>
+                                                    <span className="text-white font-bold">{projectSettings.typingSpeed} chars/s</span>
+                                                </label>
+                                                <input type="range" min="10" max="100" step="5" className="w-full mt-1"
+                                                    value={projectSettings.typingSpeed}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, typingSpeed: Number(e.target.value) })} />
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Layout */}
+                                    <div>
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Layout</h3>
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">표시 줄 수</label>
+                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.maxLines}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, maxLines: Number(e.target.value) })}>
+                                                    {[1,2,3,4,5].map(n => <option key={n} value={n}>{n}줄</option>)}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">정렬</label>
+                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.align}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, align: e.target.value })}>
+                                                    <option value="left">왼쪽</option>
+                                                    <option value="center">가운데</option>
+                                                    <option value="right">오른쪽</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">하단 여백 (px)</label>
+                                                <input type="number" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                    value={projectSettings.bottomOffset}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, bottomOffset: Number(e.target.value) })} />
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
 
+                                    {/* Font */}
+                                    <div>
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Font</h3>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">크기 (px)</label>
+                                                <input type="number" min="12" max="120" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                    value={projectSettings.fontSize}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, fontSize: Number(e.target.value) })} />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">굵기</label>
+                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.fontWeight}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, fontWeight: e.target.value })}>
+                                                    <option value="normal">Normal</option>
+                                                    <option value="bold">Bold</option>
+                                                    <option value="800">Extra Bold</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">자간 (px)</label>
+                                                <input type="number" min="-5" max="20" step="0.5" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                    value={projectSettings.letterSpacing}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, letterSpacing: Number(e.target.value) })} />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">행간</label>
+                                                <input type="number" min="1" max="3" step="0.1" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                    value={projectSettings.lineHeight}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, lineHeight: Number(e.target.value) })} />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">글자 색</label>
+                                                <input type="color" className="w-full h-9 bg-gray-700 rounded cursor-pointer"
+                                                    value={projectSettings.fontColor}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, fontColor: e.target.value })} />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">텍스트 효과</label>
+                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.textEffect}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, textEffect: e.target.value })}>
+                                                    <option value="shadow">드롭 쉐도우</option>
+                                                    <option value="stroke">아웃라인</option>
+                                                    <option value="none">없음</option>
+                                                </select>
+                                            </div>
+                                            <div className="col-span-2">
+                                                <label className="text-xs text-gray-400 block mb-1">폰트 패밀리 (CSS)</label>
+                                                <input type="text" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                    placeholder="sans-serif, Arial, 'Noto Sans KR', ..."
+                                                    value={projectSettings.fontFamily}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, fontFamily: e.target.value })} />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Background */}
+                                    <div>
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Background</h3>
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">배경색</label>
+                                                <input type="color" className="w-full h-9 bg-gray-700 rounded cursor-pointer"
+                                                    value={projectSettings.bgColor}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, bgColor: e.target.value })} />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">투명도 (0~1)</label>
+                                                <input type="number" step="0.05" min="0" max="1" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                    value={projectSettings.bgOpacity}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, bgOpacity: Number(e.target.value) })} />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">좌우 패딩 (px)</label>
+                                                <input type="number" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                    value={projectSettings.padding}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, padding: Number(e.target.value) })} />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="text-[10px] text-gray-500">※ 저장 즉시 오버레이에 실시간 반영됩니다.</div>
+                                </div>}
 
                                 {/* Section 2: AI Tuning */}
-                                <div className="border-t border-gray-700 pt-4">
+                                {settingsTab === 'ai' && <div className="pt-2">
                                     <h3 className="text-sm font-bold text-gray-300 mb-2">AI Processing Tuning</h3>
                                     <p className="text-xs text-gray-500 mb-4">Adjust these values to control when the AI refines the text. Useful for fast/slow speakers.</p>
 
@@ -854,7 +1014,7 @@ const AdminDashboard: React.FC = () => {
                                                 <span>Chunk Interval (Speed Mode)</span>
                                                 <span className="text-white font-bold">{projectSettings.chunkInterval} ms</span>
                                             </label>
-                                            <input type="range" min="500" max="5000" step="100" className="w-full mt-1"
+                                            <input type="range" min="1000" max="10000" step="500" className="w-full mt-1"
                                                 value={projectSettings.chunkInterval}
                                                 onChange={e => setProjectSettings({ ...projectSettings, chunkInterval: Number(e.target.value) })} />
                                             <p className="text-[10px] text-gray-500">Audio is sent every N ms regardless of silence.</p>
@@ -910,7 +1070,7 @@ const AdminDashboard: React.FC = () => {
                                         </div>
                                         <p className="text-[10px] text-gray-500 ml-6">체크 시 Gemini가 정제한 텍스트만 표시됩니다. "쭈꾸미" 같은 오인식 단어가 화면에 노출되지 않습니다.</p>
                                     </div>
-                                </div>
+                                </div>}
                             </div>
 
                             <div className="flex justify-end gap-2 mt-4">

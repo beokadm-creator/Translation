@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.helloWorld = exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.verifyGeminiPipeline = exports.triggerRemaster = exports.remasterSession = exports.onRefineRequest = exports.processAudio = void 0;
+exports.helloWorld = exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.verifyGeminiPipeline = exports.onRefineRequest = exports.processAudio = void 0;
 // Version: Quality Stable v1
 const functions = __importStar(require("firebase-functions"));
 const https_1 = require("firebase-functions/v2/https");
@@ -48,8 +48,6 @@ if (!admin.apps.length) {
 var stt_1 = require("./stt");
 Object.defineProperty(exports, "processAudio", { enumerable: true, get: function () { return stt_1.processAudio; } });
 Object.defineProperty(exports, "onRefineRequest", { enumerable: true, get: function () { return stt_1.onRefineRequest; } });
-Object.defineProperty(exports, "remasterSession", { enumerable: true, get: function () { return stt_1.remasterSession; } });
-Object.defineProperty(exports, "triggerRemaster", { enumerable: true, get: function () { return stt_1.triggerRemaster; } });
 Object.defineProperty(exports, "verifyGeminiPipeline", { enumerable: true, get: function () { return stt_1.verifyGeminiPipeline; } });
 var diagnose_1 = require("./diagnose"); // New Diagnostic Tool
 Object.defineProperty(exports, "diagnoseSystem", { enumerable: true, get: function () { return diagnose_1.diagnoseSystem; } });

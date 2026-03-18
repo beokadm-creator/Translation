@@ -1,25 +1,39 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useProjectStream } from '../hooks/useProjectStream';
 import { rtdb } from '../firebase';
 import { ref, onValue } from 'firebase/database';
 import type { ProjectSettings } from '../types';
 
+type OverlaySettings = NonNullable<ProjectSettings['overlay']>;
+
+const DEFAULT_SETTINGS: OverlaySettings = {
+    fontSize: 48,
+    fontColor: '#ffffff',
+    fontWeight: 'bold',
+    bgColor: '#000000',
+    bgOpacity: 1,
+    padding: 40,
+    textEffect: 'none',
+    align: 'left',
+    displayStyle: 'youtube',
+    letterSpacing: 0,
+    maxLines: 4,
+    lineHeight: 1.6,
+    fontFamily: 'sans-serif',
+    typingSpeed: 35,
+    bottomOffset: 0,
+};
+
 const OverlayView: React.FC = () => {
-    const { projectId, lang } = useParams<{ projectId: string, lang?: string }>();
+    const { projectId, lang } = useParams<{ projectId: string; lang?: string }>();
     const [searchParams] = useSearchParams();
     const isDebug = searchParams.get('debug') === 'true';
     const activeLang = lang || 'refined';
+    const activeProjectId = projectId || 'default';
 
-    const activeProjectId = projectId || "default";
     const { streamData, loading, error } = useProjectStream(activeProjectId, { subscribe: true });
-
-    // Settings
-    const [settings, setSettings] = useState<NonNullable<ProjectSettings['overlay']>>({
-        fontSize: 48, fontColor: '#ffffff', fontWeight: 'bold', bgColor: '#000000', bgOpacity: 0.6,
-        padding: 20, textEffect: 'shadow', align: 'center'
-    });
-    const [hideRaw, setHideRaw] = useState<boolean>(true);
+    const [settings, setSettings] = useState<OverlaySettings>(DEFAULT_SETTINGS);
 
     useEffect(() => {
         const settingsRef = ref(rtdb, `projects/${activeProjectId}/settings`);
@@ -27,10 +41,7 @@ const OverlayView: React.FC = () => {
             if (snap.exists()) {
                 const val = snap.val();
                 if (val.overlay) {
-                    setSettings((prev) => ({ ...prev, ...(val.overlay as Partial<ProjectSettings['overlay']>) }));
-                }
-                if (val.hideRaw !== undefined) {
-                    setHideRaw(val.hideRaw);
+                    setSettings((prev) => ({ ...DEFAULT_SETTINGS, ...prev, ...(val.overlay as Partial<OverlaySettings>) }));
                 }
             }
         });
@@ -38,154 +49,137 @@ const OverlayView: React.FC = () => {
     }, [activeProjectId]);
 
     // ── Data Processing ───────────────────────────────────────────────────────
-    type SegEntry = { id: string; text: string; isRaw: boolean };
-    const [displayLines, setDisplayLines] = useState<SegEntry[]>([]);
+    // 오버레이는 항상 final 세그먼트만 표시 (원문/번역 중 텍스트 숨김)
+    const [displayText, setDisplayText] = useState<string>('');
 
     useEffect(() => {
-        if (!streamData) {
-            setDisplayLines([]);
-            return;
-        }
+        if (!streamData) { setDisplayText(''); return; }
 
-        type StreamSegment = {
-            id: string;
-            original?: string;
-            refined?: string;
-            en?: string;
-            ja?: string;
-            status?: string;
-            timestamp: number;
+        type RawSeg = {
+            id: string; original?: string; refined?: string;
+            ko?: string; en?: string; status?: string; timestamp: number;
         };
 
         const segments = Object.entries(streamData)
-            .map(([key, val]: [string, unknown]) => {
-                const segment = val as StreamSegment;
-                return { ...segment, id: key };
-            })
-            .filter(s => {
-                if (s.status === 'final') return true;
-                if (s.status === 'raw' || s.status === 'translating') {
-                    return !hideRaw;
-                }
-                return false;
-            })
-            .sort((a, b) => a.timestamp - b.timestamp);
+            .map(([key, val]: [string, unknown]) => ({ ...(val as RawSeg), id: key }))
+            .filter(s => s.status === 'final')
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .slice(-15);
 
-        const validSegments = segments.map(s => {
-            let text = "";
-            if (activeLang === 'refined') text = s.refined ?? s.original ?? "";
-            else if (activeLang === 'en') text = s.en ?? "";
-            else if (activeLang === 'ja') text = s.ja ?? "";
-            return { id: s.id, text, isRaw: s.status !== 'final' };
-        }).filter(s => s.text);
+        const texts = segments.map(s => {
+            if (activeLang === 'ko') return s.ko ?? s.refined ?? s.original ?? '';
+            if (activeLang === 'en') return s.en ?? s.refined ?? s.original ?? '';
+            return s.refined ?? s.original ?? '';
+        }).filter(Boolean);
 
-        const lastLines = validSegments.slice(-4);
-
-        Promise.resolve().then(() => {
-            setDisplayLines(lastLines);
-        });
+        setDisplayText(texts.join(' '));
     }, [streamData, activeLang]);
 
+    // ── 타이핑 애니메이션 ─────────────────────────────────────────────────────
+    const [visibleText, setVisibleText] = useState('');
+    const typingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const visibleLengthRef = useRef(0);
 
-    // ── Styles ────────────────────────────────────────────────────────────────
-    const containerStyle: React.CSSProperties = {
-        position: 'fixed',
-        bottom: 50,
-        left: 0,
-        width: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: settings.align === 'left' ? 'flex-start' : settings.align === 'right' ? 'flex-end' : 'center',
-        padding: `0 ${settings.padding}px`,
-        pointerEvents: 'none',
-        zIndex: 9999,
-        gap: '10px',
-    };
+    useEffect(() => {
+        if (typingIntervalRef.current) { clearInterval(typingIntervalRef.current); typingIntervalRef.current = null; }
 
-    const bgHex = `${settings.bgColor}${Math.round(settings.bgOpacity * 255).toString(16).padStart(2, '0')}`;
+        if (settings.displayStyle !== 'typing') {
+            setVisibleText(displayText);
+            visibleLengthRef.current = displayText.length;
+            return;
+        }
 
-    const lineStyle = (isLast: boolean, isRaw: boolean): React.CSSProperties => ({
-        fontSize: `${settings.fontSize}px`,
-        color: isRaw ? '#a8b5c8' : settings.fontColor,
-        fontWeight: settings.fontWeight,
-        backgroundColor: bgHex,
-        padding: '10px 30px',
-        borderRadius: '12px',
-        textAlign: settings.align as React.CSSProperties['textAlign'],
-        textShadow: settings.textEffect === 'shadow' ? '2px 2px 4px rgba(0,0,0,0.8)' : 'none',
-        WebkitTextStroke: settings.textEffect === 'stroke' ? '2px black' : 'none',
-        maxWidth: '90%',
-        transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-        opacity: isLast ? 1 : 0.7,
-        border: isRaw ? '1px solid rgba(99,102,241,0.5)' : 'none',
-    });
+        if (!displayText) { setVisibleText(''); visibleLengthRef.current = 0; return; }
 
+        // 현재 visibleText가 새 displayText의 앞부분이면 이어서 타이핑, 아니면 처음부터
+        const currentSlice = displayText.slice(0, visibleLengthRef.current);
+        if (!displayText.startsWith(currentSlice) || visibleLengthRef.current > displayText.length) {
+            visibleLengthRef.current = 0;
+            setVisibleText('');
+        }
 
-    // ── Debug Views ───────────────────────────────────────────────────────────
-    if (loading && isDebug) return <div className="text-black bg-white p-4">Loading Stream...</div>;
-    if (error && isDebug) return <div className="text-red-500 bg-white p-4">Error: {error}</div>;
+        const ms = Math.max(16, Math.floor(1000 / Math.max(1, settings.typingSpeed || 35)));
+        typingIntervalRef.current = setInterval(() => {
+            if (visibleLengthRef.current >= displayText.length) {
+                clearInterval(typingIntervalRef.current!);
+                typingIntervalRef.current = null;
+                return;
+            }
+            visibleLengthRef.current += 1;
+            setVisibleText(displayText.slice(0, visibleLengthRef.current));
+        }, ms);
 
-    if (displayLines.length === 0 && isDebug) {
+        return () => { if (typingIntervalRef.current) { clearInterval(typingIntervalRef.current); typingIntervalRef.current = null; } };
+    }, [displayText, settings.displayStyle, settings.typingSpeed]);
+
+    const renderedText = settings.displayStyle === 'typing' ? visibleText : displayText;
+
+    // ── 줄 수 기반 컨테이너 높이 계산 ────────────────────────────────────────
+    const fontSize = settings.fontSize ?? 48;
+    // lineHeight를 정수 px로 고정 → scrollTop 스냅이 소수점 없이 정확히 맞음
+    const lineHeightPx = Math.round(fontSize * (settings.lineHeight ?? 1.6));
+    const maxLines = Math.max(1, settings.maxLines || 4);
+    const containerHeightPx = lineHeightPx * maxLines;
+
+    // scrollTop을 줄 높이 배수로 스냅 → 항상 완전한 줄만 보임, 잔재 없음
+    const containerRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        requestAnimationFrame(() => {
+            const maxScroll = el.scrollHeight - el.clientHeight;
+            if (maxScroll <= 0) return;
+            el.scrollTop = Math.floor(maxScroll / lineHeightPx) * lineHeightPx;
+        });
+    }, [renderedText, lineHeightPx, containerHeightPx]);
+
+    // ── Debug ─────────────────────────────────────────────────────────────────
+    if (loading && isDebug) return <div style={{ color: '#fff', background: '#000', padding: 16 }}>Loading...</div>;
+    if (error && isDebug) return <div style={{ color: 'red', background: '#fff', padding: 16 }}>Error: {error}</div>;
+
+    if (!renderedText && isDebug) {
         return (
-            <div style={{ width: '100vw', height: '100vh', background: '#0f0' }}>
-                <div style={containerStyle}>
-                    <div style={lineStyle(true, false)}>
-                        [DEBUG: Waiting for subtitles...] <br />
-                        Project: {activeProjectId} <br />
-                        Lang: {activeLang}
-                    </div>
-                </div>
+            <div style={{ width: '100vw', height: '100vh', background: settings.bgColor || '#000', padding: `${settings.padding ?? 40}px`, boxSizing: 'border-box' }}>
+                <p style={{ color: settings.fontColor || '#fff', fontSize: `${fontSize}px`, margin: 0 }}>
+                    [DEBUG] {activeProjectId} / {activeLang} | {maxLines}줄 × {lineHeightPx}px = {containerHeightPx}px
+                </p>
             </div>
         );
     }
 
-    if (displayLines.length === 0) return <div style={{ width: '100vw', height: '100vh', background: 'transparent' }} />;
+    if (!renderedText) return <div style={{ width: '100vw', height: '100vh', background: settings.bgColor || '#000000' }} />;
 
-    // ── Main Render ───────────────────────────────────────────────────────────
+    // ── Render ────────────────────────────────────────────────────────────────
     return (
-        <div style={{ width: '100vw', height: '100vh', background: 'transparent' }}>
-            <style>{`
-                @keyframes shimmer-overlay {
-                    0% { background-position: 200% 0; }
-                    100% { background-position: -200% 0; }
-                }
-                @keyframes fade-in-overlay {
-                    from { opacity: 0; transform: translateX(-50%) translateY(6px); }
-                    to { opacity: 1; transform: translateX(-50%) translateY(0); }
-                }
-                @keyframes blink-cursor-overlay {
-                    0%, 100% { opacity: 1; }
-                    50% { opacity: 0; }
-                }
-                @keyframes spin-overlay {
-                    from { transform: rotate(0deg); }
-                    to { transform: rotate(360deg); }
-                }
-            `}</style>
-
-
-            {/* Subtitle Lines */}
-            <div style={containerStyle}>
-                {displayLines.map((line, idx) => {
-                    const isLast = idx === displayLines.length - 1;
-                    return (
-                        <div key={line.id} style={lineStyle(isLast, line.isRaw)}>
-                            {line.text}
-                            {/* Blinking cursor for latest raw line */}
-                            {line.isRaw && isLast && (
-                                <span style={{
-                                    display: 'inline-block',
-                                    width: '3px',
-                                    height: '0.85em',
-                                    backgroundColor: '#818cf8',
-                                    marginLeft: '6px',
-                                    verticalAlign: 'text-bottom',
-                                    animation: 'blink-cursor-overlay 1s step-end infinite',
-                                }} />
-                            )}
-                        </div>
-                    );
-                })}
+        <div style={{
+            width: '100vw',
+            height: '100vh',
+            background: settings.bgColor || '#000000',
+            display: 'flex',
+            alignItems: 'flex-end',
+            padding: `${settings.padding ?? 40}px`,
+            boxSizing: 'border-box',
+        }}>
+            <div ref={containerRef} style={{
+                width: '100%',
+                height: `${containerHeightPx}px`,
+                overflow: 'hidden',
+            }}>
+                <p style={{
+                    margin: 0,
+                    fontSize: `${fontSize}px`,
+                    fontFamily: settings.fontFamily || 'sans-serif',
+                    fontWeight: settings.fontWeight,
+                    color: settings.fontColor || '#ffffff',
+                    // 정수 px로 지정 → CSS와 JS 계산값 일치, 잔재 없음
+                    lineHeight: `${lineHeightPx}px`,
+                    letterSpacing: `${settings.letterSpacing ?? 0}px`,
+                    wordBreak: 'keep-all',
+                    overflowWrap: 'break-word',
+                    textAlign: settings.align as React.CSSProperties['textAlign'],
+                }}>
+                    {renderedText}
+                </p>
             </div>
         </div>
     );

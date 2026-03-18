@@ -5,13 +5,22 @@ import { ref, onValue, get } from 'firebase/database';
 import { useProjectStream } from '../hooks/useProjectStream';
 import TextItem from './TextItem';
 
-const HALLUCINATION_BLACKLIST = ['자막제작', '자막 제작', 'Subtitles by', 'MBC 뉴스', 'Copyright', 'http', '.co.kr'];
+const HALLUCINATION_BLACKLIST = [
+    '자막제작', '자막 제작', 'Subtitles by', 'Subtitle by', 'MBC 뉴스', 'SBS 뉴스', 'KBS 뉴스',
+    'Copyright', 'http', '.co.kr',
+    '알 수 없는 소리', '(박수)', '[박수]', '(웃음)', '[웃음]', '(환호)', '[환호]',
+    '(음악)', '[음악]', '(노래)', '[노래]', '(소음)', '[소음]',
+    '[Music]', '(Music)', '[Applause]', '(Applause)', '[Laughter]', '(Laughter)',
+    '번역 제공', '자막 제공',
+];
 const isGarbage = (text: string) => {
     if (!text) return false;
     if (HALLUCINATION_BLACKLIST.some(bad => text.includes(bad))) return true;
     if (/(.+)\1{2,}/.test(text)) return true;
     if (/(.*,){4,}/.test(text)) return true;
     if (/^(Implant, Surgery|임플란트, 보철)/i.test(text)) return true;
+    // 전체가 괄호/대괄호 소리 표기인 경우
+    if (/^\s*[\(\[][^\)\]]{1,40}[\)\]]\s*$/.test(text.trim())) return true;
     return false;
 };
 

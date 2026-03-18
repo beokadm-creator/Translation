@@ -16,36 +16,23 @@ let _openai: OpenAI | null = null
 
 // ── 4개 Gemini API 키 ─────────────────────────────────────────────────────────
 const GEMINI_KEYS = [
-    process.env.GEMINI_KEY_TRANSLATE || "AIzaSyAA6tsr0l11KlpiVNDCKEn4GNJRM9u962o",
-    process.env.GEMINI_KEY_MEDICAL || "AIzaSyAYO3OAfzPxa1kZGyPGOoJIbiRewaumVI8",
-    process.env.GEMINI_KEY_EDITOR || "AIzaSyAMzzrp54aQywsPF-7BG4rPTkBVbda7jNc",
-    process.env.GEMINI_KEY_CONTEXT || "AIzaSyDMbGlFRZrVSJiUzwuWCTFT5gEjCEVbgIA",
-]
+    process.env.GEMINI_KEY_TRANSLATE || "",
+    process.env.GEMINI_KEY_MEDICAL   || "",
+    process.env.GEMINI_KEY_EDITOR    || "",
+    process.env.GEMINI_KEY_CONTEXT   || "",
+].filter(Boolean) // 빈 키 제거 (환경변수 미설정 방어)
 
 let _keyIndex = 0
 
-// ✅ 모델 설정: gemini-2.5-flash (최신 API 키용)
-// 만약 404가 발생하면 1.5-flash-latest 등으로 폴백 시도 가능
+// ✅ 모델 설정: gemini-2.5-flash (이 API 키에서 사용 가능한 유일한 모델)
 const FLASH_URL = (key: string) =>
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`
-const PRO_URL = (key: string) =>
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${key}`
 
 // ── Hallucination 필터 ────────────────────────────────────────────────────────
-const HALLUCINATION_BLACKLIST = [
-    '자막제작', '자막 제작', 'Subtitles by', 'Provided by', 'Copyright', 'http://', 'https://', '.co.kr',
-    'Thank you for watching', 'Thanks for watching', 'Thank you for your attention',
-    '시청해 주셔서 감사합니다', '시청해주셔서 감사합니다', '구독과 좋아요',
-    'MBC 뉴스', 'SBS 뉴스', 'KBS 뉴스', 'YTN 뉴스', 'JTBC 뉴스', '연합뉴스',
-    'Please subscribe', 'Click like', 'Like and subscribe',
-    '유료광고', '유료 광고', 'paid advertisement', '이 영상은',
-    'sites.google.com', 'cst.eu.com', 'Amara.org', 'amara.org', 'disclaimer at'
-]
-
 // 정적 URL 도메인만 핀포인트로 필터 (전체 문장 삭제 방지)
 const URL_FILTER_REGEX = /(?:https?:\/\/)?(?:www\.)?(?:sites\.google\.com|cst\.eu\.com|Amara\.org|amara\.org|youtube\.com|youtu\.be)\S*/gi
 // 메타 언어 단어만 핀포인트로 필터
-const META_FILTER_REGEX = /(?:Thank you for watching\.?|Thanks for watching\.?|Thank you\.?|시청해 주셔서 감사합니다\.?|시청해주셔서 감사합니다\.?|MBC 뉴스|SBS 뉴스|KBS 뉴스|YTN 뉴스|JTBC 뉴스|연합뉴스|유료광고|유료 광고|paid advertisement|disclaimer|면책 조항|면책조항)/gi
+const META_FILTER_REGEX = /(?:Thank you for watching\.?|Thanks for watching\.?|Thank you\.?|시청해 주셔서 감사합니다\.?|시청해주셔서 감사합니다\.?|MBC 뉴스|SBS 뉴스|KBS 뉴스|YTN 뉴스|JTBC 뉴스|연합뉴스|유료광고|유료 광고|paid advertisement|disclaimer|면책 조항|면책조항|영상편집 및 자막|자막 제공 및 광고|광고를 포함하고|알 수 없는 소리|\[Music\]|\(Music\)|\[music\]|\(music\)|\[Applause\]|\(Applause\)|\[applause\]|\(applause\)|\[Laughter\]|\(Laughter\)|\[laughter\]|\(laughter\)|\(박수\)|\[박수\]|\(웃음\)|\[웃음\]|\(환호\)|\[환호\]|\(음악\)|\[음악\]|\(노래\)|\[노래\]|\(소음\)|\[소음\]|\(침묵\)|\[침묵\]|\(무음\)|\[무음\])/gi
 
 const sanitize = (s: string): string => {
     let t = (s || "").toString()
@@ -72,9 +59,13 @@ const isGarbage = (text: string, _originalText?: string): boolean => {
 
     if (hasRepetitionLoop(text)) return true
 
+    // 전체가 괄호/대괄호 소리 표기인 경우 (Whisper 무음 환각)
+    if (/^\s*[\(\[][^\)\]]{1,40}[\)\]]\s*[\.!]?\s*$/.test(text.trim())) return true
+
     // 침묵 시 흔히 나오는 짧은 환각어 필터 (짧은 문구에서만 발동, 긴 정상 발화는 보존)
-    const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독|좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사)/i
-    if (filterGarbage.test(text.trim()) && text.length < 60) return true
+    // 주의: '좋아요' / '구독' 단독 사용 금지 - 정상 발화("좋아요, 다음으로...") 삭제됨
+    const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독과 좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사|^감사합니다\.?$|영상편집|자막 제공|광고를 포함|알 수 없는 소리|subtitles by|subtitle by|자막.*제작|번역.*제공|MBC 뉴스|SBS 뉴스|KBS 뉴스)/i
+    if (filterGarbage.test(text.trim()) && text.length < 80) return true
 
     // 성음만으로 된 건 버림
     const alphanumeric = text.replace(/[^a-zA-Z0-9가-힣ㄱ-ㅎㅏ-ㅣ]/g, '')
@@ -113,6 +104,31 @@ const callGemini = async (apiKey: string, prompt: string, timeoutMs = 12000): Pr
 }
 
 // ── 번역 파이프라인 ───────────────────────────────────────────────────────────
+
+// 번역 결과 유효성 검사 (필수 target 필드가 모두 채워졌는지 확인)
+const validateTranslation = (data: Record<string, unknown>, targets: readonly string[]): boolean => {
+    if (!data) return false
+    for (const t of targets) {
+        const val = data[t]
+        if (!val || String(val).trim().length === 0) return false
+    }
+    return true
+}
+
+const buildTranslationResult = (
+    data: Record<string, unknown>,
+    sourceLang: string,
+    rawText: string
+): { refined: string; ko: string; en: string; isMedical: boolean } => {
+    const refined = sanitize((data.refined as string) || rawText)
+    return {
+        refined,
+        ko: sourceLang === 'ko' ? refined : sanitize((data.ko as string) || ''),
+        en: sourceLang === 'en' ? refined : sanitize((data.en as string) || ''),
+        isMedical: (data.isMedical as boolean) ?? false
+    }
+}
+
 const translateWithFallback = async (
     rawText: string,
     sourceLang: string,
@@ -139,66 +155,44 @@ const translateWithFallback = async (
         `3. OUTPUT JSON ONLY.`,
         ``,
         `EXAMPLES:`,
-        `[INPUT] "The implant fixture was placed."`,
-        `{"refined": "The implant fixture was placed.", "ko": "임플란트 픽스처가 식립되었습니다.", "isMedical": true}`,
-        `[INPUT] "Uh, so, we did the bone graft."`,
+        `[INPUT KO] "임플란트 픽스처를 식립했습니다."`,
+        `{"refined": "임플란트 픽스처를 식립했습니다.", "en": "The implant fixture was placed.", "isMedical": true}`,
+        `[INPUT EN] "Uh, so, we did the bone graft."`,
         `{"refined": "So, we did the bone graft.", "ko": "그래서 우리는 골이식을 진행했습니다.", "isMedical": true}`,
         ``,
-        `CRITICAL: All language fields MUST be filled containing the translated text. Never return empty strings for translations. Even if the input is a single word or fragment, YOU MUST TRANSLATE IT.`,
+        `CRITICAL: All language fields MUST be filled. Never return empty strings. Even for fragments, YOU MUST TRANSLATE.`,
         `FORMAT: {"refined": "...", ${transFields}, "isMedical": true}`
     ].filter(Boolean).join('\n')
 
-    const startIdx = _keyIndex % GEMINI_KEYS.length
-    _keyIndex++
+    if (GEMINI_KEYS.length === 0) {
+        functions.logger.error("[Translate] No Gemini keys available")
+        const fallback = sanitize(rawText)
+        return { refined: fallback, ko: fallback, en: fallback, isMedical: false }
+    }
 
-    for (let i = 0; i < GEMINI_KEYS.length; i++) {
-        const key = GEMINI_KEYS[(startIdx + i) % GEMINI_KEYS.length]
-        const data = await callGemini(key, prompt, 12000)
-
-        if (data) {
-            // Validate that required translation fields exist and are not empty
-            let isValid = true;
-            if (sourceLang !== 'ko' && (!data.ko || data.ko.toString().trim().length === 0)) isValid = false;
-            if (sourceLang !== 'en' && (!data.en || data.en.toString().trim().length === 0)) isValid = false;
-            // if (sourceLang !== 'ja' && (!data.ja || data.ja.toString().trim().length === 0)) isValid = false; // Optional depending on config, but user only cares about ko right now mostly. Let's strictly check targets:
-
-            targets.forEach(t => {
-                if (!data[t] || data[t].toString().trim().length === 0) isValid = false;
-            });
-
-            if (isValid) {
-                functions.logger.info("[Translate] OK", {
-                    ms: Date.now() - tStart,
-                    key: key.slice(0, 10),
-                    srcLen: rawText.length,
-                    koLen: data.ko?.length || 0,
-                    enLen: data.en?.length || 0
+    // ── 4개 키 동시 병렬 호출 → 가장 빠른 유효 응답 사용 ──────────────────
+    // gemini-2.5-flash는 thinking으로 10-20초 소요. 순차 시도 시 timeout 초과 반복.
+    // Promise.any()로 4개를 동시에 쏘면 가장 빠른 키가 응답하는 즉시 사용.
+    try {
+        const data = await Promise.any(
+            GEMINI_KEYS.map(key =>
+                callGemini(key, prompt, 22000).then(d => {
+                    if (!d || !validateTranslation(d, targets)) throw new Error('invalid')
+                    return d as Record<string, unknown>
                 })
-                const refined = sanitize(data.refined || rawText)
-                return {
-                    refined,
-                    ko: sourceLang === 'ko' ? refined : sanitize(data.ko || ''),
-                    en: sourceLang === 'en' ? refined : sanitize(data.en || ''),
-                    isMedical: data.isMedical ?? false
-                }
-            } else {
-                functions.logger.warn("[Translate] Missing required translation fields, retrying...", {
-                    ko: !!data.ko, en: !!data.en,
-                    key: key.slice(0, 10),
-                    rawResponseStr: JSON.stringify(data).slice(0, 100)
-                });
-            }
-        }
+            )
+        )
+        functions.logger.info("[Translate] OK", {
+            ms: Date.now() - tStart, srcLen: rawText.length
+        })
+        return buildTranslationResult(data, sourceLang, rawText)
+    } catch {
+        // AggregateError: 모든 키 실패
     }
 
-    functions.logger.error(`[Translate] All ${GEMINI_KEYS.length} keys failed to return valid translations for input:`, { input: rawText.slice(0, 50) });
-
-    return {
-        refined: sanitize(rawText),
-        ko: sourceLang === 'ko' ? sanitize(rawText) : '',
-        en: sourceLang === 'en' ? sanitize(rawText) : '',
-        isMedical: false
-    }
+    functions.logger.error(`[Translate] All ${GEMINI_KEYS.length} keys failed → raw text fallback`, { input: rawText.slice(0, 50) })
+    const fallback = sanitize(rawText)
+    return { refined: fallback, ko: fallback, en: fallback, isMedical: false }
 }
 
 // ── OpenAI 클라이언트 ─────────────────────────────────────────────────────────
@@ -261,8 +255,8 @@ export const processAudio = functions
             let sessionContext = ""
             let previousContext = ""
             let customKeywords = ""
-            let minLength = 30
-            let timeoutMs = 5000
+            let minLength = 20
+            let timeoutMs = 3000
             let sentenceEnd = true
 
             // 설정 로드
@@ -274,32 +268,38 @@ export const processAudio = functions
                     projectRef.child('settings').get()
                 ])
 
-                const projectSettings = projectSettingsSnap.val() || {}
-                // Fallback: If no active session, try to guess from project's primary target
-                if (projectSettings.targetLanguages === 'ko' || (Array.isArray(projectSettings.targetLanguages) && projectSettings.targetLanguages.includes('ko'))) {
-                    sourceLang = 'en'
-                } else if (projectSettings.targetLanguages === 'en' || (Array.isArray(projectSettings.targetLanguages) && projectSettings.targetLanguages.includes('en'))) {
-                    sourceLang = 'ko'
-                }
-
                 if (activeSnap.exists()) {
+                    // ── 우선순위 1: 활성 세션의 sourceLanguage ─────────────────────
                     activeSessionId = activeSnap.val()
-                    console.log(`[STT] Active Session found: ${activeSessionId}`)
+                    functions.logger.info(`[STT] Active Session: ${activeSessionId}`)
                     const sSnap = await projectRef.child(`sessions/${activeSessionId}`).get()
                     if (sSnap.exists()) {
                         const s = sSnap.val()
                         sourceLang = s.sourceLanguage || sourceLang
-                        console.log(`[STT] Session language: ${sourceLang}`)
+                        functions.logger.info(`[STT] Session language: ${sourceLang}`)
                         const affiliationStr = s.affiliation ? `, Affiliation: ${s.affiliation}` : ''
                         const abstractStr = s.abstract ? `, Abstract: ${s.abstract}` : ''
                         const keywordsStr = s.keywords ? `, Keywords: ${s.keywords}` : ''
                         sessionContext = `Speaker: ${s.speaker}${affiliationStr}, Topic: ${s.topic}${abstractStr}${keywordsStr}`
-                        customKeywords = s.keywords || ""
+                        // Whisper prompt에 연자명·소속·키워드 모두 포함 → 고유명사 오인식 방지
+                        const speakerTerms = [s.speaker, s.affiliation, s.topic].filter(Boolean).join(', ')
+                        customKeywords = [s.keywords, speakerTerms].filter(Boolean).join(', ')
                     } else {
-                        console.warn(`[STT] Active Session ${activeSessionId} data missing in DB`)
+                        functions.logger.warn(`[STT] Active Session ${activeSessionId} data missing in DB`)
                     }
                 } else {
-                    console.log(`[STT] No Active Session in RTDB, using fallback lang: ${sourceLang}`)
+                    // ── 우선순위 2: 세션 없을 때 projectSettings targetLanguages 역추론 ──
+                    // queryLang(클라이언트 전달값)이 이미 초기값이므로 여기서만 보정
+                    const projectSettings = projectSettingsSnap.val() || {}
+                    const tgt = projectSettings.targetLanguages
+                    const tgtArr: string[] = Array.isArray(tgt) ? tgt : (tgt ? [tgt] : [])
+                    if (tgtArr.includes('ko') && !tgtArr.includes('en')) {
+                        sourceLang = 'en' // 타겟이 한국어면 소스는 영어
+                    } else if (tgtArr.includes('en') && !tgtArr.includes('ko')) {
+                        sourceLang = 'ko' // 타겟이 영어면 소스는 한국어
+                    }
+                    // 그 외(양방향이거나 타겟 미설정): queryLang || 'ko' 유지
+                    functions.logger.info(`[STT] No active session. Using lang: ${sourceLang}`)
                 }
                 if (chunkSnap.exists()) {
                     const sett = chunkSnap.val()
@@ -325,8 +325,14 @@ export const processAudio = functions
 
             const stt = await openai.audio.transcriptions.create({
                 file: audioStream, model: "whisper-1", language: sourceLang,
-                prompt: whisperPrompt, temperature: 0
+                prompt: whisperPrompt, temperature: 0,
             })
+            const whisperMs = Date.now() - tWhisper
+            functions.logger.info("[Whisper]", { ms: whisperMs })
+
+            // HealthDashboard WHISPER 상태 표시용 타임스탬프 기록 (비차단)
+            projectRef.child('status/services/openai').update({ ts: Date.now() }).catch(() => {})
+
             const sttText = (stt?.text || "").trim()
             const rawText = sanitize(sttText)
 
@@ -351,33 +357,48 @@ export const processAudio = functions
             // 응답 즉시 전송 (로그에서 undefined 안 나오게 text 포함)
             res.status(200).json({ success: true, id, text: rawText, stage: "translating" })
 
-            // ── STEP 3: 버퍼링 및 번역 (Background) ──────────────────────────
-            const stateSnap = await projectRef.child('state').get()
-            const st = stateSnap.val() || {}
-            let bufferText = (st.bufferText || "").toString()
-            let bufferIds = Array.isArray(st.bufferIds) ? st.bufferIds : []
-            let lastGeminiTime = Number(st.lastGeminiTime || 0)
+            // ── STEP 3: 버퍼링 및 번역 (RTDB Transaction - Race condition 완전 제거) ──
+            // transaction()은 read→modify→write를 서버 레벨에서 원자적으로 처리.
+            // 동시 요청이 있으면 RTDB가 자동으로 재시도하여 데이터 유실 없음.
+            let flushData: { targetId: string; idsToDelete: string[]; bufferText: string } | null = null
 
-            if (bufferIds.length === 0) lastGeminiTime = Date.now()
+            await projectRef.child('state').transaction((currentState: Record<string, unknown> | null) => {
+                const st = (currentState || {}) as Record<string, unknown>
+                const currentBufferText = ((st.bufferText as string) || '').toString()
+                const currentBufferIds: string[] = Array.isArray(st.bufferIds) ? (st.bufferIds as string[]) : []
 
-            bufferText = bufferText ? bufferText + " " + rawText : rawText
-            bufferIds.push(id)
+                // 버퍼가 비어있으면 지금부터 타이머 시작
+                const lastGeminiTime = currentBufferIds.length === 0
+                    ? Date.now()
+                    : Number(st.lastGeminiTime || Date.now())
 
-            const timeDiff = Date.now() - lastGeminiTime
-            const isSentenceEnd = sentenceEnd && /[.!?]$/.test(bufferText.trim())
-            const isLongEnough = bufferText.length >= minLength
-            const isTimeOut = timeDiff >= timeoutMs
+                const newBufferText = currentBufferText ? currentBufferText + ' ' + rawText : rawText
+                const newBufferIds = [...currentBufferIds, id]
 
-            if (isSentenceEnd || isLongEnough || isTimeOut) {
-                // FLUSH
-                const targetId = bufferIds[0]
-                const idsToDelete = bufferIds.slice(1)
+                const timeDiff = Date.now() - lastGeminiTime
+                const isSentenceEnd = sentenceEnd && /[.!?]$/.test(newBufferText.trim())
+                const isLongEnough = newBufferText.length >= minLength
+                const isTimeOut = timeDiff >= timeoutMs
 
-                await projectRef.child('state').update({ bufferText: "", bufferIds: [], lastGeminiTime: Date.now() })
+                if (isSentenceEnd || isLongEnough || isTimeOut) {
+                    // FLUSH: 상태 초기화 + 플러시 데이터 캡처
+                    flushData = {
+                        targetId: newBufferIds[0],
+                        idsToDelete: newBufferIds.slice(1),
+                        bufferText: newBufferText
+                    }
+                    return { bufferText: '', bufferIds: [], lastGeminiTime: Date.now(), lastRefinedList: (st.lastRefinedList as string[]) || [] }
+                } else {
+                    // BUFFERING: 현재 세그먼트 추가
+                    return { ...st, bufferText: newBufferText, bufferIds: newBufferIds, lastGeminiTime }
+                }
+            })
 
+            if (flushData) {
+                const { targetId, idsToDelete, bufferText: flushText } = flushData as { targetId: string; idsToDelete: string[]; bufferText: string }
                 try {
                     const { refined, ko, en, isMedical } = await translateWithFallback(
-                        bufferText, sourceLang, previousContext, sessionContext
+                        flushText, sourceLang, previousContext, sessionContext
                     )
                     const updates: Record<string, unknown> = {}
                     const base = `projects/${projectId}/stream/${targetId}`
@@ -401,12 +422,16 @@ export const processAudio = functions
 
                     await admin.database().ref().update(updates)
                 } catch {
-                    await admin.database().ref(`projects/${projectId}/stream/${targetId}/status`).set("final")
+                    // Gemini 실패 시 버퍼된 모든 세그먼트를 "final"로 복구
+                    const errorFixes: Record<string, unknown> = {}
+                    errorFixes[`projects/${projectId}/stream/${targetId}/status`] = "final"
+                    for (const pid of idsToDelete) {
+                        errorFixes[`projects/${projectId}/stream/${pid}/status`] = "final"
+                    }
+                    await admin.database().ref().update(errorFixes)
                 }
-            } else {
-                // KEEP BUFFERING (상태는 계속 translating 유지)
-                await projectRef.child('state').update({ bufferText, bufferIds })
             }
+            // flushData가 null이면 버퍼링 중 → transaction이 이미 상태 저장 완료
 
         } catch (e: any) {
             try { res.status(500).json({ success: false, error: e.message }) } catch { }
@@ -416,22 +441,10 @@ export const processAudio = functions
 // ── Legacy Triggers (Disabled for v11.0) ─────────────────────────────────────
 export const onRefineRequest = functions.database.ref("projects/{projectId}/stream/{dataId}").onCreate(() => null)
 
-// ── Remaster ─────────────────────────────────────────────────────────────────
-export const remasterSession = functions.pubsub.schedule("every 2 minutes").onRun(() => runRemasterLogic())
-export const triggerRemaster = functions.https.onRequest(async (req, res) => {
-    res.set("Access-Control-Allow-Origin", "*")
-    const pid = (req.query.projectId || "").toString()
-    const count = await runRemasterLogic(pid || undefined)
-    res.json({ success: true, count })
-})
-
-const runRemasterLogic = async (targetPid?: string) => {
-    const now = Date.now(); const ONE_HOUR = 3600 * 1000
-    let snap = targetPid ? await admin.database().ref(`projects/${targetPid}`).get() : await admin.database().ref('projects').get()
-    if (!snap.exists()) return 0
-    // (리마스터링 로직 생략 또는 최소화 - 실시간 성능에 집중)
-    return 0
-}
+// ── Remaster (미구현 stub - 비활성화) ────────────────────────────────────────
+// remasterSession pubsub은 구현체가 없으므로 비용/로그 낭비를 막기 위해 비활성화.
+// 추후 실제 리마스터 로직 구현 시 아래 주석을 해제할 것.
+// export const remasterSession = functions.pubsub.schedule("every 2 minutes").onRun(() => runRemasterLogic())
 
 // ── 진단 툴 ─────────────────────────────────────────────────────────────────
 export const verifyGeminiPipeline = functions.https.onRequest(async (req, res) => {
