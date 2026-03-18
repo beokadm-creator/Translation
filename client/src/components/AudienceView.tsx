@@ -64,7 +64,8 @@ const AudienceView: React.FC = () => {
         sourceLanguage: currentSession.sourceLanguage
     } : null;
 
-    const targetLanguages = currentSession?.targetLanguages?.length ? currentSession.targetLanguages : ['ko', 'en'];
+    const targetLanguages = (currentSession?.targetLanguages?.length ? currentSession.targetLanguages : ['ko', 'en'])
+        .filter(l => l !== 'ja');
 
     // --- Display Info ---
     // 기본 언어: 세션의 첫 번째 타겟 언어 (원본 언어 제외)

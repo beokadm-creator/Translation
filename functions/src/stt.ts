@@ -75,16 +75,13 @@ const isGarbage = (text: string, _originalText?: string): boolean => {
 }
 
 // ── Gemini 단일 호출 ──────────────────────────────────────────────────────────
-const callGemini = async (apiKey: string, prompt: string, timeoutMs = 12000): Promise<any | null> => {
+const callGemini = async (apiKey: string, prompt: string, timeoutMs = 15000): Promise<any | null> => {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
         const payload = {
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-                responseMimeType: "application/json",
-                thinkingConfig: { thinkingBudget: 0 }
-            }
+            generationConfig: { responseMimeType: "application/json" }
         }
         const res = await fetch(FLASH_URL(apiKey), {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -92,7 +89,8 @@ const callGemini = async (apiKey: string, prompt: string, timeoutMs = 12000): Pr
         })
         clearTimeout(timer)
         if (!res.ok) {
-            functions.logger.warn(`[Gemini] HTTP ${res.status}`, { key: apiKey.slice(0, 10) })
+            const errBody = await res.text().catch(() => '')
+            functions.logger.warn(`[Gemini] HTTP ${res.status}`, { key: apiKey.slice(0, 10), body: errBody.slice(0, 200) })
             return null
         }
         const data = await res.json()
@@ -102,6 +100,7 @@ const callGemini = async (apiKey: string, prompt: string, timeoutMs = 12000): Pr
         return JSON.parse(clean)
     } catch (e: any) {
         clearTimeout(timer)
+        functions.logger.warn(`[Gemini] Exception`, { key: apiKey.slice(0, 10), err: String(e).slice(0, 100) })
         return null
     }
 }
@@ -179,7 +178,7 @@ const translateWithFallback = async (
     try {
         const data = await Promise.any(
             GEMINI_KEYS.map(key =>
-                callGemini(key, prompt, 22000).then(d => {
+                callGemini(key, prompt, 30000).then(d => {
                     if (!d || !validateTranslation(d, targets)) throw new Error('invalid')
                     return d as Record<string, unknown>
                 })
@@ -452,6 +451,32 @@ export const onRefineRequest = functions.database.ref("projects/{projectId}/stre
 // ── 진단 툴 ─────────────────────────────────────────────────────────────────
 export const verifyGeminiPipeline = functions.https.onRequest(async (req, res) => {
     res.set("Access-Control-Allow-Origin", "*")
-    const result = await translateWithFallback("Testing terminal connectivity.", "en", "", "")
-    res.json({ success: true, version: "v11.0", result })
+
+    // 직접 Gemini API 상태 확인 (단순 HTTP 체크)
+    const diagKey = GEMINI_KEYS[0] || ""
+    let geminiStatus = "no_keys"
+    let geminiHttpCode = 0
+    let geminiRaw = ""
+    if (diagKey) {
+        try {
+            const testPayload = {
+                contents: [{ parts: [{ text: '{"refined":"임플란트 픽스처를 식립했습니다.","en":"The implant fixture was placed.","isMedical":true}' }] }],
+                generationConfig: { responseMimeType: "application/json" }
+            }
+            const testR = await fetch(FLASH_URL(diagKey), {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(testPayload),
+                signal: AbortSignal.timeout(15000)
+            })
+            geminiHttpCode = testR.status
+            geminiRaw = (await testR.text()).slice(0, 300)
+            geminiStatus = testR.ok ? "ok" : `http_${testR.status}`
+        } catch (e: any) {
+            geminiStatus = `error: ${String(e).slice(0, 100)}`
+        }
+    }
+
+    // 실제 번역 테스트 (한국어 → 영어)
+    const result = await translateWithFallback("임플란트 픽스처를 식립했습니다.", "ko", "", "Live Medical Lecture")
+    res.json({ success: true, version: "v11.0", geminiStatus, geminiHttpCode, geminiRaw, result })
 })
