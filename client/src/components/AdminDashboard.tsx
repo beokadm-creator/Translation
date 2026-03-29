@@ -587,7 +587,7 @@ const AdminDashboard: React.FC = () => {
             <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
                 <div className="p-4 border-b border-gray-700 font-bold text-lg flex justify-between items-center">
                     <span>Agenda</span>
-                    <button onClick={() => setShowProjectSettings(true)} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded">⚙️ Set</button>
+                    <button onClick={() => setShowProjectSettings(true)} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded" title="Overlay & AI Settings">⚙️</button>
                     <button onClick={handleCreateSession} className="text-blue-400 hover:text-blue-300 text-sm font-bold">+ New</button>
                 </div>
                 <div className="flex-1 overflow-y-auto">
@@ -730,8 +730,11 @@ const AdminDashboard: React.FC = () => {
                                     <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.topic || ''} onChange={e => setFormData({ ...formData, topic: e.target.value })} />
                                 </div>
                                 <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">Abstract (Context for AI)</label>
-                                    <textarea className="w-full bg-gray-800 border border-gray-600 rounded p-2 h-32" placeholder="강연 초록 또는 발표 내용을 입력하세요 (입력할수록 AI 번역 정확도가 높아집니다)" value={formData.abstract || ''} onChange={e => setFormData({ ...formData, abstract: e.target.value })} />
+                                    <label className="block text-xs text-gray-400">
+                                        Abstract (Context for AI)
+                                        <span className="ml-2 text-[10px] text-blue-400 font-normal">STT 인식 + 번역 품질 모두 향상</span>
+                                    </label>
+                                    <textarea className="w-full bg-gray-800 border border-gray-600 rounded p-2 h-32" placeholder="강연 초록 또는 발표 내용을 입력하세요. 앞부분 60자는 Whisper STT에도 직접 전달되어 도메인 용어 인식 정확도가 높아집니다." value={formData.abstract || ''} onChange={e => setFormData({ ...formData, abstract: e.target.value })} />
                                 </div>
                                 <div className="col-span-2">
                                     <label className="block text-xs text-gray-400">Keywords (Comma separated)</label>
@@ -824,43 +827,66 @@ const AdminDashboard: React.FC = () => {
             {
                 showProjectSettings && (
                     <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-                        <div className="bg-gray-800 p-6 rounded-lg w-full max-w-lg space-y-4 border border-gray-600">
-                            <h2 className="text-xl font-bold">Project Settings</h2>
+                        <div className="bg-gray-800 p-6 rounded-lg w-full max-w-xl space-y-4 border border-gray-600">
+                            <div className="flex justify-between items-start">
+                                <h2 className="text-xl font-bold">Project Settings</h2>
+                                <div className="flex gap-1.5 text-[10px]">
+                                    <span className="bg-green-900/50 text-green-400 border border-green-700 px-2 py-0.5 rounded-full font-mono">STT: gpt-4o-transcribe</span>
+                                    <span className="bg-blue-900/50 text-blue-400 border border-blue-700 px-2 py-0.5 rounded-full font-mono">Trans: gpt-4o-mini</span>
+                                </div>
+                            </div>
 
                             {/* Tabs */}
                             <div className="flex border-b border-gray-600 mb-4">
                                 <button onClick={() => setSettingsTab('overlay')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'overlay' ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}>Overlay Design</button>
-                                <button onClick={() => setSettingsTab('ai')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'ai' ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}>AI Tuning (Chunking)</button>
+                                <button onClick={() => setSettingsTab('ai')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'ai' ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}>Audio & AI</button>
                             </div>
 
                             <div className="space-y-6 overflow-y-auto max-h-[60vh]">
-                                {/* Section 0: Audio Engine */}
-                                {settingsTab === 'ai' && <div className="bg-gray-700 p-4 rounded-lg">
-                                    <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-                                        🎙️ Audio Engine <span className="text-xs font-normal text-gray-400">(Live Switchable)</span>
-                                    </h3>
-                                    <div className="flex gap-4">
-                                        <label className={`flex-1 p-3 rounded border cursor-pointer transition-all ${projectSettings.recordMode === 'chunk' ? 'bg-blue-600 border-blue-400' : 'bg-gray-800 border-gray-600 hover:bg-gray-600'}`}>
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <input type="radio" name="recordMode" value="chunk" checked={projectSettings.recordMode === 'chunk'} onChange={() => setProjectSettings({ ...projectSettings, recordMode: 'chunk' })} className="hidden" />
-                                                <span className="font-bold text-white">🔵 Speed (Chunk)</span>
+                                {/* Section 0: Model Info + Audio Engine */}
+                                {settingsTab === 'ai' && <>
+                                    <div className="bg-gray-900 border border-gray-600 p-3 rounded-lg">
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">현재 AI 모델</h3>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div className="bg-gray-800 rounded p-2">
+                                                <div className="text-[10px] text-gray-500 mb-0.5">STT (음성인식)</div>
+                                                <div className="text-xs font-bold text-green-400">gpt-4o-transcribe</div>
                                             </div>
-                                            <p className="text-[10px] text-gray-300 leading-tight">
-                                                Sends audio periodically. Best for fast-paced Q&A.
-                                            </p>
-                                        </label>
-
-                                        <label className={`flex-1 p-3 rounded border cursor-pointer transition-all ${projectSettings.recordMode === 'vad' ? 'bg-green-600 border-green-400' : 'bg-gray-800 border-gray-600 hover:bg-gray-600'}`}>
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <input type="radio" name="recordMode" value="vad" checked={projectSettings.recordMode === 'vad'} onChange={() => setProjectSettings({ ...projectSettings, recordMode: 'vad' })} className="hidden" />
-                                                <span className="font-bold text-white">🟢 Precision (VAD)</span>
+                                            <div className="bg-gray-800 rounded p-2">
+                                                <div className="text-[10px] text-gray-500 mb-0.5">Translation (번역)</div>
+                                                <div className="text-xs font-bold text-blue-400">gpt-4o-mini</div>
                                             </div>
-                                            <p className="text-[10px] text-gray-300 leading-tight">
-                                                Sends when you stop talking. Best for Keynotes.
-                                            </p>
-                                        </label>
+                                        </div>
                                     </div>
-                                </div>}
+                                    <div className="bg-gray-700 p-4 rounded-lg">
+                                        <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+                                            🎙️ Audio Capture Mode <span className="text-xs font-normal text-gray-400">(녹화 중 변경 가능)</span>
+                                        </h3>
+                                        <div className="flex gap-4">
+                                            <label className={`flex-1 p-3 rounded border cursor-pointer transition-all ${projectSettings.recordMode === 'chunk' ? 'bg-blue-600 border-blue-400' : 'bg-gray-800 border-gray-600 hover:bg-gray-600'}`}>
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <input type="radio" name="recordMode" value="chunk" checked={projectSettings.recordMode === 'chunk'} onChange={() => setProjectSettings({ ...projectSettings, recordMode: 'chunk' })} className="hidden" />
+                                                    <span className="font-bold text-white">🔵 Interval (Chunk)</span>
+                                                </div>
+                                                <p className="text-[10px] text-gray-300 leading-tight">
+                                                    고정 간격으로 오디오 전송. Q&A·다화자 환경 권장.<br/>
+                                                    <span className="text-yellow-300">※ 간격이 짧을수록 Whisper 컨텍스트가 줄어 정확도 저하 가능.</span>
+                                                </p>
+                                            </label>
+
+                                            <label className={`flex-1 p-3 rounded border cursor-pointer transition-all ${projectSettings.recordMode === 'vad' ? 'bg-green-600 border-green-400' : 'bg-gray-800 border-gray-600 hover:bg-gray-600'}`}>
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <input type="radio" name="recordMode" value="vad" checked={projectSettings.recordMode === 'vad'} onChange={() => setProjectSettings({ ...projectSettings, recordMode: 'vad' })} className="hidden" />
+                                                    <span className="font-bold text-white">🟢 Silence (VAD)</span>
+                                                </div>
+                                                <p className="text-[10px] text-gray-300 leading-tight">
+                                                    발화 중단 후 자동 전송. 기조연설·단독 발표 권장.<br/>
+                                                    <span className="text-yellow-300">※ 말이 빠른 발화자·소음 환경에서 감도 조절 필요.</span>
+                                                </p>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </>}
 
                                 {/* Section 1: Overlay */}
                                 {settingsTab === 'overlay' && <div className="space-y-5">
@@ -1003,72 +1029,75 @@ const AdminDashboard: React.FC = () => {
                                     <div className="text-[10px] text-gray-500">※ 저장 즉시 오버레이에 실시간 반영됩니다.</div>
                                 </div>}
 
-                                {/* Section 2: AI Tuning */}
+                                {/* Section 2: Buffer Tuning */}
                                 {settingsTab === 'ai' && <div className="pt-2">
-                                    <h3 className="text-sm font-bold text-gray-300 mb-2">AI Processing Tuning</h3>
-                                    <p className="text-xs text-gray-500 mb-4">Adjust these values to control when the AI refines the text. Useful for fast/slow speakers.</p>
+                                    <h3 className="text-sm font-bold text-gray-300 mb-1">번역 버퍼 튜닝</h3>
+                                    <p className="text-xs text-gray-500 mb-4">STT 결과를 모아서 번역하는 타이밍을 조정합니다. 발화 속도에 맞게 설정하세요.</p>
 
                                     <div className="grid grid-cols-1 gap-4">
                                         <div>
-                                            <label className="text-xs text-gray-400 block flex justify-between">
-                                                <span>Chunk Interval (Speed Mode)</span>
+                                            <label className="text-xs text-gray-400 flex justify-between">
+                                                <span>Interval 간격 <span className="text-gray-500">(Interval 모드)</span></span>
                                                 <span className="text-white font-bold">{projectSettings.chunkInterval} ms</span>
                                             </label>
-                                            <input type="range" min="1000" max="10000" step="500" className="w-full mt-1"
+                                            <input type="range" min="2000" max="8000" step="500" className="w-full mt-1"
                                                 value={projectSettings.chunkInterval}
                                                 onChange={e => setProjectSettings({ ...projectSettings, chunkInterval: Number(e.target.value) })} />
-                                            <p className="text-[10px] text-gray-500">Audio is sent every N ms regardless of silence.</p>
+                                            <p className="text-[10px] text-gray-500">오디오를 N ms마다 잘라서 전송. 길수록 Whisper 인식 정확도 향상 (권장: 3000~5000ms).</p>
                                         </div>
 
                                         <div>
-                                            <label className="text-xs text-gray-400 block flex justify-between">
-                                                <span>Minimum Chunk Length (Characters)</span>
-                                                <span className="text-white font-bold">{projectSettings.minLength} chars</span>
+                                            <label className="text-xs text-gray-400 flex justify-between">
+                                                <span>번역 시작 최소 글자 수</span>
+                                                <span className="text-white font-bold">{projectSettings.minLength} 자</span>
                                             </label>
-                                            <input type="range" min="20" max="200" step="10" className="w-full mt-1"
+                                            <input type="range" min="10" max="200" step="5" className="w-full mt-1"
                                                 value={projectSettings.minLength}
                                                 onChange={e => setProjectSettings({ ...projectSettings, minLength: Number(e.target.value) })} />
-                                            <p className="text-[10px] text-gray-500">Wait until at least this many characters are collected.</p>
+                                            <p className="text-[10px] text-gray-500">이 글자 수 이상 쌓여야 번역 시작. 낮을수록 빠르지만 문맥이 짧아짐 (권장: 20~60).</p>
                                         </div>
 
                                         <div>
-                                            <label className="text-xs text-gray-400 block flex justify-between">
-                                                <span>Max Wait Time (Timeout)</span>
+                                            <label className="text-xs text-gray-400 flex justify-between">
+                                                <span>강제 번역 대기 시간</span>
                                                 <span className="text-white font-bold">{projectSettings.timeoutMs} ms</span>
                                             </label>
-                                            <input type="range" min="1000" max="10000" step="500" className="w-full mt-1"
+                                            <input type="range" min="1000" max="8000" step="500" className="w-full mt-1"
                                                 value={projectSettings.timeoutMs}
                                                 onChange={e => setProjectSettings({ ...projectSettings, timeoutMs: Number(e.target.value) })} />
-                                            <p className="text-[10px] text-gray-500">Force processing if silence lasts longer than this.</p>
+                                            <p className="text-[10px] text-gray-500">최소 글자 미달이어도 이 시간이 지나면 강제 번역 (권장: 2000~4000ms).</p>
                                         </div>
 
                                         <div>
-                                            <label className="text-xs text-gray-400 block flex justify-between">
-                                                <span>VAD Mode Max Forced Cutoff</span>
+                                            <label className="text-xs text-gray-400 flex justify-between">
+                                                <span>VAD 최대 발화 허용 시간</span>
                                                 <span className="text-white font-bold">{projectSettings.vadMaxCutMs} ms</span>
                                             </label>
-                                            <input type="range" min="2000" max="25000" step="1000" className="w-full mt-1"
+                                            <input type="range" min="3000" max="20000" step="1000" className="w-full mt-1"
                                                 value={projectSettings.vadMaxCutMs}
                                                 onChange={e => setProjectSettings({ ...projectSettings, vadMaxCutMs: Number(e.target.value) })} />
-                                            <p className="text-[10px] text-gray-500">When using Precision (VAD) mode, force a chunk cut if the speaker does not stop talking for this long.</p>
+                                            <p className="text-[10px] text-gray-500">Silence(VAD) 모드에서 침묵 감지 없이 이 시간이 지나면 강제 컷 (권장: 8000~15000ms).</p>
                                         </div>
 
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-2 pt-1">
                                             <input type="checkbox" id="chkSentence"
                                                 checked={projectSettings.sentenceEnd}
                                                 onChange={e => setProjectSettings({ ...projectSettings, sentenceEnd: e.target.checked })} />
-                                            <label htmlFor="chkSentence" className="text-sm text-gray-300">Split by Sentence (. ! ?)</label>
+                                            <label htmlFor="chkSentence" className="text-sm text-gray-300">문장 끝(. ! ?)에서 즉시 번역</label>
                                         </div>
 
-                                        <div className="flex items-center gap-2 pt-2 border-t border-gray-700">
+                                        <div className="flex items-start gap-2 pt-2 border-t border-gray-700">
                                             <input type="checkbox" id="chkHideRaw"
                                                 checked={projectSettings.hideRaw}
-                                                onChange={e => setProjectSettings({ ...projectSettings, hideRaw: e.target.checked })} />
-                                            <label htmlFor="chkHideRaw" className="text-sm text-gray-300">
-                                                🔒 Hide Raw STT (Whisper 원문 숨김)
-                                            </label>
+                                                onChange={e => setProjectSettings({ ...projectSettings, hideRaw: e.target.checked })}
+                                                className="mt-0.5" />
+                                            <div>
+                                                <label htmlFor="chkHideRaw" className="text-sm text-gray-300 cursor-pointer">
+                                                    🔒 Raw STT 숨김 (번역 완료 전 원문 미표시)
+                                                </label>
+                                                <p className="text-[10px] text-gray-500 mt-0.5">체크 시 gpt-4o-mini가 정제한 텍스트만 표시됩니다. 오인식 단어가 화면에 노출되지 않습니다.</p>
+                                            </div>
                                         </div>
-                                        <p className="text-[10px] text-gray-500 ml-6">체크 시 Gemini가 정제한 텍스트만 표시됩니다. "쭈꾸미" 같은 오인식 단어가 화면에 노출되지 않습니다.</p>
                                     </div>
                                 </div>}
                             </div>

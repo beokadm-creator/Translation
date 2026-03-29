@@ -1,8 +1,10 @@
-﻿// Version: v11.0 (Stable - Medical/Dental Optimized)
-// KEY IMPROVEMENT:
+﻿// Version: v12.3 (Stable - OpenAI Only)
+// STT:         gpt-4o-transcribe  (language + domain keyword prompt)
+// Translation: gpt-4o-mini        (JSON strict, temperature 0)
+// KEY FLOW:
 // 1. Every speech segment is written to DB IMMEDIATELY as 'translating'.
-// 2. Audience sees the raw text in ~2 seconds.
-// 3. Translation (Gemini) waits for either minLength (30 chars) or timeout (2s pause).
+// 2. Audience sees the raw text in ~1-2 seconds.
+// 3. Translation waits for minLength chars OR timeout before flushing buffer.
 // 4. When buffer flushes, first segment gets translation, others are marked 'merged' (hidden).
 // 5. Result: Ultra-fast visual feedback + High-quality contextual translation.
 
@@ -137,7 +139,7 @@ const translateWithOpenAI = async (
             contextLine ? `session_context=${contextLine}` : "",
             previousLine ? `previous_refined=${previousLine}` : "",
             'Return strict JSON: {"refined":"","ko":"","en":"","isMedical":true}.',
-            'Rules: preserve exact meaning and all clinical facts; correct only obvious STT errors; do not invent symptoms, diagnoses, or questions; keep terminology literal; never leave ko or en empty; translate fragments as fragments.',
+            'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer content from session_context. (2) Correct only obvious STT errors (e.g. wrong homophone). (3) Do not output topic, speaker name, affiliation, or keywords as standalone content. (4) Never leave ko or en empty; translate fragments as fragments. (5) Keep all clinical terminology literal.',
             'If source_lang=ko, refined and ko must stay Korean and en must be English. If source_lang=en, refined and en must stay English and ko must be Korean.',
             'Example output for source_lang=ko and input="임플란트 픽스처를 식립했습니다.": {"refined":"임플란트 픽스처를 식립했습니다.","ko":"임플란트 픽스처를 식립했습니다.","en":"The implant fixture was placed.","isMedical":true}'
         ].filter(Boolean).join('\n')
@@ -145,12 +147,12 @@ const translateWithOpenAI = async (
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             temperature: 0,
-            max_tokens: 140,
+            max_tokens: 200,
             response_format: { type: "json_object" },
             messages: [
                 {
                     role: "system",
-                    content: "You refine medical transcript text and produce Korean and English translations in strict JSON."
+                    content: "You refine live medical speech-to-text output and produce Korean and English translations in strict JSON."
                 },
                 {
                     role: "user",
@@ -215,7 +217,7 @@ const DENTAL_PROMPT_EN = "Implant, Sinus, Bone Graft, Fixture, Abutment, Crown"
 export const processAudio = functions
     .runWith({ timeoutSeconds: 120, memory: "1GB" })
     .https.onRequest(async (req, res) => {
-        const versionTag = "v11.1_openai_only"
+        const versionTag = "v12.3_openai_only"
 
         // CORS
         const origin = req.headers.origin as string
@@ -282,9 +284,10 @@ export const processAudio = functions
                         const abstractStr = s.abstract ? `, Abstract: ${s.abstract}` : ''
                         const keywordsStr = s.keywords ? `, Keywords: ${s.keywords}` : ''
                         sessionContext = `Speaker: ${s.speaker}${affiliationStr}, Topic: ${s.topic}${abstractStr}${keywordsStr}`
-                        // Whisper prompt에 연자명·소속·키워드 모두 포함 → 고유명사 오인식 방지
+                        // Whisper prompt: 연자명·소속·주제·키워드·초록(60자) 포함 → 고유명사·도메인 용어 오인식 방지
                         const speakerTerms = [s.speaker, s.affiliation, s.topic].filter(Boolean).join(', ')
-                        customKeywords = [s.keywords, speakerTerms].filter(Boolean).join(', ')
+                        const abstractSnippet = s.abstract ? s.abstract.slice(0, 60) : ''
+                        customKeywords = [s.keywords, speakerTerms, abstractSnippet].filter(Boolean).join(', ')
                     } else {
                         functions.logger.warn(`[STT] Active Session ${activeSessionId} data missing in DB`)
                     }
@@ -304,8 +307,8 @@ export const processAudio = functions
                 }
                 if (chunkSnap.exists()) {
                     const sett = chunkSnap.val()
-                    if (sett.minLength !== undefined) minLength = Math.max(35, Number(sett.minLength))
-                    if (sett.timeoutMs !== undefined) timeoutMs = Math.max(4500, Number(sett.timeoutMs))
+                    if (sett.minLength !== undefined) minLength = Math.max(10, Number(sett.minLength))
+                    if (sett.timeoutMs !== undefined) timeoutMs = Math.max(1000, Number(sett.timeoutMs))
                     if (sett.sentenceEnd !== undefined) sentenceEnd = Boolean(sett.sentenceEnd)
                 }
                 if (stateSnap.exists()) {
@@ -371,7 +374,7 @@ export const processAudio = functions
                 // 버퍼가 비어있으면 지금부터 타이머 시작
                 const lastFlushTime = currentBufferIds.length === 0
                     ? Date.now()
-                    : Number(st.lastGeminiTime || Date.now())
+                    : Number(st.lastFlushTime || st.lastGeminiTime || Date.now())
 
                 const newBufferText = currentBufferText ? currentBufferText + ' ' + rawText : rawText
                 const newBufferIds = [...currentBufferIds, id]
@@ -388,10 +391,10 @@ export const processAudio = functions
                         idsToDelete: newBufferIds.slice(1),
                         bufferText: newBufferText
                     }
-                    return { bufferText: '', bufferIds: [], lastGeminiTime: Date.now(), lastRefinedList: (st.lastRefinedList as string[]) || [] }
+                    return { bufferText: '', bufferIds: [], lastFlushTime: Date.now(), lastRefinedList: (st.lastRefinedList as string[]) || [] }
                 } else {
                     // BUFFERING: 현재 세그먼트 추가
-                    return { ...st, bufferText: newBufferText, bufferIds: newBufferIds, lastGeminiTime: lastFlushTime }
+                    return { ...st, bufferText: newBufferText, bufferIds: newBufferIds, lastFlushTime: lastFlushTime }
                 }
             })
 
@@ -423,7 +426,7 @@ export const processAudio = functions
 
                     await admin.database().ref().update(updates)
                 } catch {
-                    // Gemini 실패 시 버퍼된 모든 세그먼트를 "final"로 복구
+                    // 번역 실패 시 버퍼된 모든 세그먼트를 "final"로 복구
                     const errorFixes: Record<string, unknown> = {}
                     errorFixes[`projects/${projectId}/stream/${targetId}/status`] = "final"
                     for (const pid of idsToDelete) {
@@ -439,7 +442,7 @@ export const processAudio = functions
         }
     })
 
-// ── Legacy Triggers (Disabled for v11.0) ─────────────────────────────────────
+// ── Legacy Triggers (Disabled) ───────────────────────────────────────────────
 export const onRefineRequest = functions.database.ref("projects/{projectId}/stream/{dataId}").onCreate(() => null)
 
 // ── Remaster (미구현 stub - 비활성화) ────────────────────────────────────────
@@ -448,8 +451,8 @@ export const onRefineRequest = functions.database.ref("projects/{projectId}/stre
 // export const remasterSession = functions.pubsub.schedule("every 2 minutes").onRun(() => runRemasterLogic())
 
 // ── 진단 툴 ─────────────────────────────────────────────────────────────────
-export const verifyGeminiPipeline = functions.https.onRequest(async (_req, res) => {
+export const verifyPipeline = functions.https.onRequest(async (_req, res) => {
     res.set("Access-Control-Allow-Origin", "*")
     const result = await translateWithFallback("임플란트 픽스처를 식립했습니다.", "ko", "", "Live Medical Lecture")
-    res.json({ success: true, version: "v11.1_openai_only", provider: "openai", result })
+    res.json({ success: true, version: "v12.3_openai_only", stt: "gpt-4o-transcribe", translation: "gpt-4o-mini", result })
 })
