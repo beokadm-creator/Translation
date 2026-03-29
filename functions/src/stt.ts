@@ -1,4 +1,4 @@
-// Version: v11.0 (Stable - Medical/Dental Optimized)
+﻿// Version: v11.0 (Stable - Medical/Dental Optimized)
 // KEY IMPROVEMENT:
 // 1. Every speech segment is written to DB IMMEDIATELY as 'translating'.
 // 2. Audience sees the raw text in ~2 seconds.
@@ -13,20 +13,6 @@ import type { Request } from "express"
 import { Readable } from "stream"
 
 let _openai: OpenAI | null = null
-
-// ── 4개 Gemini API 키 ─────────────────────────────────────────────────────────
-const GEMINI_KEYS = [
-    process.env.GEMINI_KEY_TRANSLATE || "",
-    process.env.GEMINI_KEY_MEDICAL   || "",
-    process.env.GEMINI_KEY_EDITOR    || "",
-    process.env.GEMINI_KEY_CONTEXT   || "",
-].filter(Boolean) // 빈 키 제거 (환경변수 미설정 방어)
-
-let _keyIndex = 0
-
-// ✅ 모델 설정: gemini-2.5-flash (이 API 키에서 사용 가능한 유일한 모델)
-const FLASH_URL = (key: string) =>
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`
 
 // ── Hallucination 필터 ────────────────────────────────────────────────────────
 // 정적 URL 도메인만 핀포인트로 필터 (전체 문장 삭제 방지)
@@ -54,10 +40,45 @@ const hasRepetitionLoop = (text: string): boolean => {
     return unique.size <= 6 && text.length > 80
 }
 
-const isGarbage = (text: string, _originalText?: string): boolean => {
+const normalizeLoose = (text: string): string =>
+    (text || "")
+        .toLowerCase()
+        .replace(/[()]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+
+const isPromptLeakage = (text: string, promptText?: string): boolean => {
+    if (!text || !promptText) return false
+
+    const normalizedText = normalizeLoose(text)
+    const normalizedPrompt = normalizeLoose(promptText)
+
+    if (!normalizedText || !normalizedPrompt) return false
+
+    if (normalizedPrompt.includes(normalizedText) && normalizedText.length >= 40) return true
+    if (normalizedText.includes(normalizedPrompt) && normalizedPrompt.length >= 40) return true
+
+    const promptItems = promptText
+        .split(',')
+        .map(item => normalizeLoose(item))
+        .filter(item => item.length >= 6)
+
+    if (promptItems.length < 4) return false
+
+    const matchedItems = new Set(
+        promptItems.filter(item => normalizedText.includes(item))
+    )
+
+    const commaCount = (text.match(/,/g) || []).length
+
+    return matchedItems.size >= 4 && commaCount >= 3
+}
+
+const isGarbage = (text: string, _originalText?: string, promptText?: string): boolean => {
     if (!text) return false
 
     if (hasRepetitionLoop(text)) return true
+    if (isPromptLeakage(text, promptText)) return true
 
     // 전체가 괄호/대괄호 소리 표기인 경우 (Whisper 무음 환각)
     if (/^\s*[\(\[][^\)\]]{1,40}[\)\]]\s*[\.!]?\s*$/.test(text.trim())) return true
@@ -72,37 +93,6 @@ const isGarbage = (text: string, _originalText?: string): boolean => {
     if (alphanumeric.length < 2) return true
 
     return false
-}
-
-// ── Gemini 단일 호출 ──────────────────────────────────────────────────────────
-const callGemini = async (apiKey: string, prompt: string, timeoutMs = 15000): Promise<any | null> => {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
-    try {
-        const payload = {
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: "application/json" }
-        }
-        const res = await fetch(FLASH_URL(apiKey), {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload), signal: controller.signal
-        })
-        clearTimeout(timer)
-        if (!res.ok) {
-            const errBody = await res.text().catch(() => '')
-            functions.logger.warn(`[Gemini] HTTP ${res.status}`, { key: apiKey.slice(0, 10), body: errBody.slice(0, 200) })
-            return null
-        }
-        const data = await res.json()
-        const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || ""
-        if (!raw) return null
-        const clean = raw.replace(/```json\s*|```/g, "").trim()
-        return JSON.parse(clean)
-    } catch (e: any) {
-        clearTimeout(timer)
-        functions.logger.warn(`[Gemini] Exception`, { key: apiKey.slice(0, 10), err: String(e).slice(0, 100) })
-        return null
-    }
 }
 
 // ── 번역 파이프라인 ───────────────────────────────────────────────────────────
@@ -131,6 +121,59 @@ const buildTranslationResult = (
     }
 }
 
+const translateWithOpenAI = async (
+    rawText: string,
+    sourceLang: string,
+    previousContext: string,
+    sessionContext: string
+) : Promise<{ refined: string; ko: string; en: string; isMedical: boolean } | null> => {
+    try {
+        const openai = getOpenAI()
+        const contextLine = sanitize(sessionContext).slice(0, 180)
+        const previousLine = sanitize(previousContext.split(' / ').slice(-1)[0] || '').slice(0, 80)
+        const prompt = [
+            `source_lang=${sourceLang}`,
+            `input=${rawText}`,
+            contextLine ? `session_context=${contextLine}` : "",
+            previousLine ? `previous_refined=${previousLine}` : "",
+            'Return strict JSON: {"refined":"","ko":"","en":"","isMedical":true}.',
+            'Rules: preserve exact meaning and all clinical facts; correct only obvious STT errors; do not invent symptoms, diagnoses, or questions; keep terminology literal; never leave ko or en empty; translate fragments as fragments.',
+            'If source_lang=ko, refined and ko must stay Korean and en must be English. If source_lang=en, refined and en must stay English and ko must be Korean.',
+            'Example output for source_lang=ko and input="임플란트 픽스처를 식립했습니다.": {"refined":"임플란트 픽스처를 식립했습니다.","ko":"임플란트 픽스처를 식립했습니다.","en":"The implant fixture was placed.","isMedical":true}'
+        ].filter(Boolean).join('\n')
+
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            temperature: 0,
+            max_tokens: 140,
+            response_format: { type: "json_object" },
+            messages: [
+                {
+                    role: "system",
+                    content: "You refine medical transcript text and produce Korean and English translations in strict JSON."
+                },
+                {
+                    role: "user",
+                    content: prompt
+                }
+            ]
+        })
+
+        const content = completion.choices[0]?.message?.content || ""
+        if (!content) return null
+
+        const data = JSON.parse(content) as Record<string, unknown>
+        if (!validateTranslation(data, ['ko', 'en'])) return null
+
+        return buildTranslationResult(data, sourceLang, rawText)
+    } catch (e: any) {
+        functions.logger.warn("[Translate][OpenAI] Failed", {
+            err: String(e).slice(0, 180)
+        })
+        return null
+    }
+}
+
 const translateWithFallback = async (
     rawText: string,
     sourceLang: string,
@@ -138,61 +181,17 @@ const translateWithFallback = async (
     sessionContext: string
 ): Promise<{ refined: string; ko: string; en: string; isMedical: boolean }> => {
     const tStart = Date.now()
-    const targets = (['ko', 'en'] as const).filter(l => l !== sourceLang)
-    const langNames: Record<string, string> = { ko: 'Korean', en: 'English' }
-    const srcName = langNames[sourceLang] || 'the source language'
-    const transFields = targets.map(l => `"${l}": "...${langNames[l] || l}..."`).join(', ')
+    const result = await translateWithOpenAI(rawText, sourceLang, previousContext, sessionContext)
 
-    const prompt = [
-        `You are a professional medical/dental translation AI.`,
-        `SESSION CONTEXT (CRITICAL): ${sessionContext || 'Live Medical/Dental Lecture'}`,
-        `SOURCE: ${sourceLang} (${srcName})`,
-        `INPUT: "${rawText}"`,
-        previousContext ? `PREVIOUS: "${previousContext.split(' / ').slice(-1)[0]}"` : '',
-        `TASK: Refine/Fix the input in ${srcName} (especially technical terminology like Implant, Sinus, Bone Graft, etc.) and translate it accurately.`,
-        ``,
-        `TASKS:`,
-        `1. REFINE: Fix errors in ${srcName}. Correct dental terms. Keep ${srcName} only.`,
-        `2. TRANSLATE to: ${targets.map(l => langNames[l] || l).join(' AND ')}`,
-        `3. OUTPUT JSON ONLY.`,
-        ``,
-        `EXAMPLES:`,
-        `[INPUT KO] "임플란트 픽스처를 식립했습니다."`,
-        `{"refined": "임플란트 픽스처를 식립했습니다.", "en": "The implant fixture was placed.", "isMedical": true}`,
-        `[INPUT EN] "Uh, so, we did the bone graft."`,
-        `{"refined": "So, we did the bone graft.", "ko": "그래서 우리는 골이식을 진행했습니다.", "isMedical": true}`,
-        ``,
-        `CRITICAL: All language fields MUST be filled. Never return empty strings. Even for fragments, YOU MUST TRANSLATE.`,
-        `FORMAT: {"refined": "...", ${transFields}, "isMedical": true}`
-    ].filter(Boolean).join('\n')
-
-    if (GEMINI_KEYS.length === 0) {
-        functions.logger.error("[Translate] No Gemini keys available")
-        const fallback = sanitize(rawText)
-        return { refined: fallback, ko: fallback, en: fallback, isMedical: false }
-    }
-
-    // ── 4개 키 동시 병렬 호출 → 가장 빠른 유효 응답 사용 ──────────────────
-    // gemini-2.5-flash는 thinking으로 10-20초 소요. 순차 시도 시 timeout 초과 반복.
-    // Promise.any()로 4개를 동시에 쏘면 가장 빠른 키가 응답하는 즉시 사용.
-    try {
-        const data = await Promise.any(
-            GEMINI_KEYS.map(key =>
-                callGemini(key, prompt, 30000).then(d => {
-                    if (!d || !validateTranslation(d, targets)) throw new Error('invalid')
-                    return d as Record<string, unknown>
-                })
-            )
-        )
-        functions.logger.info("[Translate] OK", {
-            ms: Date.now() - tStart, srcLen: rawText.length
+    if (result) {
+        functions.logger.info("[Translate][OpenAI] OK", {
+            ms: Date.now() - tStart,
+            srcLen: rawText.length
         })
-        return buildTranslationResult(data, sourceLang, rawText)
-    } catch {
-        // AggregateError: 모든 키 실패
+        return result
     }
 
-    functions.logger.error(`[Translate] All ${GEMINI_KEYS.length} keys failed → raw text fallback`, { input: rawText.slice(0, 50) })
+    functions.logger.error("[Translate][OpenAI] Failed, raw text fallback", { input: rawText.slice(0, 50) })
     const fallback = sanitize(rawText)
     return { refined: fallback, ko: fallback, en: fallback, isMedical: false }
 }
@@ -216,7 +215,7 @@ const DENTAL_PROMPT_EN = "Implant, Sinus, Bone Graft, Fixture, Abutment, Crown"
 export const processAudio = functions
     .runWith({ timeoutSeconds: 120, memory: "1GB" })
     .https.onRequest(async (req, res) => {
-        const versionTag = "v11.0_stable"
+        const versionTag = "v11.1_openai_only"
 
         // CORS
         const origin = req.headers.origin as string
@@ -257,8 +256,8 @@ export const processAudio = functions
             let sessionContext = ""
             let previousContext = ""
             let customKeywords = ""
-            let minLength = 20
-            let timeoutMs = 3000
+            let minLength = 35
+            let timeoutMs = 4500
             let sentenceEnd = true
 
             // 설정 로드
@@ -305,8 +304,8 @@ export const processAudio = functions
                 }
                 if (chunkSnap.exists()) {
                     const sett = chunkSnap.val()
-                    if (sett.minLength !== undefined) minLength = Number(sett.minLength)
-                    if (sett.timeoutMs !== undefined) timeoutMs = Number(sett.timeoutMs)
+                    if (sett.minLength !== undefined) minLength = Math.max(35, Number(sett.minLength))
+                    if (sett.timeoutMs !== undefined) timeoutMs = Math.max(4500, Number(sett.timeoutMs))
                     if (sett.sentenceEnd !== undefined) sentenceEnd = Boolean(sett.sentenceEnd)
                 }
                 if (stateSnap.exists()) {
@@ -316,7 +315,7 @@ export const processAudio = functions
                 }
             } catch { /* 무시 */ }
 
-            // ── STEP 1: Whisper STT ────────────────────────────────────────────
+            // ── STEP 1: OpenAI STT ────────────────────────────────────────────
             let openai = getOpenAI()
             const audioStream = Readable.from(buf) as Readable & { path: string }
             audioStream.path = "audio.webm"
@@ -326,7 +325,7 @@ export const processAudio = functions
             const whisperPrompt = customKeywords ? `${basePrompt}, ${customKeywords}` : basePrompt;
 
             const stt = await openai.audio.transcriptions.create({
-                file: audioStream, model: "whisper-1", language: sourceLang,
+                file: audioStream, model: "gpt-4o-transcribe", language: sourceLang,
                 prompt: whisperPrompt, temperature: 0,
             })
             const whisperMs = Date.now() - tWhisper
@@ -338,7 +337,7 @@ export const processAudio = functions
             const sttText = (stt?.text || "").trim()
             const rawText = sanitize(sttText)
 
-            if (rawText.length < 2 || isGarbage(rawText, sttText)) {
+            if (rawText.length < 2 || isGarbage(rawText, sttText, whisperPrompt)) {
                 res.status(200).json({ success: true, info: "EmptyOrGarbage", text: rawText }); return
             }
 
@@ -370,14 +369,14 @@ export const processAudio = functions
                 const currentBufferIds: string[] = Array.isArray(st.bufferIds) ? (st.bufferIds as string[]) : []
 
                 // 버퍼가 비어있으면 지금부터 타이머 시작
-                const lastGeminiTime = currentBufferIds.length === 0
+                const lastFlushTime = currentBufferIds.length === 0
                     ? Date.now()
                     : Number(st.lastGeminiTime || Date.now())
 
                 const newBufferText = currentBufferText ? currentBufferText + ' ' + rawText : rawText
                 const newBufferIds = [...currentBufferIds, id]
 
-                const timeDiff = Date.now() - lastGeminiTime
+                const timeDiff = Date.now() - lastFlushTime
                 const isSentenceEnd = sentenceEnd && /[.!?]$/.test(newBufferText.trim())
                 const isLongEnough = newBufferText.length >= minLength
                 const isTimeOut = timeDiff >= timeoutMs
@@ -392,7 +391,7 @@ export const processAudio = functions
                     return { bufferText: '', bufferIds: [], lastGeminiTime: Date.now(), lastRefinedList: (st.lastRefinedList as string[]) || [] }
                 } else {
                     // BUFFERING: 현재 세그먼트 추가
-                    return { ...st, bufferText: newBufferText, bufferIds: newBufferIds, lastGeminiTime }
+                    return { ...st, bufferText: newBufferText, bufferIds: newBufferIds, lastGeminiTime: lastFlushTime }
                 }
             })
 
@@ -449,34 +448,8 @@ export const onRefineRequest = functions.database.ref("projects/{projectId}/stre
 // export const remasterSession = functions.pubsub.schedule("every 2 minutes").onRun(() => runRemasterLogic())
 
 // ── 진단 툴 ─────────────────────────────────────────────────────────────────
-export const verifyGeminiPipeline = functions.https.onRequest(async (req, res) => {
+export const verifyGeminiPipeline = functions.https.onRequest(async (_req, res) => {
     res.set("Access-Control-Allow-Origin", "*")
-
-    // 직접 Gemini API 상태 확인 (단순 HTTP 체크)
-    const diagKey = GEMINI_KEYS[0] || ""
-    let geminiStatus = "no_keys"
-    let geminiHttpCode = 0
-    let geminiRaw = ""
-    if (diagKey) {
-        try {
-            const testPayload = {
-                contents: [{ parts: [{ text: '{"refined":"임플란트 픽스처를 식립했습니다.","en":"The implant fixture was placed.","isMedical":true}' }] }],
-                generationConfig: { responseMimeType: "application/json" }
-            }
-            const testR = await fetch(FLASH_URL(diagKey), {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(testPayload),
-                signal: AbortSignal.timeout(15000)
-            })
-            geminiHttpCode = testR.status
-            geminiRaw = (await testR.text()).slice(0, 300)
-            geminiStatus = testR.ok ? "ok" : `http_${testR.status}`
-        } catch (e: any) {
-            geminiStatus = `error: ${String(e).slice(0, 100)}`
-        }
-    }
-
-    // 실제 번역 테스트 (한국어 → 영어)
     const result = await translateWithFallback("임플란트 픽스처를 식립했습니다.", "ko", "", "Live Medical Lecture")
-    res.json({ success: true, version: "v11.0", geminiStatus, geminiHttpCode, geminiRaw, result })
+    res.json({ success: true, version: "v11.1_openai_only", provider: "openai", result })
 })
