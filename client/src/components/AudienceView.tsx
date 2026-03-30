@@ -150,22 +150,38 @@ const AudienceView: React.FC = () => {
         }
     }, [playNext]);
 
-    // 클릭: 즉시 재생 (큐 비우고 해당 세그먼트부터)
-    const handleSpeak = useCallback((text: string, lang: string, id?: string) => {
+    // 클릭: 해당 세그먼트부터 이후 모든 세그먼트 연속 재생
+    const handleSpeak = useCallback((_text: string, lang: string, id?: string) => {
         stopAudio();
+
+        const startIndex = id ? segmentsOrder.indexOf(id) : -1;
+        const fromIndex = startIndex >= 0 ? startIndex : segmentsOrder.length - 1;
+
+        // 클릭한 세그먼트부터 끝까지 final 세그먼트를 큐에 쌓음
+        const queue: { text: string; lang: string; id: string }[] = [];
+        for (let i = fromIndex; i < segmentsOrder.length; i++) {
+            const sid = segmentsOrder[i];
+            const seg = segmentsMap[sid];
+            if (!seg || seg.status === 'merged') continue;
+            const t = (seg[lang] as string) || (seg.refined as string) || '';
+            if (t.trim()) queue.push({ text: t, lang, id: sid });
+        }
+
+        if (queue.length === 0) return;
+
         isSpeakingRef.current = true;
-        const segId = id || `manual_${Date.now()}`;
-        audioQueueRef.current = [{ text, lang, id: segId }];
+        audioQueueRef.current = queue;
         playNext();
-    }, [stopAudio, playNext]);
+    }, [stopAudio, playNext, segmentsOrder, segmentsMap]);
 
     useEffect(() => {
         scrollToBottom();
     }, [segmentsOrder, scrollToBottom]);
 
-    // Auto-play: 새로운 final 세그먼트를 자동으로 큐에 추가
+    // Auto-play + 연속재생 중 신규 세그먼트 자동 추가
+    // isTtsEnabled: 자동재생 켜져 있을 때 새 final 세그먼트 자동 큐잉
+    // isSpeakingRef: 클릭 연속재생 중에도 새 세그먼트를 큐 끝에 추가
     useEffect(() => {
-        if (!isTtsEnabled) return;
         const lastId = segmentsOrder[segmentsOrder.length - 1];
         if (!lastId) return;
         const seg = segmentsMap[lastId];
@@ -175,8 +191,11 @@ const AudienceView: React.FC = () => {
         const text = (seg[activeLang] as string) || (seg.refined as string) || '';
         if (!text.trim()) return;
 
-        spokenIdsRef.current.add(lastId);
-        enqueueSpeak(text, activeLang, lastId);
+        // 자동재생 켜져 있거나, 클릭 연속재생 진행 중일 때 새 세그먼트 큐에 추가
+        if (isTtsEnabled || isSpeakingRef.current) {
+            spokenIdsRef.current.add(lastId);
+            enqueueSpeak(text, activeLang, lastId);
+        }
     }, [segmentsOrder, segmentsMap, isTtsEnabled, activeLang, enqueueSpeak]);
 
     // TTS 비활성화 시 재생 중단
@@ -448,15 +467,22 @@ const AudienceView: React.FC = () => {
                         >
                             {isTtsEnabled ? '🔊' : '🔇'}
                         </button>
-                        {/* Stop button — only when playing */}
+                        {/* 재생 중 상태 표시 + 정지 버튼 */}
                         {speakingId && (
-                            <button
-                                onClick={stopAudio}
-                                title="Stop audio"
-                                className="px-2 py-1 rounded text-sm text-red-400 hover:text-red-300 transition-all animate-pulse"
-                            >
-                                ⏹
-                            </button>
+                            <div className="flex items-center gap-1">
+                                <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                    {audioQueueRef.current.length > 0
+                                        ? `+${audioQueueRef.current.length} 대기`
+                                        : '재생 중'}
+                                </span>
+                                <button
+                                    onClick={stopAudio}
+                                    title="Stop audio"
+                                    className="px-2 py-1 rounded text-sm text-red-400 hover:text-red-300 transition-all"
+                                >
+                                    ⏹
+                                </button>
+                            </div>
                         )}
                         {/* Speed selector */}
                         {isTtsEnabled && (
