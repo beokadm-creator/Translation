@@ -11,6 +11,7 @@ if (!admin.apps.length) {
 
 // Export functions
 export { processAudio, onRefineRequest, verifyPipeline } from "./stt";
+export { synthesizeSpeech } from "./tts";
 export { diagnoseSystem } from "./diagnose"; // New Diagnostic Tool
 // export { translateNewSegment } from "./translate"; // DEPRECATED: Moved to inline processing in stt.ts
 export { archiveSession } from "./archive";

@@ -8,11 +8,16 @@ interface Props {
   color?: string;
   opacity?: number;
   fontSize?: string;
+  onSpeak?: (text: string, lang: string) => void;
+  isSpeaking?: boolean;
 }
 
-const TextItem: React.FC<Props> = ({ id, text, isRaw, targetLang = "original", color, opacity, fontSize }) => {
+const TextItem: React.FC<Props> = ({
+  id, text, isRaw, targetLang = "original", color, opacity, fontSize, onSpeak, isSpeaking = false
+}) => {
   const [highlight, setHighlight] = useState(false);
   const [justFinalized, setJustFinalized] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
   const prevTextRef = useRef(text);
   const prevIsRawRef = useRef(isRaw);
 
@@ -49,6 +54,12 @@ const TextItem: React.FC<Props> = ({ id, text, isRaw, targetLang = "original", c
     ? (justFinalized ? "#4ade80" : "#60a5fa")  // green flash on finalize, blue on update
     : resolvedColor;
 
+  const handleSpeak = () => {
+    if (onSpeak && text && !isRaw) {
+      onSpeak(text, targetLang);
+    }
+  };
+
   const style: React.CSSProperties = {
     color: textColor,
     fontWeight: isRaw ? 400 : 500,
@@ -58,6 +69,7 @@ const TextItem: React.FC<Props> = ({ id, text, isRaw, targetLang = "original", c
     fontSize: fontSize || "inherit",
     position: "relative",
     display: "inline",
+    cursor: !isRaw && onSpeak ? "pointer" : "inherit",
   };
 
   if (isRaw) {
@@ -85,8 +97,30 @@ const TextItem: React.FC<Props> = ({ id, text, isRaw, targetLang = "original", c
   }
 
   return (
-    <span style={style} data-id={id}>
+    <span
+      style={style}
+      data-id={id}
+      onClick={handleSpeak}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      title={!isRaw && onSpeak ? "클릭하여 읽기 / Click to hear" : ""}
+    >
       {display}
+      {!isRaw && onSpeak && (
+        <span
+          style={{
+            marginLeft: "4px",
+            fontSize: "0.75em",
+            verticalAlign: "middle",
+            opacity: isSpeaking ? 1 : isHovered ? 0.7 : 0.2,
+            transition: "opacity 0.2s",
+            animation: isSpeaking ? "pulse 1s ease-in-out infinite" : "none",
+            display: "inline-block",
+          }}
+        >
+          {isSpeaking ? "🔊" : "🔈"}
+        </span>
+      )}
     </span>
   );
 };

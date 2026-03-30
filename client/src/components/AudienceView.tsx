@@ -1,9 +1,11 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { rtdb as database } from '../firebase';
 import { ref, onValue, get } from 'firebase/database';
 import { useProjectStream } from '../hooks/useProjectStream';
 import TextItem from './TextItem';
+
+const CF_BASE = import.meta.env.VITE_CF_BASE_URL || 'https://us-central1-translation-comm.cloudfunctions.net';
 
 const HALLUCINATION_BLACKLIST = [
     '자막제작', '자막 제작', 'Subtitles by', 'Subtitle by', 'MBC 뉴스', 'SBS 뉴스', 'KBS 뉴스',
@@ -37,6 +39,15 @@ const AudienceView: React.FC = () => {
     const [lineHeight, setLineHeight] = useState<number>(1.8);
     const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
     const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+
+    // --- TTS State ---
+    const [isTtsEnabled, setIsTtsEnabled] = useState<boolean>(false);
+    const [speakingId, setSpeakingId] = useState<string | null>(null);
+    const [ttsSpeed, setTtsSpeed] = useState<number>(1.0);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const audioQueueRef = useRef<{ text: string; lang: string; id: string }[]>([]);
+    const spokenIdsRef = useRef<Set<string>>(new Set());
+    const isSpeakingRef = useRef<boolean>(false);
 
     // --- Session & Mode State ---
     type SessionItem = {
@@ -102,9 +113,81 @@ const AudienceView: React.FC = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, []);
 
+    // --- TTS Functions ---
+    const stopAudio = useCallback(() => {
+        if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.src = "";
+            audioRef.current = null;
+        }
+        audioQueueRef.current = [];
+        isSpeakingRef.current = false;
+        setSpeakingId(null);
+    }, []);
+
+    const playNext = useCallback(() => {
+        const next = audioQueueRef.current.shift();
+        if (!next) {
+            isSpeakingRef.current = false;
+            setSpeakingId(null);
+            return;
+        }
+        const url = `${CF_BASE}/synthesizeSpeech?text=${encodeURIComponent(next.text)}&lang=${next.lang}&speed=${ttsSpeed}`;
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        setSpeakingId(next.id);
+        audio.onended = () => playNext();
+        audio.onerror = () => playNext();
+        audio.play().catch(() => playNext());
+    }, [ttsSpeed]);
+
+    const enqueueSpeak = useCallback((text: string, lang: string, id: string) => {
+        if (!text.trim()) return;
+        audioQueueRef.current.push({ text, lang, id });
+        if (!isSpeakingRef.current) {
+            isSpeakingRef.current = true;
+            playNext();
+        }
+    }, [playNext]);
+
+    // 클릭: 즉시 재생 (큐 비우고 해당 세그먼트부터)
+    const handleSpeak = useCallback((text: string, lang: string, id?: string) => {
+        stopAudio();
+        isSpeakingRef.current = true;
+        const segId = id || `manual_${Date.now()}`;
+        audioQueueRef.current = [{ text, lang, id: segId }];
+        playNext();
+    }, [stopAudio, playNext]);
+
     useEffect(() => {
         scrollToBottom();
     }, [segmentsOrder, scrollToBottom]);
+
+    // Auto-play: 새로운 final 세그먼트를 자동으로 큐에 추가
+    useEffect(() => {
+        if (!isTtsEnabled) return;
+        const lastId = segmentsOrder[segmentsOrder.length - 1];
+        if (!lastId) return;
+        const seg = segmentsMap[lastId];
+        if (seg?.status !== 'final') return;
+        if (spokenIdsRef.current.has(lastId)) return;
+
+        const text = (seg[activeLang] as string) || (seg.refined as string) || '';
+        if (!text.trim()) return;
+
+        spokenIdsRef.current.add(lastId);
+        enqueueSpeak(text, activeLang, lastId);
+    }, [segmentsOrder, segmentsMap, isTtsEnabled, activeLang, enqueueSpeak]);
+
+    // TTS 비활성화 시 재생 중단
+    useEffect(() => {
+        if (!isTtsEnabled) stopAudio();
+    }, [isTtsEnabled, stopAudio]);
+
+    // 컴포넌트 언마운트 시 오디오 정리
+    useEffect(() => {
+        return () => stopAudio();
+    }, [stopAudio]);
 
     // 1. Initial Load
     useEffect(() => {
@@ -355,6 +438,43 @@ const AudienceView: React.FC = () => {
                         <button onClick={() => setLineHeight(v => Math.min(4.0, parseFloat((v + 0.1).toFixed(1))))} className="p-1 font-bold text-sm">행+</button>
                     </div>
 
+                    {/* TTS Controls */}
+                    <div className={`flex items-center gap-1 px-2 py-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>
+                        {/* Auto-play toggle */}
+                        <button
+                            onClick={() => setIsTtsEnabled(v => !v)}
+                            title={isTtsEnabled ? 'Auto-play ON — click to turn off' : 'Auto-play OFF — click to turn on'}
+                            className={`px-2 py-1 rounded text-sm font-bold transition-all ${isTtsEnabled ? 'bg-blue-600 text-white' : (isDarkMode ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-black')}`}
+                        >
+                            {isTtsEnabled ? '🔊' : '🔇'}
+                        </button>
+                        {/* Stop button — only when playing */}
+                        {speakingId && (
+                            <button
+                                onClick={stopAudio}
+                                title="Stop audio"
+                                className="px-2 py-1 rounded text-sm text-red-400 hover:text-red-300 transition-all animate-pulse"
+                            >
+                                ⏹
+                            </button>
+                        )}
+                        {/* Speed selector */}
+                        {isTtsEnabled && (
+                            <select
+                                value={ttsSpeed}
+                                onChange={e => setTtsSpeed(Number(e.target.value))}
+                                className={`text-xs px-1 py-0.5 rounded ${isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-300 text-gray-700'}`}
+                                title="Playback speed"
+                            >
+                                <option value={0.75}>0.75×</option>
+                                <option value={0.9}>0.9×</option>
+                                <option value={1.0}>1.0×</option>
+                                <option value={1.2}>1.2×</option>
+                                <option value={1.5}>1.5×</option>
+                            </select>
+                        )}
+                    </div>
+
                     <div className={`flex rounded p-1 ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>
                         <button
                             onClick={() => setActiveLang('original')}
@@ -363,7 +483,7 @@ const AudienceView: React.FC = () => {
                             Original
                         </button>
                         {targetLanguages
-                            .filter(lang => lang !== sessionInfo?.sourceLanguage) // Filter out the speaker's language
+                            .filter(lang => lang !== sessionInfo?.sourceLanguage)
                             .map(lang => (
                                 <button
                                     key={lang}
@@ -489,6 +609,8 @@ const AudienceView: React.FC = () => {
                                     fontSize={`${fontSize}px`}
                                     color={isFallback ? (isDarkMode ? "#6b7280" : "#9ca3af") : (isDarkMode ? "white" : "black")}
                                     opacity={!showAsRaw && !isTranslating ? 1 : 0.7}
+                                    isSpeaking={speakingId === id}
+                                    onSpeak={(t, l) => handleSpeak(t, l, id)}
                                 />
                             )
                         })}
