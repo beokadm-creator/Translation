@@ -3,11 +3,11 @@
  * 
  * 상태 판단 기준:
  * - SERVER: Firebase RTDB 연결 상태
- * - WHISPER: 마지막 STT 성공까지의 경과 시간 (processAudio가 status에 기록)
- * - GEMINI: 마지막 Gemini 처리 경과 시간 (onRefineRequest가 state에 기록)
+ * - STT: 마지막 STT 성공까지의 경과 시간 (processAudio가 status에 기록)
+ * - TRANS: 마지막 번역 처리 경과 시간 (onRefineRequest가 state에 기록)
  * - DB: RTDB 읽기 레이턴시
  * 
- * ⚠️  주의: WHISPER/GEMINI는 녹음을 시작하고 오디오가 전송되어야 점등됩니다.
+ * ⚠️  주의: STT/TRANS는 녹음을 시작하고 오디오가 전송되어야 점등됩니다.
  *       녹음 전에는 회색(idle)이 정상입니다.
  */
 
@@ -181,12 +181,12 @@ const HealthDashboard: React.FC<HealthProps> = ({ projectId }) => {
     return (
         <div className="flex items-center gap-4 bg-gray-900/60 px-3 py-2 rounded-lg border border-gray-800 backdrop-blur-sm">
             {renderLight('SERVER', serverStatus, serverStatus === 'ok' ? '🟢 Firebase 연결됨' : '🔴 연결 끊김')}
-            {renderLight('WHISPER', whisperStatus, lastWhisperMs !== null
-                ? `🎙️ GPT Whisper: ${formatMs(lastWhisperMs)}`
+            {renderLight('STT', whisperStatus, lastWhisperMs !== null
+                ? `🎙️ STT (gpt-4o): ${formatMs(lastWhisperMs)}`
                 : '🎙️ 아직 오디오 미전송 (녹음 시작 필요)'
             )}
-            {renderLight('GEMINI', geminiStatus, lastGeminiMs !== null
-                ? `🔬 Gemini 번역: ${formatMs(lastGeminiMs)}`
+            {renderLight('TRANS', geminiStatus, lastGeminiMs !== null
+                ? `🔬 번역 (gpt-4o-mini): ${formatMs(lastGeminiMs)}`
                 : '🔬 번역 대기 중'
             )}
             {renderLight('DB', dbStatus, dbLatencyMs !== null

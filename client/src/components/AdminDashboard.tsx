@@ -2,7 +2,6 @@ import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { rtdb as database, auth } from '../firebase';
 import { ref, onValue, push, set, update, get } from 'firebase/database';
 import { useParams } from 'react-router-dom';
-import AudioVisualizer from './AudioVisualizer';
 import TextItem from './TextItem';
 import { useProjectStream } from '../hooks/useProjectStream';
 import HealthDashboard from './HealthDashboard';
@@ -643,15 +642,14 @@ const AdminDashboard: React.FC = () => {
 
 
             {/* Main: Workspace */}
-            <div className="flex-1 flex flex-col min-w-0">
-                {/* Top: Metadata Editor */}
-                <div className="h-[45%] p-6 border-b border-white/5 bg-[#0a0a0a] overflow-y-auto">
+            <div className="flex-1 flex min-w-0">
+                {/* Left: Metadata Editor (Session Settings) */}
+                <div className="w-1/2 p-6 border-r border-white/5 bg-[#0a0a0a] flex flex-col">
                     {selectedSessionId ? (
-                        <div className="max-w-4xl mx-auto space-y-6">
-                            <div className="flex justify-between items-center mb-6">
+                        <div className="max-w-2xl mx-auto flex flex-col h-full w-full">
+                            <div className="flex justify-between items-center mb-6 shrink-0">
                                 <h2 className="text-xl font-semibold tracking-tight text-gray-100">Session Settings</h2>
                                 <div className="flex gap-2">
-                                    <button onClick={() => { if (window.confirm("Archive this session?")) triggerArchive(selectedSessionId); }} className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-md text-xs font-medium text-gray-300 transition-colors">Force Archive</button>
                                     <button onClick={handleSaveSession} className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-md text-xs font-medium text-gray-300 transition-colors">Save</button>
                                     <button onClick={handleGoLive} className={`px-4 py-2 rounded-md text-xs font-bold transition-colors ${activeSessionId === selectedSessionId ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-green-600 text-white hover:bg-green-500'}`}>
                                         {activeSessionId === selectedSessionId ? 'Live Active' : 'Go Live'}
@@ -669,7 +667,7 @@ const AdminDashboard: React.FC = () => {
                                     { lang: 'refined', label: srcLang === 'ko' ? '🇰🇷 Korean (Raw)' : '🇺🇸 English (Raw)', primary: false },
                                 ];
                                 return (
-                                    <div className="flex gap-2 mb-6 p-3 bg-[#111111] rounded-lg border border-white/5 flex-wrap items-center">
+                                    <div className="flex gap-2 mb-6 p-3 bg-[#111111] rounded-lg border border-white/5 flex-wrap items-center shrink-0">
                                         <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mr-2">Overlays</span>
                                         {links.map(({ lang, label, primary }) => {
                                             const url = `${origin}/overlay/${activeProjectId}/${lang}`;
@@ -691,68 +689,86 @@ const AdminDashboard: React.FC = () => {
                                                 </div>
                                             );
                                         })}
-                                        <button
-                                            onClick={() => window.open(`${origin}/overlay/${activeProjectId}/${tgtLang}?debug=true`, '_blank')}
-                                            className="px-3 py-1.5 rounded-md text-[10px] bg-transparent hover:bg-white/5 text-gray-500 border border-white/10 ml-auto transition-colors"
-                                        >Debug Mode</button>
                                     </div>
                                 );
                             })()}
                             
-                            <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                                <div className="space-y-1.5">
-                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Speaker Name</label>
-                                    <input className="w-full bg-[#111111] border border-white/10 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-white/30 outline-none text-gray-100 placeholder-gray-600 transition-all" value={formData.speaker || ''} onChange={e => setFormData({ ...formData, speaker: e.target.value })} />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Time</label>
-                                    <input className="w-full bg-[#111111] border border-white/10 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-white/30 outline-none text-gray-100 placeholder-gray-600 transition-all font-mono" value={formData.startTime || ''} onChange={e => setFormData({ ...formData, startTime: e.target.value })} />
-                                </div>
-                                <div className="space-y-1.5 col-span-2 md:col-span-1">
-                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Source Language</label>
-                                    <select
-                                        className="w-full bg-[#111111] border border-white/10 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-white/30 outline-none text-gray-100 transition-all appearance-none"
-                                        value={formData.sourceLanguage || 'ko'}
-                                        onChange={e => {
-                                            const src = e.target.value as 'ko' | 'en';
-                                            const tgt = src === 'ko' ? ['en'] : ['ko'];
-                                            setFormData({ ...formData, sourceLanguage: src, targetLanguages: tgt });
-                                        }}
-                                    >
-                                        <option value="ko">Korean (한국어)</option>
-                                        <option value="en">English (영어)</option>
-                                    </select>
-                                </div>
-                                <div className="space-y-1.5 col-span-2 md:col-span-1">
-                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Target Language</label>
-                                    <div className="flex gap-3 px-3 py-2 bg-[#111111]/50 rounded-lg border border-white/5">
-                                        {['ko', 'en'].map(l => (
-                                            <label key={l} className="flex items-center gap-2 cursor-not-allowed opacity-50">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={(formData.targetLanguages || []).includes(l)}
-                                                    disabled
-                                                    className="rounded border-gray-600 text-blue-500 focus:ring-blue-500 bg-gray-800"
-                                                />
-                                                <span className="uppercase text-xs font-medium text-gray-300">{l}</span>
-                                            </label>
-                                        ))}
+                            <div className="flex flex-col gap-4 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Speaker Name</label>
+                                        <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors" value={formData.speaker || ''} onChange={e => setFormData({ ...formData, speaker: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Affiliation</label>
+                                        <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors" value={formData.affiliation || ''} onChange={e => setFormData({ ...formData, affiliation: e.target.value })} />
                                     </div>
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Affiliation</label>
-                                    <input className="w-full bg-[#111111] border border-white/10 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-white/30 outline-none text-gray-100 placeholder-gray-600 transition-all" value={formData.affiliation || ''} onChange={e => setFormData({ ...formData, affiliation: e.target.value })} />
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Time</label>
+                                        <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors font-mono" value={formData.startTime || ''} onChange={e => setFormData({ ...formData, startTime: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Topic</label>
+                                        <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors" value={formData.topic || ''} onChange={e => setFormData({ ...formData, topic: e.target.value })} />
+                                    </div>
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Topic</label>
-                                    <input className="w-full bg-[#111111] border border-white/10 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-white/30 outline-none text-gray-100 placeholder-gray-600 transition-all" value={formData.topic || ''} onChange={e => setFormData({ ...formData, topic: e.target.value })} />
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Source Language</label>
+                                        <div className="relative">
+                                            <select
+                                                className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 transition-colors appearance-none"
+                                                value={formData.sourceLanguage || 'ko'}
+                                                onChange={e => {
+                                                    const src = e.target.value as 'ko' | 'en';
+                                                    const tgt = src === 'ko' ? ['en'] : ['ko'];
+                                                    setFormData({ ...formData, sourceLanguage: src, targetLanguages: tgt });
+                                                }}
+                                            >
+                                                <option value="ko">Korean (한국어)</option>
+                                                <option value="en">English (영어)</option>
+                                            </select>
+                                            <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-gray-500">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Target Language <span className="normal-case tracking-normal text-gray-600 ml-1">(Auto)</span></label>
+                                        <div className="flex gap-3 px-3 py-1.5 bg-[#111111]/50 rounded-md border border-white/5 h-[34px] items-center">
+                                            {['ko', 'en'].map(l => (
+                                                <label key={l} className={`flex items-center gap-2 ${(formData.targetLanguages || []).includes(l) ? 'text-gray-200' : 'text-gray-600'} cursor-not-allowed`}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={(formData.targetLanguages || []).includes(l)}
+                                                        disabled
+                                                        className="rounded border-white/10 bg-black/50 accent-gray-500"
+                                                    />
+                                                    <span className="uppercase text-xs font-medium">{l}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="col-span-2 space-y-1.5">
-                                    <label className="flex items-center text-[10px] text-gray-500 uppercase tracking-wider font-medium">
-                                        Abstract
-                                        <span className="ml-2 text-[9px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded normal-case tracking-normal">Improves AI Context</span>
+
+                                <div className="space-y-1.5 flex flex-col min-h-[80px]">
+                                    <label className="flex items-center text-[10px] text-gray-500 uppercase tracking-wider font-medium mb-1.5 shrink-0">
+                                        Keywords
+                                        <span className="ml-2 text-[9px] bg-white/5 border border-white/10 text-gray-400 px-1.5 py-0.5 rounded normal-case tracking-normal">Comma separated</span>
                                     </label>
-                                    <textarea className="w-full bg-[#111111] border border-white/10 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-white/30 outline-none text-gray-100 placeholder-gray-600 transition-all h-24 resize-none leading-relaxed" placeholder="Enter abstract or presentation content. The first 60 characters are sent to Whisper STT to improve domain terminology recognition." value={formData.abstract || ''} onChange={e => setFormData({ ...formData, abstract: e.target.value })} />
+                                    <textarea className="w-full flex-1 bg-[#111111] border border-white/10 rounded-md px-3 py-2 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors resize-none leading-relaxed" placeholder="e.g. Implant, Sinus, Bone Graft" value={formData.keywords || ''} onChange={e => setFormData({ ...formData, keywords: e.target.value })} />
+                                </div>
+
+                                <div className="space-y-1.5 flex flex-col flex-1 min-h-[120px]">
+                                    <label className="flex items-center text-[10px] text-gray-500 uppercase tracking-wider font-medium mb-1.5 shrink-0">
+                                        Abstract (초록)
+                                        <span className="ml-2 text-[9px] bg-white/5 border border-white/10 text-gray-400 px-1.5 py-0.5 rounded normal-case tracking-normal">Improves AI Context</span>
+                                    </label>
+                                    <textarea className="w-full flex-1 bg-[#111111] border border-white/10 rounded-md px-3 py-3 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors resize-none leading-relaxed" placeholder="Enter abstract or presentation content. The first 60 characters are sent to the STT model to improve domain terminology recognition." value={formData.abstract || ''} onChange={e => setFormData({ ...formData, abstract: e.target.value })} />
                                 </div>
                             </div>
                         </div>
@@ -764,8 +780,8 @@ const AdminDashboard: React.FC = () => {
                     )}
                 </div>
 
-                {/* Bottom: Monitor & Controls */}
-                <div className="h-[55%] bg-[#0a0a0a] flex flex-col p-6">
+                {/* Right: Monitor & Controls */}
+                <div className="w-1/2 bg-[#0a0a0a] flex flex-col p-6">
                     <div className="flex justify-between items-center mb-4">
                         <div className="flex items-center gap-4">
                             <div className="flex bg-[#111111] rounded-md p-1 border border-white/5">
@@ -789,10 +805,6 @@ const AdminDashboard: React.FC = () => {
                             <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Status</span>
                             <span className={`text-xs font-medium ${status === 'recording' || status === 'streaming' ? 'text-green-400' : 'text-gray-400'}`}>{status}</span>
                         </div>
-                    </div>
-
-                    <div className="bg-[#111111] border border-white/5 rounded-lg p-2 mb-4">
-                        <AudioVisualizer stream={stream} width={800} height={40} />
                     </div>
 
                     {/* Log Window with Header */}

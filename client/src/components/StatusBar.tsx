@@ -7,7 +7,6 @@ interface Props { projectId?: string }
 const StatusBar: React.FC<Props> = ({ projectId }) => {
   const [openai, setOpenai] = useState<Record<string, unknown> | null>(null);
   const [gemini, setGemini] = useState<Record<string, unknown> | null>(null);
-  const [translation, setTranslation] = useState<Record<string, unknown> | null>(null);
   const [lastActive, setLastActive] = useState<number | null>(null);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [serverState, setServerState] = useState<string>('...');
@@ -28,7 +27,6 @@ const StatusBar: React.FC<Props> = ({ projectId }) => {
     const laRef = ref(rtdb, `${base}/lastActive`);
     onValue(oRef, (s) => setOpenai(s.val()));
     onValue(gRef, (s) => setGemini(s.val()));
-    onValue(tRef, (s) => setTranslation(s.val()));
     onValue(laRef, (s) => setLastActive(Number(s.val()) || null));
     return () => { off(oRef); off(gRef); off(tRef); off(laRef); };
   }, [projectId]);
@@ -56,9 +54,8 @@ const StatusBar: React.FC<Props> = ({ projectId }) => {
     <div className="w-full flex items-center gap-2 py-2 sticky top-0 z-10 bg-gray-900">
       <span className={`px-2 py-1 rounded text-xs ${connected ? 'bg-green-700' : 'bg-red-700'}`}>RTDB: {connected ? 'OK' : 'DISCONNECTED'}</span>
       {pill('Server', serverState)}
-      {pill('OpenAI', (openai?.state as string) || '')}
-      {pill('Gemini', (gemini?.state as string) || '')}
-      {pill('Translation', (translation?.state as string) || '')}
+      {pill('STT', (openai?.state as string) || '')}
+      {pill('Trans', (gemini?.state as string) || '')}
     </div>
   );
 };
