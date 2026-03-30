@@ -31,8 +31,11 @@ export const synthesizeSpeech = functions
 
             if (!text) { res.status(400).json({ error: "text required" }); return }
 
-            // 언어별 음성 선택: nova(한국어 자연스러움), alloy(영어 중립적)
-            const voice = lang === "ko" ? "nova" : "alloy"
+            // 음성 선택: 클라이언트에서 voice 파라미터 전달 가능 (nova/shimmer/onyx/echo/alloy/fable)
+            const voiceParam = (req.query.voice || "").toString()
+            const defaultVoice = lang === "ko" ? "nova" : "alloy"
+            const VALID_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']
+            const voice = VALID_VOICES.includes(voiceParam) ? voiceParam : defaultVoice
 
             const openai = getOpenAI()
             const response = await openai.audio.speech.create({

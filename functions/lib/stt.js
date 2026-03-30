@@ -1,9 +1,11 @@
 "use strict";
-// Version: v11.0 (Stable - Medical/Dental Optimized)
-// KEY IMPROVEMENT:
+// Version: v12.3 (Stable - OpenAI Only)
+// STT:         gpt-4o-transcribe  (language + domain keyword prompt)
+// Translation: gpt-4o-mini        (JSON strict, temperature 0)
+// KEY FLOW:
 // 1. Every speech segment is written to DB IMMEDIATELY as 'translating'.
-// 2. Audience sees the raw text in ~2 seconds.
-// 3. Translation (Gemini) waits for either minLength (30 chars) or timeout (2s pause).
+// 2. Audience sees the raw text in ~1-2 seconds.
+// 3. Translation waits for minLength chars OR timeout before flushing buffer.
 // 4. When buffer flushes, first segment gets translation, others are marked 'merged' (hidden).
 // 5. Result: Ultra-fast visual feedback + High-quality contextual translation.
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
@@ -43,22 +45,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyGeminiPipeline = exports.onRefineRequest = exports.processAudio = void 0;
+exports.verifyPipeline = exports.onRefineRequest = exports.processAudio = void 0;
 const functions = __importStar(require("firebase-functions/v1"));
 const admin = __importStar(require("firebase-admin"));
 const openai_1 = __importDefault(require("openai"));
 const stream_1 = require("stream");
 let _openai = null;
-// ── 4개 Gemini API 키 ─────────────────────────────────────────────────────────
-const GEMINI_KEYS = [
-    process.env.GEMINI_KEY_TRANSLATE || "",
-    process.env.GEMINI_KEY_MEDICAL || "",
-    process.env.GEMINI_KEY_EDITOR || "",
-    process.env.GEMINI_KEY_CONTEXT || "",
-].filter(Boolean); // 빈 키 제거 (환경변수 미설정 방어)
-let _keyIndex = 0;
-// ✅ 모델 설정: gemini-2.5-flash (이 API 키에서 사용 가능한 유일한 모델)
-const FLASH_URL = (key) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
 // ── Hallucination 필터 ────────────────────────────────────────────────────────
 // 정적 URL 도메인만 핀포인트로 필터 (전체 문장 삭제 방지)
 const URL_FILTER_REGEX = /(?:https?:\/\/)?(?:www\.)?(?:sites\.google\.com|cst\.eu\.com|Amara\.org|amara\.org|youtube\.com|youtu\.be)\S*/gi;
@@ -81,10 +73,38 @@ const hasRepetitionLoop = (text) => {
     const unique = new Set(words.map(w => w.toLowerCase()));
     return unique.size <= 6 && text.length > 80;
 };
-const isGarbage = (text, _originalText) => {
+const normalizeLoose = (text) => (text || "")
+    .toLowerCase()
+    .replace(/[()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+const isPromptLeakage = (text, promptText) => {
+    if (!text || !promptText)
+        return false;
+    const normalizedText = normalizeLoose(text);
+    const normalizedPrompt = normalizeLoose(promptText);
+    if (!normalizedText || !normalizedPrompt)
+        return false;
+    if (normalizedPrompt.includes(normalizedText) && normalizedText.length >= 40)
+        return true;
+    if (normalizedText.includes(normalizedPrompt) && normalizedPrompt.length >= 40)
+        return true;
+    const promptItems = promptText
+        .split(',')
+        .map(item => normalizeLoose(item))
+        .filter(item => item.length >= 6);
+    if (promptItems.length < 4)
+        return false;
+    const matchedItems = new Set(promptItems.filter(item => normalizedText.includes(item)));
+    const commaCount = (text.match(/,/g) || []).length;
+    return matchedItems.size >= 4 && commaCount >= 3;
+};
+const isGarbage = (text, _originalText, promptText) => {
     if (!text)
         return false;
     if (hasRepetitionLoop(text))
+        return true;
+    if (isPromptLeakage(text, promptText))
         return true;
     // 전체가 괄호/대괄호 소리 표기인 경우 (Whisper 무음 환각)
     if (/^\s*[\(\[][^\)\]]{1,40}[\)\]]\s*[\.!]?\s*$/.test(text.trim()))
@@ -99,38 +119,6 @@ const isGarbage = (text, _originalText) => {
     if (alphanumeric.length < 2)
         return true;
     return false;
-};
-// ── Gemini 단일 호출 ──────────────────────────────────────────────────────────
-const callGemini = async (apiKey, prompt, timeoutMs = 15000) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-        const payload = {
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: "application/json" }
-        };
-        const res = await fetch(FLASH_URL(apiKey), {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload), signal: controller.signal
-        });
-        clearTimeout(timer);
-        if (!res.ok) {
-            const errBody = await res.text().catch(() => '');
-            functions.logger.warn(`[Gemini] HTTP ${res.status}`, { key: apiKey.slice(0, 10), body: errBody.slice(0, 200) });
-            return null;
-        }
-        const data = await res.json();
-        const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        if (!raw)
-            return null;
-        const clean = raw.replace(/```json\s*|```/g, "").trim();
-        return JSON.parse(clean);
-    }
-    catch (e) {
-        clearTimeout(timer);
-        functions.logger.warn(`[Gemini] Exception`, { key: apiKey.slice(0, 10), err: String(e).slice(0, 100) });
-        return null;
-    }
 };
 // ── 번역 파이프라인 ───────────────────────────────────────────────────────────
 // 번역 결과 유효성 검사 (필수 target 필드가 모두 채워졌는지 확인)
@@ -153,57 +141,63 @@ const buildTranslationResult = (data, sourceLang, rawText) => {
         isMedical: data.isMedical ?? false
     };
 };
-const translateWithFallback = async (rawText, sourceLang, previousContext, sessionContext) => {
-    const tStart = Date.now();
-    const targets = ['ko', 'en'].filter(l => l !== sourceLang);
-    const langNames = { ko: 'Korean', en: 'English' };
-    const srcName = langNames[sourceLang] || 'the source language';
-    const transFields = targets.map(l => `"${l}": "...${langNames[l] || l}..."`).join(', ');
-    const prompt = [
-        `You are a professional medical/dental translation AI.`,
-        `SESSION CONTEXT (CRITICAL): ${sessionContext || 'Live Medical/Dental Lecture'}`,
-        `SOURCE: ${sourceLang} (${srcName})`,
-        `INPUT: "${rawText}"`,
-        previousContext ? `PREVIOUS: "${previousContext.split(' / ').slice(-1)[0]}"` : '',
-        `TASK: Refine/Fix the input in ${srcName} (especially technical terminology like Implant, Sinus, Bone Graft, etc.) and translate it accurately.`,
-        ``,
-        `TASKS:`,
-        `1. REFINE: Fix errors in ${srcName}. Correct dental terms. Keep ${srcName} only.`,
-        `2. TRANSLATE to: ${targets.map(l => langNames[l] || l).join(' AND ')}`,
-        `3. OUTPUT JSON ONLY.`,
-        ``,
-        `EXAMPLES:`,
-        `[INPUT KO] "임플란트 픽스처를 식립했습니다."`,
-        `{"refined": "임플란트 픽스처를 식립했습니다.", "en": "The implant fixture was placed.", "isMedical": true}`,
-        `[INPUT EN] "Uh, so, we did the bone graft."`,
-        `{"refined": "So, we did the bone graft.", "ko": "그래서 우리는 골이식을 진행했습니다.", "isMedical": true}`,
-        ``,
-        `CRITICAL: All language fields MUST be filled. Never return empty strings. Even for fragments, YOU MUST TRANSLATE.`,
-        `FORMAT: {"refined": "...", ${transFields}, "isMedical": true}`
-    ].filter(Boolean).join('\n');
-    if (GEMINI_KEYS.length === 0) {
-        functions.logger.error("[Translate] No Gemini keys available");
-        const fallback = sanitize(rawText);
-        return { refined: fallback, ko: fallback, en: fallback, isMedical: false };
-    }
-    // ── 4개 키 동시 병렬 호출 → 가장 빠른 유효 응답 사용 ──────────────────
-    // gemini-2.5-flash는 thinking으로 10-20초 소요. 순차 시도 시 timeout 초과 반복.
-    // Promise.any()로 4개를 동시에 쏘면 가장 빠른 키가 응답하는 즉시 사용.
+const translateWithOpenAI = async (rawText, sourceLang, previousContext, sessionContext) => {
     try {
-        const data = await Promise.any(GEMINI_KEYS.map(key => callGemini(key, prompt, 30000).then(d => {
-            if (!d || !validateTranslation(d, targets))
-                throw new Error('invalid');
-            return d;
-        })));
-        functions.logger.info("[Translate] OK", {
-            ms: Date.now() - tStart, srcLen: rawText.length
+        const openai = getOpenAI();
+        const contextLine = sanitize(sessionContext).slice(0, 180);
+        const previousLine = sanitize(previousContext.split(' / ').slice(-1)[0] || '').slice(0, 80);
+        const prompt = [
+            `source_lang=${sourceLang}`,
+            `input=${rawText}`,
+            contextLine ? `session_context=${contextLine}` : "",
+            previousLine ? `previous_refined=${previousLine}` : "",
+            'Return strict JSON: {"refined":"","ko":"","en":"","isMedical":true}.',
+            'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer content from session_context. (2) Correct only obvious STT errors (e.g. wrong homophone). (3) Do not output topic, speaker name, affiliation, or keywords as standalone content. (4) Never leave ko or en empty; translate fragments as fragments. (5) Keep all clinical terminology literal.',
+            'If source_lang=ko, refined and ko must stay Korean and en must be English. If source_lang=en, refined and en must stay English and ko must be Korean.',
+            'Example output for source_lang=ko and input="임플란트 픽스처를 식립했습니다.": {"refined":"임플란트 픽스처를 식립했습니다.","ko":"임플란트 픽스처를 식립했습니다.","en":"The implant fixture was placed.","isMedical":true}'
+        ].filter(Boolean).join('\n');
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            temperature: 0,
+            max_tokens: 200,
+            response_format: { type: "json_object" },
+            messages: [
+                {
+                    role: "system",
+                    content: "You refine live medical speech-to-text output and produce Korean and English translations in strict JSON."
+                },
+                {
+                    role: "user",
+                    content: prompt
+                }
+            ]
         });
+        const content = completion.choices[0]?.message?.content || "";
+        if (!content)
+            return null;
+        const data = JSON.parse(content);
+        if (!validateTranslation(data, ['ko', 'en']))
+            return null;
         return buildTranslationResult(data, sourceLang, rawText);
     }
-    catch {
-        // AggregateError: 모든 키 실패
+    catch (e) {
+        functions.logger.warn("[Translate][OpenAI] Failed", {
+            err: String(e).slice(0, 180)
+        });
+        return null;
     }
-    functions.logger.error(`[Translate] All ${GEMINI_KEYS.length} keys failed → raw text fallback`, { input: rawText.slice(0, 50) });
+};
+const translateWithFallback = async (rawText, sourceLang, previousContext, sessionContext) => {
+    const tStart = Date.now();
+    const result = await translateWithOpenAI(rawText, sourceLang, previousContext, sessionContext);
+    if (result) {
+        functions.logger.info("[Translate][OpenAI] OK", {
+            ms: Date.now() - tStart,
+            srcLen: rawText.length
+        });
+        return result;
+    }
+    functions.logger.error("[Translate][OpenAI] Failed, raw text fallback", { input: rawText.slice(0, 50) });
     const fallback = sanitize(rawText);
     return { refined: fallback, ko: fallback, en: fallback, isMedical: false };
 };
@@ -225,7 +219,7 @@ const DENTAL_PROMPT_EN = "Implant, Sinus, Bone Graft, Fixture, Abutment, Crown";
 exports.processAudio = functions
     .runWith({ timeoutSeconds: 120, memory: "1GB" })
     .https.onRequest(async (req, res) => {
-    const versionTag = "v11.0_stable";
+    const versionTag = "v12.3_openai_only";
     // CORS
     const origin = req.headers.origin;
     const allowedOrigin = process.env.ALLOWED_ORIGIN || functions.config()?.app?.allowed_origin || "*";
@@ -279,8 +273,8 @@ exports.processAudio = functions
         let sessionContext = "";
         let previousContext = "";
         let customKeywords = "";
-        let minLength = 20;
-        let timeoutMs = 3000;
+        let minLength = 35;
+        let timeoutMs = 4500;
         let sentenceEnd = true;
         // 설정 로드
         try {
@@ -303,9 +297,10 @@ exports.processAudio = functions
                     const abstractStr = s.abstract ? `, Abstract: ${s.abstract}` : '';
                     const keywordsStr = s.keywords ? `, Keywords: ${s.keywords}` : '';
                     sessionContext = `Speaker: ${s.speaker}${affiliationStr}, Topic: ${s.topic}${abstractStr}${keywordsStr}`;
-                    // Whisper prompt에 연자명·소속·키워드 모두 포함 → 고유명사 오인식 방지
+                    // Whisper prompt: 연자명·소속·주제·키워드·초록(60자) 포함 → 고유명사·도메인 용어 오인식 방지
                     const speakerTerms = [s.speaker, s.affiliation, s.topic].filter(Boolean).join(', ');
-                    customKeywords = [s.keywords, speakerTerms].filter(Boolean).join(', ');
+                    const abstractSnippet = s.abstract ? s.abstract.slice(0, 60) : '';
+                    customKeywords = [s.keywords, speakerTerms, abstractSnippet].filter(Boolean).join(', ');
                 }
                 else {
                     functions.logger.warn(`[STT] Active Session ${activeSessionId} data missing in DB`);
@@ -329,9 +324,9 @@ exports.processAudio = functions
             if (chunkSnap.exists()) {
                 const sett = chunkSnap.val();
                 if (sett.minLength !== undefined)
-                    minLength = Number(sett.minLength);
+                    minLength = Math.max(10, Number(sett.minLength));
                 if (sett.timeoutMs !== undefined)
-                    timeoutMs = Number(sett.timeoutMs);
+                    timeoutMs = Math.max(1000, Number(sett.timeoutMs));
                 if (sett.sentenceEnd !== undefined)
                     sentenceEnd = Boolean(sett.sentenceEnd);
             }
@@ -342,7 +337,7 @@ exports.processAudio = functions
             }
         }
         catch { /* 무시 */ }
-        // ── STEP 1: Whisper STT ────────────────────────────────────────────
+        // ── STEP 1: OpenAI STT ────────────────────────────────────────────
         let openai = getOpenAI();
         const audioStream = stream_1.Readable.from(buf);
         audioStream.path = "audio.webm";
@@ -350,7 +345,7 @@ exports.processAudio = functions
         const basePrompt = sourceLang === 'ko' ? DENTAL_PROMPT_KO : DENTAL_PROMPT_EN;
         const whisperPrompt = customKeywords ? `${basePrompt}, ${customKeywords}` : basePrompt;
         const stt = await openai.audio.transcriptions.create({
-            file: audioStream, model: "whisper-1", language: sourceLang,
+            file: audioStream, model: "gpt-4o-transcribe", language: sourceLang,
             prompt: whisperPrompt, temperature: 0,
         });
         const whisperMs = Date.now() - tWhisper;
@@ -359,7 +354,7 @@ exports.processAudio = functions
         projectRef.child('status/services/openai').update({ ts: Date.now() }).catch(() => { });
         const sttText = (stt?.text || "").trim();
         const rawText = sanitize(sttText);
-        if (rawText.length < 2 || isGarbage(rawText, sttText)) {
+        if (rawText.length < 2 || isGarbage(rawText, sttText, whisperPrompt)) {
             res.status(200).json({ success: true, info: "EmptyOrGarbage", text: rawText });
             return;
         }
@@ -386,12 +381,12 @@ exports.processAudio = functions
             const currentBufferText = (st.bufferText || '').toString();
             const currentBufferIds = Array.isArray(st.bufferIds) ? st.bufferIds : [];
             // 버퍼가 비어있으면 지금부터 타이머 시작
-            const lastGeminiTime = currentBufferIds.length === 0
+            const lastFlushTime = currentBufferIds.length === 0
                 ? Date.now()
-                : Number(st.lastGeminiTime || Date.now());
+                : Number(st.lastFlushTime || st.lastGeminiTime || Date.now());
             const newBufferText = currentBufferText ? currentBufferText + ' ' + rawText : rawText;
             const newBufferIds = [...currentBufferIds, id];
-            const timeDiff = Date.now() - lastGeminiTime;
+            const timeDiff = Date.now() - lastFlushTime;
             const isSentenceEnd = sentenceEnd && /[.!?]$/.test(newBufferText.trim());
             const isLongEnough = newBufferText.length >= minLength;
             const isTimeOut = timeDiff >= timeoutMs;
@@ -402,11 +397,11 @@ exports.processAudio = functions
                     idsToDelete: newBufferIds.slice(1),
                     bufferText: newBufferText
                 };
-                return { bufferText: '', bufferIds: [], lastGeminiTime: Date.now(), lastRefinedList: st.lastRefinedList || [] };
+                return { bufferText: '', bufferIds: [], lastFlushTime: Date.now(), lastRefinedList: st.lastRefinedList || [] };
             }
             else {
                 // BUFFERING: 현재 세그먼트 추가
-                return { ...st, bufferText: newBufferText, bufferIds: newBufferIds, lastGeminiTime };
+                return { ...st, bufferText: newBufferText, bufferIds: newBufferIds, lastFlushTime: lastFlushTime };
             }
         });
         if (flushData) {
@@ -434,7 +429,7 @@ exports.processAudio = functions
                 await admin.database().ref().update(updates);
             }
             catch {
-                // Gemini 실패 시 버퍼된 모든 세그먼트를 "final"로 복구
+                // 번역 실패 시 버퍼된 모든 세그먼트를 "final"로 복구
                 const errorFixes = {};
                 errorFixes[`projects/${projectId}/stream/${targetId}/status`] = "final";
                 for (const pid of idsToDelete) {
@@ -452,40 +447,15 @@ exports.processAudio = functions
         catch { }
     }
 });
-// ── Legacy Triggers (Disabled for v11.0) ─────────────────────────────────────
+// ── Legacy Triggers (Disabled) ───────────────────────────────────────────────
 exports.onRefineRequest = functions.database.ref("projects/{projectId}/stream/{dataId}").onCreate(() => null);
 // ── Remaster (미구현 stub - 비활성화) ────────────────────────────────────────
 // remasterSession pubsub은 구현체가 없으므로 비용/로그 낭비를 막기 위해 비활성화.
 // 추후 실제 리마스터 로직 구현 시 아래 주석을 해제할 것.
 // export const remasterSession = functions.pubsub.schedule("every 2 minutes").onRun(() => runRemasterLogic())
 // ── 진단 툴 ─────────────────────────────────────────────────────────────────
-exports.verifyGeminiPipeline = functions.https.onRequest(async (req, res) => {
+exports.verifyPipeline = functions.https.onRequest(async (_req, res) => {
     res.set("Access-Control-Allow-Origin", "*");
-    // 직접 Gemini API 상태 확인 (단순 HTTP 체크)
-    const diagKey = GEMINI_KEYS[0] || "";
-    let geminiStatus = "no_keys";
-    let geminiHttpCode = 0;
-    let geminiRaw = "";
-    if (diagKey) {
-        try {
-            const testPayload = {
-                contents: [{ parts: [{ text: '{"refined":"임플란트 픽스처를 식립했습니다.","en":"The implant fixture was placed.","isMedical":true}' }] }],
-                generationConfig: { responseMimeType: "application/json" }
-            };
-            const testR = await fetch(FLASH_URL(diagKey), {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(testPayload),
-                signal: AbortSignal.timeout(15000)
-            });
-            geminiHttpCode = testR.status;
-            geminiRaw = (await testR.text()).slice(0, 300);
-            geminiStatus = testR.ok ? "ok" : `http_${testR.status}`;
-        }
-        catch (e) {
-            geminiStatus = `error: ${String(e).slice(0, 100)}`;
-        }
-    }
-    // 실제 번역 테스트 (한국어 → 영어)
     const result = await translateWithFallback("임플란트 픽스처를 식립했습니다.", "ko", "", "Live Medical Lecture");
-    res.json({ success: true, version: "v11.0", geminiStatus, geminiHttpCode, geminiRaw, result });
+    res.json({ success: true, version: "v12.3_openai_only", stt: "gpt-4o-transcribe", translation: "gpt-4o-mini", result });
 });

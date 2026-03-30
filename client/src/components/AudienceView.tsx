@@ -44,10 +44,19 @@ const AudienceView: React.FC = () => {
     const [isTtsEnabled, setIsTtsEnabled] = useState<boolean>(false);
     const [speakingId, setSpeakingId] = useState<string | null>(null);
     const [ttsSpeed, setTtsSpeed] = useState<number>(1.0);
+    const [ttsGender, setTtsGender] = useState<'female' | 'male'>('female');
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const audioQueueRef = useRef<{ text: string; lang: string; id: string }[]>([]);
     const spokenIdsRef = useRef<Set<string>>(new Set());
     const isSpeakingRef = useRef<boolean>(false);
+
+    // 성별 → OpenAI 음성 매핑
+    // female: nova(ko 자연스러움) / shimmer(en 부드러움)
+    // male:   onyx(ko 중후함) / echo(en 명료함)
+    const ttsVoice = (lang: string) =>
+        ttsGender === 'female'
+            ? (lang === 'ko' ? 'nova' : 'shimmer')
+            : (lang === 'ko' ? 'onyx' : 'echo');
 
     // --- Session & Mode State ---
     type SessionItem = {
@@ -132,14 +141,15 @@ const AudienceView: React.FC = () => {
             setSpeakingId(null);
             return;
         }
-        const url = `${CF_BASE}/synthesizeSpeech?text=${encodeURIComponent(next.text)}&lang=${next.lang}&speed=${ttsSpeed}`;
+        const voice = ttsVoice(next.lang);
+        const url = `${CF_BASE}/synthesizeSpeech?text=${encodeURIComponent(next.text)}&lang=${next.lang}&speed=${ttsSpeed}&voice=${voice}`;
         const audio = new Audio(url);
         audioRef.current = audio;
         setSpeakingId(next.id);
         audio.onended = () => playNext();
         audio.onerror = () => playNext();
         audio.play().catch(() => playNext());
-    }, [ttsSpeed]);
+    }, [ttsSpeed, ttsVoice]);
 
     const enqueueSpeak = useCallback((text: string, lang: string, id: string) => {
         if (!text.trim()) return;
@@ -484,20 +494,42 @@ const AudienceView: React.FC = () => {
                                 </button>
                             </div>
                         )}
-                        {/* Speed selector */}
+                        {/* 성별 + 속도 선택 — TTS 켜졌을 때만 표시 */}
                         {isTtsEnabled && (
-                            <select
-                                value={ttsSpeed}
-                                onChange={e => setTtsSpeed(Number(e.target.value))}
-                                className={`text-xs px-1 py-0.5 rounded ${isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-300 text-gray-700'}`}
-                                title="Playback speed"
-                            >
-                                <option value={0.75}>0.75×</option>
-                                <option value={0.9}>0.9×</option>
-                                <option value={1.0}>1.0×</option>
-                                <option value={1.2}>1.2×</option>
-                                <option value={1.5}>1.5×</option>
-                            </select>
+                            <>
+                                <div className={`flex rounded overflow-hidden text-xs border ${isDarkMode ? 'border-gray-600' : 'border-gray-400'}`}>
+                                    <button
+                                        onClick={() => setTtsGender('female')}
+                                        title="Female voice"
+                                        className={`px-2 py-0.5 transition-colors ${ttsGender === 'female'
+                                            ? 'bg-pink-600 text-white'
+                                            : isDarkMode ? 'bg-gray-700 text-gray-400 hover:text-white' : 'bg-gray-200 text-gray-500 hover:text-black'}`}
+                                    >
+                                        ♀
+                                    </button>
+                                    <button
+                                        onClick={() => setTtsGender('male')}
+                                        title="Male voice"
+                                        className={`px-2 py-0.5 transition-colors ${ttsGender === 'male'
+                                            ? 'bg-blue-600 text-white'
+                                            : isDarkMode ? 'bg-gray-700 text-gray-400 hover:text-white' : 'bg-gray-200 text-gray-500 hover:text-black'}`}
+                                    >
+                                        ♂
+                                    </button>
+                                </div>
+                                <select
+                                    value={ttsSpeed}
+                                    onChange={e => setTtsSpeed(Number(e.target.value))}
+                                    className={`text-xs px-1 py-0.5 rounded ${isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-300 text-gray-700'}`}
+                                    title="Playback speed"
+                                >
+                                    <option value={0.75}>0.75×</option>
+                                    <option value={0.9}>0.9×</option>
+                                    <option value={1.0}>1.0×</option>
+                                    <option value={1.2}>1.2×</option>
+                                    <option value={1.5}>1.5×</option>
+                                </select>
+                            </>
                         )}
                     </div>
 
@@ -636,7 +668,7 @@ const AudienceView: React.FC = () => {
                                     color={isFallback ? (isDarkMode ? "#6b7280" : "#9ca3af") : (isDarkMode ? "white" : "black")}
                                     opacity={!showAsRaw && !isTranslating ? 1 : 0.7}
                                     isSpeaking={speakingId === id}
-                                    onSpeak={(t, l) => handleSpeak(t, l, id)}
+                                    onSpeak={isTtsEnabled ? (t, l) => handleSpeak(t, l, id) : undefined}
                                 />
                             )
                         })}
