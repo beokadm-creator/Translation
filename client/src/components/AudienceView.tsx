@@ -45,16 +45,20 @@ const AudienceView: React.FC = () => {
     const [speakingId, setSpeakingId] = useState<string | null>(null);
     const [ttsSpeed, setTtsSpeed] = useState<number>(1.0);
     const [ttsGender, setTtsGender] = useState<'female' | 'male'>('female');
+    const [showTtsHint, setShowTtsHint] = useState<boolean>(false);
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const audioQueueRef = useRef<{ text: string; lang: string; id: string }[]>([]);
     const spokenIdsRef = useRef<Set<string>>(new Set());
     const isSpeakingRef = useRef<boolean>(false);
+    // Refs so playNext doesn't need to recreate on speed/gender change
+    const ttsSpeedRef = useRef<number>(1.0);
+    const ttsGenderRef = useRef<'female' | 'male'>('female');
+    ttsSpeedRef.current = ttsSpeed;
+    ttsGenderRef.current = ttsGender;
 
-    // 성별 → OpenAI 음성 매핑
-    // female: nova(ko 자연스러움) / shimmer(en 부드러움)
-    // male:   onyx(ko 중후함) / echo(en 명료함)
-    const ttsVoice = (lang: string) =>
-        ttsGender === 'female'
+    // 성별 → OpenAI 음성 매핑 (ref 기반 — 재생 중 변경 즉시 반영)
+    const ttsVoiceFromRef = (lang: string) =>
+        ttsGenderRef.current === 'female'
             ? (lang === 'ko' ? 'nova' : 'shimmer')
             : (lang === 'ko' ? 'onyx' : 'echo');
 
@@ -141,15 +145,16 @@ const AudienceView: React.FC = () => {
             setSpeakingId(null);
             return;
         }
-        const voice = ttsVoice(next.lang);
-        const url = `${CF_BASE}/synthesizeSpeech?text=${encodeURIComponent(next.text)}&lang=${next.lang}&speed=${ttsSpeed}&voice=${voice}`;
+        const voice = ttsVoiceFromRef(next.lang);
+        const url = `${CF_BASE}/synthesizeSpeech?text=${encodeURIComponent(next.text)}&lang=${next.lang}&speed=${ttsSpeedRef.current}&voice=${voice}`;
         const audio = new Audio(url);
         audioRef.current = audio;
         setSpeakingId(next.id);
         audio.onended = () => playNext();
         audio.onerror = () => playNext();
         audio.play().catch(() => playNext());
-    }, [ttsSpeed, ttsVoice]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const enqueueSpeak = useCallback((text: string, lang: string, id: string) => {
         if (!text.trim()) return;
@@ -188,9 +193,8 @@ const AudienceView: React.FC = () => {
         scrollToBottom();
     }, [segmentsOrder, scrollToBottom]);
 
-    // Auto-play + 연속재생 중 신규 세그먼트 자동 추가
-    // isTtsEnabled: 자동재생 켜져 있을 때 새 final 세그먼트 자동 큐잉
-    // isSpeakingRef: 클릭 연속재생 중에도 새 세그먼트를 큐 끝에 추가
+    // 연속재생 중 신규 세그먼트 자동 추가 (클릭으로 시작된 재생 중에만)
+    // TTS 활성화 단독으로는 재생 시작하지 않음 — 반드시 세그먼트 클릭으로 시작
     useEffect(() => {
         const lastId = segmentsOrder[segmentsOrder.length - 1];
         if (!lastId) return;
@@ -201,16 +205,22 @@ const AudienceView: React.FC = () => {
         const text = (seg[activeLang] as string) || (seg.refined as string) || '';
         if (!text.trim()) return;
 
-        // 자동재생 켜져 있거나, 클릭 연속재생 진행 중일 때 새 세그먼트 큐에 추가
-        if (isTtsEnabled || isSpeakingRef.current) {
+        // 이미 재생 중인 경우에만 새 세그먼트를 큐에 추가
+        if (isSpeakingRef.current) {
             spokenIdsRef.current.add(lastId);
             enqueueSpeak(text, activeLang, lastId);
         }
-    }, [segmentsOrder, segmentsMap, isTtsEnabled, activeLang, enqueueSpeak]);
+    }, [segmentsOrder, segmentsMap, activeLang, enqueueSpeak]);
 
-    // TTS 비활성화 시 재생 중단
+    // TTS 비활성화 시 재생 중단 / 활성화 시 힌트 표시
     useEffect(() => {
-        if (!isTtsEnabled) stopAudio();
+        if (!isTtsEnabled) {
+            stopAudio();
+        } else {
+            setShowTtsHint(true);
+            const t = setTimeout(() => setShowTtsHint(false), 3500);
+            return () => clearTimeout(t);
+        }
     }, [isTtsEnabled, stopAudio]);
 
     // 컴포넌트 언마운트 시 오디오 정리
@@ -468,68 +478,92 @@ const AudienceView: React.FC = () => {
                     </div>
 
                     {/* TTS Controls */}
-                    <div className={`flex items-center gap-1 px-2 py-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>
-                        {/* Auto-play toggle */}
-                        <button
-                            onClick={() => setIsTtsEnabled(v => !v)}
-                            title={isTtsEnabled ? 'Auto-play ON — click to turn off' : 'Auto-play OFF — click to turn on'}
-                            className={`px-2 py-1 rounded text-sm font-bold transition-all ${isTtsEnabled ? 'bg-blue-600 text-white' : (isDarkMode ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-black')}`}
-                        >
-                            {isTtsEnabled ? '🔊' : '🔇'}
-                        </button>
-                        {/* 재생 중 상태 표시 + 정지 버튼 */}
-                        {speakingId && (
-                            <div className="flex items-center gap-1">
-                                <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                    {audioQueueRef.current.length > 0
-                                        ? `+${audioQueueRef.current.length} 대기`
-                                        : '재생 중'}
-                                </span>
-                                <button
-                                    onClick={stopAudio}
-                                    title="Stop audio"
-                                    className="px-2 py-1 rounded text-sm text-red-400 hover:text-red-300 transition-all"
-                                >
-                                    ⏹
-                                </button>
-                            </div>
-                        )}
-                        {/* 성별 + 속도 선택 — TTS 켜졌을 때만 표시 */}
-                        {isTtsEnabled && (
-                            <>
-                                <div className={`flex rounded overflow-hidden text-xs border ${isDarkMode ? 'border-gray-600' : 'border-gray-400'}`}>
+                    <div className="relative flex items-center gap-1">
+                        <div className={`flex items-center gap-1 px-2 py-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>
+                            {/* TTS on/off toggle */}
+                            <button
+                                onClick={() => setIsTtsEnabled(v => !v)}
+                                title={isTtsEnabled ? 'Voice ON — click to turn off' : 'Voice OFF — click to turn on'}
+                                className={`px-2 py-1 rounded text-sm font-bold transition-all ${isTtsEnabled ? 'bg-blue-600 text-white' : (isDarkMode ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-black')}`}
+                            >
+                                {isTtsEnabled ? '🔊' : '🔇'}
+                            </button>
+                            {/* 재생 중 상태 표시 + 정지 버튼 */}
+                            {speakingId && (
+                                <div className="flex items-center gap-1">
+                                    <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                        {audioQueueRef.current.length > 0
+                                            ? `+${audioQueueRef.current.length} queued`
+                                            : 'playing'}
+                                    </span>
                                     <button
-                                        onClick={() => setTtsGender('female')}
-                                        title="Female voice"
-                                        className={`px-2 py-0.5 transition-colors ${ttsGender === 'female'
-                                            ? 'bg-pink-600 text-white'
-                                            : isDarkMode ? 'bg-gray-700 text-gray-400 hover:text-white' : 'bg-gray-200 text-gray-500 hover:text-black'}`}
+                                        onClick={stopAudio}
+                                        title="Stop audio"
+                                        className="px-2 py-1 rounded text-sm text-red-400 hover:text-red-300 transition-all"
                                     >
-                                        ♀
-                                    </button>
-                                    <button
-                                        onClick={() => setTtsGender('male')}
-                                        title="Male voice"
-                                        className={`px-2 py-0.5 transition-colors ${ttsGender === 'male'
-                                            ? 'bg-blue-600 text-white'
-                                            : isDarkMode ? 'bg-gray-700 text-gray-400 hover:text-white' : 'bg-gray-200 text-gray-500 hover:text-black'}`}
-                                    >
-                                        ♂
+                                        ⏹
                                     </button>
                                 </div>
-                                <select
-                                    value={ttsSpeed}
-                                    onChange={e => setTtsSpeed(Number(e.target.value))}
-                                    className={`text-xs px-1 py-0.5 rounded ${isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-300 text-gray-700'}`}
-                                    title="Playback speed"
-                                >
-                                    <option value={0.75}>0.75×</option>
-                                    <option value={0.9}>0.9×</option>
-                                    <option value={1.0}>1.0×</option>
-                                    <option value={1.2}>1.2×</option>
-                                    <option value={1.5}>1.5×</option>
-                                </select>
-                            </>
+                            )}
+                            {/* Voice gender + speed — TTS 켜졌을 때만 표시 */}
+                            {isTtsEnabled && (
+                                <>
+                                    <div className={`flex rounded overflow-hidden text-xs border ${isDarkMode ? 'border-gray-600' : 'border-gray-400'}`}>
+                                        <button
+                                            onClick={() => setTtsGender('female')}
+                                            title="Female voice"
+                                            className={`px-2 py-0.5 transition-colors ${ttsGender === 'female'
+                                                ? 'bg-pink-600 text-white'
+                                                : isDarkMode ? 'bg-gray-700 text-gray-400 hover:text-white' : 'bg-gray-200 text-gray-500 hover:text-black'}`}
+                                        >
+                                            Female
+                                        </button>
+                                        <button
+                                            onClick={() => setTtsGender('male')}
+                                            title="Male voice"
+                                            className={`px-2 py-0.5 transition-colors ${ttsGender === 'male'
+                                                ? 'bg-blue-600 text-white'
+                                                : isDarkMode ? 'bg-gray-700 text-gray-400 hover:text-white' : 'bg-gray-200 text-gray-500 hover:text-black'}`}
+                                        >
+                                            Male
+                                        </button>
+                                    </div>
+                                    <select
+                                        value={ttsSpeed}
+                                        onChange={e => setTtsSpeed(Number(e.target.value))}
+                                        className={`text-xs px-1 py-0.5 rounded ${isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-300 text-gray-700'}`}
+                                        title="Playback speed"
+                                    >
+                                        <option value={0.75}>0.75×</option>
+                                        <option value={0.9}>0.9×</option>
+                                        <option value={1.0}>1.0×</option>
+                                        <option value={1.2}>1.2×</option>
+                                        <option value={1.5}>1.5×</option>
+                                    </select>
+                                </>
+                            )}
+                        </div>
+                        {/* 시작 지점 선택 안내 툴팁 */}
+                        {showTtsHint && (
+                            <div
+                                style={{
+                                    position: 'absolute',
+                                    top: 'calc(100% + 8px)',
+                                    right: 0,
+                                    whiteSpace: 'nowrap',
+                                    background: isDarkMode ? '#1e293b' : '#f1f5f9',
+                                    border: `1px solid ${isDarkMode ? '#3b82f6' : '#93c5fd'}`,
+                                    borderRadius: '8px',
+                                    padding: '8px 12px',
+                                    fontSize: '12px',
+                                    color: isDarkMode ? '#93c5fd' : '#1d4ed8',
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                                    animation: 'fade-in-down 0.25s ease both',
+                                    zIndex: 100,
+                                }}
+                            >
+                                🔈 Click any text segment to start reading from that point
+                            </div>
                         )}
                     </div>
 
