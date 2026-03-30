@@ -1,0 +1,56 @@
+# CLAUDE.md
+
+## Design Context
+
+### Users
+
+**Administrators** — Conference organizers managing live sessions, translation settings, and speaker pipelines. They operate under time pressure in high-stakes environments; the admin UI must communicate system state clearly and respond immediately.
+
+**Audience** — Conference attendees (medical professionals, researchers) consuming real-time subtitles in a language they may not be fluent in. They're focused on the speaker, not the screen — the UI must be invisible by design.
+
+**Broadcast operators** — AV/OBS professionals embedding caption overlays for streaming. They need full typographic and layout control without friction.
+
+**Job to be done**: Enable simultaneous medical translation to be consumed confidently and without friction in a live conference setting.
+
+---
+
+### Brand Personality
+
+**Precise. Clinical. Authoritative.**
+
+The platform operates in a medical context where accuracy is non-negotiable. Every design decision should reinforce trust and competence. The interface earns confidence through restraint — nothing decorative that doesn't serve function.
+
+---
+
+### Aesthetic Direction
+
+**Reference**: Vercel / Linear — dark, ultra-clean, high-contrast, developer-grade precision. Thoughtful micro-interactions, sharp typography, dense information with breathing room.
+
+**Theme**: Dark-first. The primary experience is a dark UI (gray-900 base) with blue and purple accent gradients. Light mode is a secondary option for audience view.
+
+**Visual tone**: High contrast, purposeful color (status indicators only), structured layout with generous whitespace. Typography does the heavy lifting — no unnecessary decoration.
+
+**Anti-patterns to avoid**:
+- Playful, bubbly, or consumer-app aesthetics
+- Cluttered dashboard overload — every element earns its place
+- Generic Bootstrap/SaaS admin-panel look
+
+---
+
+### Emotional Goal
+
+**Confidence & Clarity** — Users (especially audience members) should feel they're receiving accurate, trustworthy information in real time. The interface should radiate calm competence. Nothing should make the user anxious or uncertain about system state.
+
+---
+
+### Design Principles
+
+1. **Precision over decoration** — Every color, animation, and label serves a functional purpose. Status colors (blue = active, green = finalized, red = live/error) are semantic, not aesthetic.
+
+2. **Content is king** — In audience and overlay views, the translated text is the product. The surrounding UI should recede. Maximize readability, minimize chrome.
+
+3. **Authoritative clarity** — Typography, spacing, and hierarchy should project confidence. Use weight and size contrasts assertively. No ambiguity in labels, states, or actions.
+
+4. **Live-awareness** — The platform is always "on" during use. Design must communicate real-time state (recording, processing, finalized) immediately and unmistakably, without being alarming.
+
+5. **Linear/Vercel quality bar** — Every component should feel crafted, not assembled. Sharp edges where appropriate, consistent spacing scales, transitions that feel intentional. No accidental UI.

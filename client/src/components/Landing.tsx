@@ -111,52 +111,60 @@ const Landing: React.FC = () => {
     };
 
     return (
-        <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4 relative overflow-hidden">
-            {/* Background Effects */}
-            <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/40 via-gray-900 to-gray-900 pointer-events-none"></div>
+        <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col items-center justify-center p-4 relative font-sans selection:bg-blue-500/30">
+            {/* Minimal Grid Background (Optional, Linear style) */}
+            <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none"></div>
 
             <div className="z-10 w-full max-w-md space-y-8 text-center">
                 
                 {/* Initial loading check */}
                 {status === 'loading' && accessCode === '' && (
-                    <div className="text-gray-400 text-sm animate-pulse">Loading...</div>
+                    <div className="text-gray-500 text-sm tracking-widest uppercase flex items-center justify-center gap-2">
+                        <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
+                        Loading
+                    </div>
                 )}
 
                 {/* Stage 1: Access Code Input */}
                 {status !== 'success' && !(status === 'loading' && accessCode === '') && (
-                    <div className="animate-fade-in-up space-y-6">
-                        <h1 className="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500 tracking-tight">
-                            HONG COMM.
-                            <span className="block text-2xl font-medium text-gray-400 mt-2">Simultaneous Translation</span>
-                        </h1>
+                    <div className="space-y-8 animate-in fade-in duration-500">
+                        <div className="space-y-2">
+                            <h1 className="text-2xl font-semibold tracking-tight text-gray-100">
+                                HONG COMM.
+                            </h1>
+                            <p className="text-sm text-gray-400">Simultaneous Translation</p>
+                        </div>
                         
-                        <div className="bg-gray-800/50 backdrop-blur-lg p-8 rounded-2xl border border-gray-700 shadow-2xl">
-                            <label className="block text-sm font-bold text-gray-400 mb-2 uppercase tracking-wider">Access Code</label>
-                            <input 
-                                type="text" 
-                                className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-center text-2xl font-mono tracking-widest focus:ring-2 focus:ring-blue-500 outline-none transition-all placeholder-gray-700"
-                                placeholder="CODE"
-                                value={accessCode}
-                                onChange={e => { setAccessCode(e.target.value.toUpperCase()); setStatus('idle'); }}
-                                onKeyDown={e => e.key === 'Enter' && handleEnter()}
-                            />
+                        <div className="bg-[#111111] p-8 rounded-xl border border-white/5 shadow-2xl space-y-6 text-left">
+                            <div className="space-y-2">
+                                <label className="block text-xs font-medium text-gray-400 uppercase tracking-widest">Access Code</label>
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-4 py-3 text-lg font-mono tracking-widest focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all placeholder-gray-600 text-gray-100"
+                                    placeholder="Enter Code"
+                                    value={accessCode}
+                                    onChange={e => { setAccessCode(e.target.value.toUpperCase()); setStatus('idle'); }}
+                                    onKeyDown={e => e.key === 'Enter' && handleEnter()}
+                                />
+                            </div>
                             
                             {status === 'error' && (
-                                <div className="text-red-500 text-sm mt-3 font-bold animate-shake">
+                                <div className="text-red-400 text-xs flex items-center gap-2">
+                                    <span className="w-1 h-1 bg-red-400 rounded-full"></span>
                                     Invalid Access Code
                                 </div>
                             )}
 
                             <button 
                                 onClick={handleEnter}
-                                disabled={status === 'loading'}
-                                className="w-full mt-6 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-bold py-3 rounded-xl transition-all shadow-lg disabled:opacity-50"
+                                disabled={status === 'loading' || !accessCode}
+                                className="w-full bg-white text-black hover:bg-gray-200 font-medium py-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                             >
-                                {status === 'loading' ? 'Verifying...' : 'ENTER'}
+                                {status === 'loading' ? 'Verifying...' : 'Continue'}
                             </button>
                         </div>
                         
-                        <div className="text-gray-600 text-xs mt-8">
+                        <div className="text-gray-600 text-xs">
                             © 2025 HONG COMM. All rights reserved.
                         </div>
                     </div>
@@ -164,45 +172,51 @@ const Landing: React.FC = () => {
 
                 {/* Stage 2: Hall Selection */}
                 {status === 'success' && conference && (
-                    <div className="animate-fade-in space-y-6 w-full max-w-2xl mx-auto">
-                        <div className="text-center mb-8">
-                            <h2 className="text-sm text-blue-400 font-bold tracking-widest uppercase mb-2">Welcome to</h2>
-                            <h1 className="text-3xl font-bold text-white">{conference.title}</h1>
+                    <div className="animate-in fade-in duration-500 space-y-8 w-full max-w-2xl mx-auto">
+                        <div className="text-left space-y-2 border-b border-white/5 pb-6">
+                            <h2 className="text-xs text-gray-500 font-medium tracking-widest uppercase flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                                Active Conference
+                            </h2>
+                            <h1 className="text-2xl font-semibold text-gray-100">{conference.title}</h1>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-4">
+                        <div className="grid grid-cols-1 gap-3">
                             {projects.map(p => (
                                 <button 
                                     key={p.slug}
                                     onClick={() => navigate(`/${p.slug}`)}
-                                    className="group relative bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-blue-500 p-6 rounded-xl transition-all text-left flex items-center justify-between overflow-hidden"
+                                    className="group bg-[#111111] hover:bg-[#1a1a1a] border border-white/5 hover:border-white/20 p-5 rounded-xl transition-all text-left flex items-center justify-between"
                                 >
-                                    <div>
-                                        <h3 className="text-xl font-bold text-white group-hover:text-blue-400 transition-colors">{p.name}</h3>
-                                        <div className="flex gap-2 mt-2">
+                                    <div className="space-y-2">
+                                        <h3 className="text-lg font-medium text-gray-200 group-hover:text-white transition-colors">{p.name}</h3>
+                                        <div className="flex gap-2">
                                             {(p.targetLanguages ?? []).map(l => (
-                                                <span key={l} className="text-[10px] uppercase bg-gray-900 text-gray-400 px-2 py-1 rounded border border-gray-700">
-                                                    {l === 'ko' ? '🇰🇷 KO' : l === 'en' ? '🇺🇸 EN' : l === 'ja' ? '🇯🇵 JA' : l}
+                                                <span key={l} className="text-[10px] uppercase bg-white/5 text-gray-400 px-2 py-0.5 rounded-md font-medium tracking-wider">
+                                                    {l === 'ko' ? 'KO' : l === 'en' ? 'EN' : l === 'ja' ? 'JA' : l}
                                                 </span>
                                             ))}
                                         </div>
                                     </div>
-                                    <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center text-gray-500 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                                        ➜
+                                    <div className="text-gray-500 group-hover:text-white transition-colors">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
                                     </div>
                                 </button>
                             ))}
 
                             {projects.length === 0 && (
-                                <div className="text-center text-gray-500 py-10">
-                                    No halls open yet.
+                                <div className="text-center text-gray-500 py-12 border border-dashed border-white/10 rounded-xl bg-[#111111]/50">
+                                    No halls available at the moment.
                                 </div>
                             )}
                         </div>
                         
-                        <button onClick={() => { setStatus('idle'); setAccessCode(""); }} className="text-gray-500 hover:text-white text-sm mt-8 underline">
-                            ← Back to Access Code
-                        </button>
+                        <div className="text-left">
+                            <button onClick={() => { setStatus('idle'); setAccessCode(""); }} className="text-gray-500 hover:text-gray-300 text-sm transition-colors flex items-center gap-2">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"></path></svg>
+                                Back
+                            </button>
+                        </div>
                     </div>
                 )}
 
