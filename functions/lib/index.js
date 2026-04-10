@@ -33,10 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.helloWorld = exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.synthesizeSpeech = exports.verifyPipeline = exports.onRefineRequest = exports.processAudio = void 0;
-// Version: Quality Stable v1
-const functions = __importStar(require("firebase-functions"));
-const https_1 = require("firebase-functions/v2/https");
+exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.synthesizeSpeech = exports.verifyPipeline = exports.onRefineRequest = exports.processAudio = void 0;
 const admin = __importStar(require("firebase-admin"));
 // Initialize Firebase Admin
 // Cloud Functions auto-initialize correctly. 
@@ -53,14 +50,7 @@ var tts_1 = require("./tts");
 Object.defineProperty(exports, "synthesizeSpeech", { enumerable: true, get: function () { return tts_1.synthesizeSpeech; } });
 var diagnose_1 = require("./diagnose"); // New Diagnostic Tool
 Object.defineProperty(exports, "diagnoseSystem", { enumerable: true, get: function () { return diagnose_1.diagnoseSystem; } });
-// export { translateNewSegment } from "./translate"; // DEPRECATED: Moved to inline processing in stt.ts
 var archive_1 = require("./archive");
 Object.defineProperty(exports, "archiveSession", { enumerable: true, get: function () { return archive_1.archiveSession; } });
 var purge_1 = require("./purge");
 Object.defineProperty(exports, "purgeSession", { enumerable: true, get: function () { return purge_1.purgeSession; } });
-// Start writing functions
-// https://firebase.google.com/docs/functions/typescript
-exports.helloWorld = (0, https_1.onRequest)((request, response) => {
-    functions.logger.info("Hello logs!", { structuredData: true });
-    response.send("Hello from Firebase!");
-});

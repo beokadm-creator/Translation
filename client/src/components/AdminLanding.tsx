@@ -4,8 +4,6 @@ import { rtdb } from '../firebase';
 import { ref, set, get, child, remove } from 'firebase/database';
 import type { ProjectSettings, Conference } from '../types';
 
-import { QRCodeSVG } from 'qrcode.react';
-
 const AdminLanding: React.FC = () => {
   const navigate = useNavigate();
   
@@ -341,12 +339,6 @@ const AdminLanding: React.FC = () => {
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" onClick={() => setShowQR(null)}>
               <div className="bg-white p-8 rounded-lg flex flex-col items-center gap-4" onClick={e => e.stopPropagation()}>
                   <h2 className="text-black text-xl font-bold">Conference Access QR</h2>
-                  <QRCodeSVG 
-                      value={`${window.location.origin}/?conf=${showQR}`} 
-                      size={256}
-                      level={"H"}
-                      includeMargin={true}
-                  />
                   <div className="text-black text-center">
                       <div className="text-sm text-gray-500">Scan to join directly</div>
                       <div className="font-mono text-xs mt-2 bg-gray-100 p-2 rounded">
