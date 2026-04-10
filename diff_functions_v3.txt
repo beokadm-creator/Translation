@@ -1,3 +1,0 @@
-M	backup/v3_stable/functions_src/archive.ts
-M	backup/v3_stable/functions_src/index.ts
-M	backup/v3_stable/functions_src/stt.ts
