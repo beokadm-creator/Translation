@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyPipeline = exports.onRefineRequest = exports.processAudio = void 0;
+exports.processAudio = void 0;
 const functions = __importStar(require("firebase-functions/v1"));
 const admin = __importStar(require("firebase-admin"));
 const openai_1 = __importDefault(require("openai"));
@@ -446,16 +446,4 @@ exports.processAudio = functions
         }
         catch { }
     }
-});
-// ── Legacy Triggers (Disabled) ───────────────────────────────────────────────
-exports.onRefineRequest = functions.database.ref("projects/{projectId}/stream/{dataId}").onCreate(() => null);
-// ── Remaster (미구현 stub - 비활성화) ────────────────────────────────────────
-// remasterSession pubsub은 구현체가 없으므로 비용/로그 낭비를 막기 위해 비활성화.
-// 추후 실제 리마스터 로직 구현 시 아래 주석을 해제할 것.
-// export const remasterSession = functions.pubsub.schedule("every 2 minutes").onRun(() => runRemasterLogic())
-// ── 진단 툴 ─────────────────────────────────────────────────────────────────
-exports.verifyPipeline = functions.https.onRequest(async (_req, res) => {
-    res.set("Access-Control-Allow-Origin", "*");
-    const result = await translateWithFallback("임플란트 픽스처를 식립했습니다.", "ko", "", "Live Medical Lecture");
-    res.json({ success: true, version: "v12.3_openai_only", stt: "gpt-4o-transcribe", translation: "gpt-4o-mini", result });
 });

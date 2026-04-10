@@ -15,6 +15,6 @@
     "src/diagnose.ts",
     "src/archive.ts",
     "src/purge.ts",
-    "src/middleware.ts"
+    "src/tts.ts"
   ]
 }

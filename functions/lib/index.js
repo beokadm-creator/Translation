@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.synthesizeSpeech = exports.verifyPipeline = exports.onRefineRequest = exports.processAudio = void 0;
+exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.synthesizeSpeech = exports.processAudio = void 0;
 const admin = __importStar(require("firebase-admin"));
 // Initialize Firebase Admin
 // Cloud Functions auto-initialize correctly. 
@@ -44,8 +44,6 @@ if (!admin.apps.length) {
 // Export functions
 var stt_1 = require("./stt");
 Object.defineProperty(exports, "processAudio", { enumerable: true, get: function () { return stt_1.processAudio; } });
-Object.defineProperty(exports, "onRefineRequest", { enumerable: true, get: function () { return stt_1.onRefineRequest; } });
-Object.defineProperty(exports, "verifyPipeline", { enumerable: true, get: function () { return stt_1.verifyPipeline; } });
 var tts_1 = require("./tts");
 Object.defineProperty(exports, "synthesizeSpeech", { enumerable: true, get: function () { return tts_1.synthesizeSpeech; } });
 var diagnose_1 = require("./diagnose"); // New Diagnostic Tool

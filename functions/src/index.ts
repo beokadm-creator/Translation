@@ -10,7 +10,7 @@ if (!admin.apps.length) {
 }
 
 // Export functions
-export { processAudio, onRefineRequest, verifyPipeline } from "./stt";
+export { processAudio } from "./stt";
 export { synthesizeSpeech } from "./tts";
 export { diagnoseSystem } from "./diagnose"; // New Diagnostic Tool
 export { archiveSession } from "./archive";
