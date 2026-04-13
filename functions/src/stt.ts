@@ -73,10 +73,13 @@ const isPromptLeakage = (text: string, promptText?: string): boolean => {
     // 텍스트 내에 존재하는 프롬프트 아이템 개수 세기
     const matchedItems = promptItems.filter(item => normalizedText.includes(item))
     
-    // 키워드가 3개 이상 들어있으면서, 그 키워드들이 쉼표로 나열된 패턴이 보이면 환각으로 간주
+    // 키워드가 3개 이상 들어있으면서, 그 키워드들이 쉼표나 띄어쓰기로만 단순 나열된 패턴이 보이면 환각으로 간주
     // "단어1, 단어2, 단어3" 형태의 패턴이 텍스트에 존재하는지 검사
     const commaCount = (text.match(/,/g) || []).length
     if (matchedItems.length >= 3 && commaCount >= 2) return true
+    
+    // 추가: 쉼표가 없더라도 프롬프트 단어가 3개 이상 들어가고 문장 길이가 짧으면 환각으로 간주
+    if (matchedItems.length >= 3 && text.length < 50) return true
 
     return false
 }
