@@ -213,7 +213,7 @@ class OpenAITranslationProvider {
             contextLine ? `session_context=${contextLine}` : "",
             previousLine ? `previous_refined=${previousLine}` : "",
             'Return strict JSON: {"refined":"","ko":"","en":"","isMedical":true}.',
-            'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer content from session_context. (2) Correct only obvious STT errors (e.g. wrong homophone). (3) Do not output topic, speaker name, affiliation, or keywords as standalone content. (4) Never leave ko or en empty; translate fragments as fragments. (5) Keep all clinical terminology literal.',
+            'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer content from session_context or previous_refined. (2) Correct only obvious STT errors (e.g. wrong homophone). (3) Do not output topic, speaker name, affiliation, or keywords as standalone content. (4) Never leave ko or en empty; translate fragments as fragments. (5) Keep all clinical terminology literal. (6) DO NOT generate conversational filler, meta-text, or hallucinations.',
             'If source_lang=ko, refined and ko must stay Korean and en must be English. If source_lang=en, refined and en must stay English and ko must be Korean.',
             'Example output for source_lang=ko and input="임플란트 픽스처를 식립했습니다.": {"refined":"임플란트 픽스처를 식립했습니다.","ko":"임플란트 픽스처를 식립했습니다.","en":"The implant fixture was placed.","isMedical":true}'
         ].filter(Boolean).join('\n');
@@ -225,7 +225,7 @@ class OpenAITranslationProvider {
             messages: [
                 {
                     role: "system",
-                    content: "You refine live medical speech-to-text output and produce Korean and English translations in strict JSON."
+                    content: "You refine live medical speech-to-text output and produce Korean and English translations in strict JSON. Do not hallucinate or create fake text."
                 },
                 {
                     role: "user",

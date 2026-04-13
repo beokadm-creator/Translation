@@ -444,13 +444,13 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             const currentLang = activeSession?.sourceLanguage || 'ko';
             
             // --- 2단계 최적화: 서버 DB 읽기 병목 제거를 위한 헤더 송장(Metadata) 생성 ---
-            // 1. Whisper용 단어장 (초록은 앞부분 60자만 포함하여 오인식 방지)
+            // 1. Whisper용 단어장 (초록은 통문장이 들어가면 환각을 일으키므로 STT 프롬프트에서 완전 제외)
             const speakerTerms = [activeSession?.speaker, activeSession?.affiliation, activeSession?.topic].filter(Boolean).join(', ');
-            const abstractSnippet = activeSession?.abstract ? activeSession.abstract.slice(0, 60) : '';
-            const customKeywords = [activeSession?.keywords, speakerTerms, abstractSnippet].filter(Boolean).join(', ');
+            const customKeywords = [activeSession?.keywords, speakerTerms].filter(Boolean).join(', ');
 
-            // 2. GPT 번역용 배경지식 (환각 방지를 위해 초록 제외, 주제/키워드/연자 순으로 똑똑하게 배치)
-            const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}`;
+            // 2. GPT 번역용 배경지식 (환각 방지를 위해 초록은 번역 컨텍스트로만 제한적 사용)
+            const abstractSnippet = activeSession?.abstract ? activeSession.abstract.slice(0, 100) : '';
+            const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}, Context: ${abstractSnippet}`;
 
             // 3. 청크 설정값 (Auto-Pilot 기본값 강제 적용)
             const chunkMinLength = "35";
