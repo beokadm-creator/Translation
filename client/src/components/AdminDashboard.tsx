@@ -175,6 +175,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     const audioContextRef = useRef<AudioContext | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
     const rafIdRef = useRef<number | null>(null);
+    const chunkMaxDbRef = useRef<number>(-100);
     const [sourceType, setSourceType] = useState<'mic' | 'system'>('mic');
 
     // --- Isolation View State ---
@@ -527,7 +528,18 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             const createRecorder = (targetChunksRef: React.MutableRefObject<Blob[]>) => {
                 const mr = new MediaRecorder(dest.stream, { mimeType: "audio/webm" });
                 mr.ondataavailable = (e) => { if (e.data.size > 0) targetChunksRef.current.push(e.data); };
-                mr.onstop = () => { const chunks = [...targetChunksRef.current]; targetChunksRef.current = []; uploadChunks(chunks); };
+                mr.onstop = () => { 
+                    const chunks = [...targetChunksRef.current]; 
+                    const skipVAD = (targetChunksRef.current as any).skipVAD;
+                    targetChunksRef.current = []; 
+                    (targetChunksRef.current as any).skipVAD = false;
+                    
+                    if (skipVAD) {
+                        console.log("[VAD] Client dropped chunk (silence detected).");
+                    } else {
+                        uploadChunks(chunks); 
+                    }
+                };
                 return mr;
             };
 
@@ -537,6 +549,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             mr1Ref.current.start();
             setIsRecording(true);
             setStatus("recording");
+            chunkMaxDbRef.current = -100;
 
             const scheduleNextCut = (ms: number) => {
                 if (segmentTimerRef.current) window.clearTimeout(segmentTimerRef.current);
@@ -550,10 +563,18 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 const nextIndex = activeIndexRef.current === 0 ? 1 : 0;
                 const nextMR = nextIndex === 0 ? mr1Ref.current : mr2Ref.current;
                 const currentMR = activeIndexRef.current === 0 ? mr1Ref.current : mr2Ref.current;
+                const currentChunksRef = activeIndexRef.current === 0 ? chunks1Ref : chunks2Ref;
                 
                 // 1. 새로운 레코더를 먼저 시작 (오버랩 시작)
                 if (nextMR && nextMR.state === 'inactive') nextMR.start();
                 
+                // VAD 판단 (2.5초 동안 최대 볼륨이 -45dB 이하면 무음으로 간주)
+                const maxDb = chunkMaxDbRef.current;
+                chunkMaxDbRef.current = -100; // 리셋
+                if (maxDb < -45) {
+                    (currentChunksRef.current as any).skipVAD = true;
+                }
+
                 // 2. 아주 미세한 오버랩(100ms)을 주어 스위칭 순간의 단어 잘림 방지
                 setTimeout(() => {
                     if (currentMR && currentMR.state === 'recording') currentMR.stop();
@@ -575,6 +596,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 const rms = Math.sqrt(sum / buf.length);
                 const db = 20 * Math.log10(Math.max(rms, 1e-8));
                 setCurrentDb(db);
+                if (db > chunkMaxDbRef.current) chunkMaxDbRef.current = db;
                 rafIdRef.current = window.requestAnimationFrame(loop);
             };
             rafIdRef.current = window.requestAnimationFrame(loop);
