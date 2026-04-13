@@ -369,13 +369,13 @@ const AudienceView: React.FC = () => {
     };
 
     // --- Theme ---
-    const bgClass = isDarkMode ? "bg-black text-white" : "bg-white text-black";
-    const headerClass = isDarkMode ? "bg-gray-900 border-gray-800" : "bg-[#f9fafb] dark:bg-[#111827] border-[#e5e7eb] dark:border-[#374151]";
-    const textClass = isDarkMode ? "text-[#374151] dark:text-[#e5e7eb]" : "text-gray-800";
-    const subTextClass = isDarkMode ? "text-gray-400" : "text-gray-500";
-    const tabActiveClass = isDarkMode ? "bg-gray-700 text-white" : "bg-white text-black shadow";
-    const tabInactiveClass = isDarkMode ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-black";
-    const drawerClass = isDarkMode ? "bg-gray-900 text-white" : "bg-white text-black";
+    const bgClass = isDarkMode ? "bg-[#0a0a0a] text-gray-200 selection:bg-blue-500/30" : "bg-white text-black selection:bg-blue-500/30";
+    const headerClass = isDarkMode ? "bg-[#0a0a0a] border-white/5 shadow-sm" : "bg-gray-100 border-gray-200 shadow-sm";
+    const textClass = isDarkMode ? "text-gray-100" : "text-gray-800";
+    const subTextClass = isDarkMode ? "text-gray-500" : "text-gray-500";
+    const tabActiveClass = isDarkMode ? "bg-white text-black" : "bg-white text-black shadow";
+    const tabInactiveClass = isDarkMode ? "bg-[#111111] text-gray-400 border border-white/5 hover:bg-[#1a1a1a] hover:text-gray-300" : "text-gray-500 hover:text-black";
+    const drawerClass = isDarkMode ? "bg-[#0a0a0a] text-gray-200" : "bg-white text-black";
 
     // ── Normal View ────────────────────────────────────────────
     return (
@@ -413,27 +413,30 @@ const AudienceView: React.FC = () => {
             `}</style>
 
             {/* Sidebar Drawer */}
-            <div className={`fixed inset-y-0 left-0 w-64 z-50 transform transition-transform duration-300 shadow-2xl border-r ${drawerClass} ${isDarkMode ? 'border-gray-800' : 'border-[#e5e7eb] dark:border-[#374151]'} ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-                <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-                    <h2 className="font-bold text-lg">Sessions</h2>
-                    <button onClick={() => setIsSidebarOpen(false)} className="text-gray-500 hover:text-white">✕</button>
+            <div className={`fixed inset-y-0 left-0 w-64 z-50 transform transition-transform duration-300 shadow-2xl border-r ${drawerClass} ${isDarkMode ? 'border-white/5' : 'border-gray-200'} ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+                <div className={`px-4 py-3.5 border-b flex justify-between items-center ${isDarkMode ? 'border-white/5' : 'border-gray-200'}`}>
+                    <span className="text-xs font-semibold uppercase tracking-widest text-gray-400">Sessions</span>
+                    <button onClick={() => setIsSidebarOpen(false)} className="p-1 rounded text-gray-600 hover:text-gray-300 transition-colors">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                    </button>
                 </div>
                 <div className="overflow-y-auto h-full pb-20">
-                    <div onClick={() => navigate('/')} className={`p-4 border-b cursor-pointer transition-colors ${isDarkMode ? 'border-gray-800 hover:bg-gray-800' : 'border-[#e5e7eb] dark:border-[#374151] hover:bg-[#f9fafb] dark:bg-[#111827]'}`}>
-                        <div className="font-bold text-sm text-blue-500">⬅ Switch Hall</div>
+                    <div onClick={() => navigate('/')} className={`px-4 py-3 border-b cursor-pointer transition-colors flex items-center gap-2 ${isDarkMode ? 'border-white/5 hover:bg-white/5 text-gray-500 hover:text-gray-300' : 'border-gray-200 hover:bg-gray-100 text-gray-500 hover:text-gray-700'}`}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                        <span className="text-xs font-medium">Switch Hall</span>
                     </div>
                     {sessions.map(s => {
                         const isActive = activeSessionId === s.id;
                         const isSelected = (viewMode === 'live' && isActive) || (viewMode === 'archive' && archiveSessionId === s.id);
                         return (
                             <div key={s.id} onClick={() => handleSelectSession(s.id)}
-                                className={`p-4 border-b cursor-pointer transition-colors ${isDarkMode ? 'border-gray-800 hover:bg-gray-800' : 'border-[#e5e7eb] dark:border-[#374151] hover:bg-[#f9fafb] dark:bg-[#111827]'} ${isSelected ? (isDarkMode ? 'bg-gray-800' : 'bg-[#e5e7eb] dark:bg-[#1f2937]') : ''}`}>
+                                className={`px-4 py-3.5 border-b cursor-pointer transition-colors ${isDarkMode ? 'border-white/5 hover:bg-white/5' : 'border-gray-200 hover:bg-gray-100'} ${isSelected ? (isDarkMode ? 'bg-white/5' : 'bg-gray-100') : ''}`}>
                                 <div className="flex items-center gap-2 mb-1">
-                                    {isActive && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
-                                    <span className="text-xs text-gray-500">{s.startTime}</span>
+                                    {isActive && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>}
+                                    <span className="text-[10px] text-gray-500 font-mono">{s.startTime}</span>
                                 </div>
-                                <div className="font-bold text-sm truncate">{s.speaker}</div>
-                                <div className="text-xs text-gray-500 truncate">{s.topic}</div>
+                                <div className="text-sm font-medium truncate">{s.speaker}</div>
+                                <div className="text-xs text-gray-500 truncate mt-0.5">{s.topic}</div>
                             </div>
                         );
                     })}
@@ -444,34 +447,39 @@ const AudienceView: React.FC = () => {
             {isSidebarOpen && <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setIsSidebarOpen(false)}></div>}
 
             {/* Top Info Bar */}
-            <div className={`border-b p-4 shadow-md flex flex-col md:flex-row items-center justify-between z-10 gap-4 ${headerClass}`}>
+            <div className={`border-b p-4 flex flex-col md:flex-row items-center justify-between z-10 gap-4 ${headerClass}`}>
                 <div className="flex items-center gap-4 w-full md:w-auto">
-                    <button onClick={() => setIsSidebarOpen(true)} className="p-2 hover:bg-gray-700 rounded transition-colors">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+                    <button onClick={() => setIsSidebarOpen(true)} className="p-2 hover:bg-white/10 rounded transition-colors text-gray-400 hover:text-white">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
                     </button>
 
                     {sessionInfo ? (
                         <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
                             <div className="flex items-center gap-2">
                                 {viewMode === 'live' ? (
-                                    <span className="text-red-500 font-bold text-xs uppercase tracking-wider animate-pulse">Live</span>
+                                    <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 font-bold text-[10px] uppercase tracking-widest">
+                                        <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></span>
+                                        Live
+                                    </span>
                                 ) : (
-                                    <span className="text-gray-500 font-bold text-xs uppercase tracking-wider">Replay</span>
+                                    <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-gray-400 font-bold text-[10px] uppercase tracking-widest">
+                                        Replay
+                                    </span>
                                 )}
-                                <span className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-black'}`}>{sessionInfo.speaker}</span>
-                                <span className={`text-sm ${subTextClass}`}>({sessionInfo.affiliation})</span>
+                                <span className={`text-base font-semibold tracking-tight ${isDarkMode ? 'text-gray-100' : 'text-black'}`}>{sessionInfo.speaker}</span>
+                                <span className={`text-xs font-medium ${subTextClass}`}>({sessionInfo.affiliation})</span>
                             </div>
-                            <div className={`hidden md:block w-px h-8 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-300'}`}></div>
+                            <div className={`hidden md:block w-px h-4 ${isDarkMode ? 'bg-white/10' : 'bg-gray-300'}`}></div>
                             <div className="flex items-center gap-2">
-                                <span className="text-blue-500 font-bold text-xs uppercase tracking-wider">Topic</span>
-                                <span className={`text-lg ${textClass}`}>{sessionInfo.topic}</span>
+                                <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Topic</span>
+                                <span className={`text-sm font-medium ${textClass}`}>{sessionInfo.topic}</span>
                             </div>
                         </div>
                     ) : (
-                        <div className="text-gray-500 italic flex items-center gap-2">
+                        <div className="text-gray-500 text-sm flex items-center gap-2">
                             {viewMode === 'live' ? (
                                 <>
-                                    <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>
+                                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>
                                     <span>Standby for Next Session</span>
                                 </>
                             ) : "Select a session from menu"}
@@ -482,83 +490,84 @@ const AudienceView: React.FC = () => {
                 {/* Right Controls */}
                 <div className="flex items-center gap-3 flex-wrap justify-end">
 
-                    <div className={`flex items-center gap-2 px-3 py-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-[#e5e7eb] dark:bg-[#1f2937]'}`}>
-                        <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-1 hover:opacity-80 text-lg">
-                            {isDarkMode ? '🌙' : '☀️'}
+                    <div className={`flex items-center gap-1 px-2 py-1 rounded-md border ${isDarkMode ? 'bg-[#111111] border-white/5' : 'bg-white border-gray-200 shadow-sm'}`}>
+                        <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-1.5 hover:bg-white/5 rounded text-sm transition-colors text-gray-400 hover:text-white">
+                            {isDarkMode ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>}
                         </button>
-                        <div className={`w-px h-4 ${isDarkMode ? 'bg-gray-600' : 'bg-gray-400'}`}></div>
-                        <button onClick={() => setFontSize(Math.max(16, fontSize - 2))} className="p-1 font-bold text-sm">A−</button>
-                        <button onClick={() => setFontSize(Math.min(48, fontSize + 2))} className="p-1 font-bold text-lg">A+</button>
-                        <div className={`w-px h-4 ${isDarkMode ? 'bg-gray-600' : 'bg-gray-400'}`}></div>
-                        <button onClick={() => setLetterSpacing(v => Math.max(-1, parseFloat((v - 0.5).toFixed(1))))} className="p-1 font-bold text-sm">자−</button>
-                        <button onClick={() => setLetterSpacing(v => Math.min(8, parseFloat((v + 0.5).toFixed(1))))} className="p-1 font-bold text-sm">자+</button>
-                        <div className={`w-px h-4 ${isDarkMode ? 'bg-gray-600' : 'bg-gray-400'}`}></div>
-                        <button onClick={() => setLineHeight(v => Math.max(1.0, parseFloat((v - 0.1).toFixed(1))))} className="p-1 font-bold text-sm">행−</button>
-                        <button onClick={() => setLineHeight(v => Math.min(4.0, parseFloat((v + 0.1).toFixed(1))))} className="p-1 font-bold text-sm">행+</button>
+                        <div className={`w-px h-3 ${isDarkMode ? 'bg-white/10' : 'bg-gray-300'}`}></div>
+                        <button onClick={() => setFontSize(Math.max(16, fontSize - 2))} className="p-1.5 hover:bg-white/5 rounded text-xs font-medium text-gray-400 hover:text-white transition-colors">A−</button>
+                        <button onClick={() => setFontSize(Math.min(48, fontSize + 2))} className="p-1.5 hover:bg-white/5 rounded text-sm font-bold text-gray-400 hover:text-white transition-colors">A+</button>
+                        <div className={`w-px h-3 ${isDarkMode ? 'bg-white/10' : 'bg-gray-300'}`}></div>
+                        <button onClick={() => setLetterSpacing(v => Math.max(-1, parseFloat((v - 0.5).toFixed(1))))} className="p-1.5 hover:bg-white/5 rounded text-xs font-medium text-gray-400 hover:text-white transition-colors">↔−</button>
+                        <button onClick={() => setLetterSpacing(v => Math.min(8, parseFloat((v + 0.5).toFixed(1))))} className="p-1.5 hover:bg-white/5 rounded text-xs font-medium text-gray-400 hover:text-white transition-colors">↔+</button>
+                        <div className={`w-px h-3 ${isDarkMode ? 'bg-white/10' : 'bg-gray-300'}`}></div>
+                        <button onClick={() => setLineHeight(v => Math.max(1.0, parseFloat((v - 0.1).toFixed(1))))} className="p-1.5 hover:bg-white/5 rounded text-xs font-medium text-gray-400 hover:text-white transition-colors">↕−</button>
+                        <button onClick={() => setLineHeight(v => Math.min(4.0, parseFloat((v + 0.1).toFixed(1))))} className="p-1.5 hover:bg-white/5 rounded text-xs font-medium text-gray-400 hover:text-white transition-colors">↕+</button>
                     </div>
 
                     {/* TTS Controls */}
                     <div className="relative flex items-center gap-1">
-                        <div className={`flex items-center gap-1 px-2 py-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-[#e5e7eb] dark:bg-[#1f2937]'}`}>
+                        <div className={`flex items-center gap-1 px-2 py-1 rounded-md border ${isDarkMode ? 'bg-[#111111] border-white/5' : 'bg-white border-gray-200 shadow-sm'}`}>
                             {/* TTS on/off toggle */}
                             <button
                                 onClick={() => setIsTtsEnabled(v => !v)}
                                 title={isTtsEnabled ? 'Voice ON — click to turn off' : 'Voice OFF — click to turn on'}
-                                className={`px-2 py-1 rounded text-sm font-bold transition-all ${isTtsEnabled ? 'bg-blue-600 text-white' : (isDarkMode ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-black')}`}
+                                className={`px-2 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${isTtsEnabled ? 'bg-blue-500/10 text-blue-400' : (isDarkMode ? 'text-gray-400 hover:bg-white/5 hover:text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-black')}`}
                             >
-                                {isTtsEnabled ? '🔊' : '🔇'}
+                                {isTtsEnabled ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg> : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>}
+                                {isTtsEnabled ? 'TTS On' : 'TTS Off'}
                             </button>
                             {/* 재생 중 상태 표시 + 정지 버튼 */}
                             {speakingId && (
-                                <div className="flex items-center gap-1">
-                                    <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                <div className="flex items-center gap-1 ml-1">
+                                    <span className={`text-[10px] uppercase tracking-wider font-medium ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
                                         {audioQueueRef.current.length > 0
-                                            ? `+${audioQueueRef.current.length} queued`
+                                            ? `+${audioQueueRef.current.length} q`
                                             : 'playing'}
                                     </span>
                                     <button
                                         onClick={stopAudio}
                                         title="Stop audio"
-                                        className="px-2 py-1 rounded text-sm text-red-400 hover:text-red-300 transition-all"
+                                        className="p-1 rounded text-red-400 hover:bg-red-500/10 transition-all"
                                     >
-                                        ⏹
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
                                     </button>
                                 </div>
                             )}
                             {/* Voice gender + speed — TTS 켜졌을 때만 표시 */}
                             {isTtsEnabled && (
                                 <>
-                                    <div className={`flex rounded overflow-hidden text-xs border ${isDarkMode ? 'border-gray-600' : 'border-gray-400'}`}>
+                                    <div className={`flex rounded overflow-hidden text-[10px] font-medium ml-1 ${isDarkMode ? 'bg-[#1a1a1a]' : 'bg-gray-100'}`}>
                                         <button
                                             onClick={() => setTtsGender('female')}
                                             title="Female voice"
-                                            className={`px-2 py-0.5 transition-colors ${ttsGender === 'female'
-                                                ? 'bg-pink-600 text-white'
-                                                : isDarkMode ? 'bg-gray-700 text-gray-400 hover:text-white' : 'bg-[#e5e7eb] dark:bg-[#1f2937] text-gray-500 hover:text-black'}`}
+                                            className={`px-2 py-1 transition-colors ${ttsGender === 'female'
+                                                ? 'bg-white/10 text-white'
+                                                : isDarkMode ? 'text-gray-500 hover:text-white' : 'text-gray-500 hover:text-black'}`}
                                         >
-                                            Female
+                                            F
                                         </button>
                                         <button
                                             onClick={() => setTtsGender('male')}
                                             title="Male voice"
-                                            className={`px-2 py-0.5 transition-colors ${ttsGender === 'male'
-                                                ? 'bg-blue-600 text-white'
-                                                : isDarkMode ? 'bg-gray-700 text-gray-400 hover:text-white' : 'bg-[#e5e7eb] dark:bg-[#1f2937] text-gray-500 hover:text-black'}`}
+                                            className={`px-2 py-1 transition-colors ${ttsGender === 'male'
+                                                ? 'bg-white/10 text-white'
+                                                : isDarkMode ? 'text-gray-500 hover:text-white' : 'text-gray-500 hover:text-black'}`}
                                         >
-                                            Male
+                                            M
                                         </button>
                                     </div>
                                     <select
                                         value={ttsSpeed}
                                         onChange={e => setTtsSpeed(Number(e.target.value))}
-                                        className={`text-xs px-1 py-0.5 rounded ${isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-300 text-gray-700'}`}
+                                        className={`text-[10px] px-1 py-1 rounded ml-1 outline-none font-mono ${isDarkMode ? 'bg-[#1a1a1a] text-gray-300' : 'bg-gray-100 text-gray-700'}`}
                                         title="Playback speed"
                                     >
-                                        <option value={0.75}>0.75×</option>
-                                        <option value={0.9}>0.9×</option>
-                                        <option value={1.0}>1.0×</option>
-                                        <option value={1.2}>1.2×</option>
-                                        <option value={1.5}>1.5×</option>
+                                        <option value={0.75}>0.75x</option>
+                                        <option value={0.9}>0.90x</option>
+                                        <option value={1.0}>1.00x</option>
+                                        <option value={1.2}>1.20x</option>
+                                        <option value={1.5}>1.50x</option>
                                     </select>
                                 </>
                             )}
@@ -571,26 +580,27 @@ const AudienceView: React.FC = () => {
                                     top: 'calc(100% + 8px)',
                                     right: 0,
                                     whiteSpace: 'nowrap',
-                                    background: isDarkMode ? '#1e293b' : '#f1f5f9',
-                                    border: `1px solid ${isDarkMode ? '#3b82f6' : '#93c5fd'}`,
-                                    borderRadius: '8px',
-                                    padding: '8px 12px',
-                                    fontSize: '12px',
-                                    color: isDarkMode ? '#93c5fd' : '#1d4ed8',
-                                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                                    background: isDarkMode ? '#111111' : '#ffffff',
+                                    border: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+                                    borderRadius: '6px',
+                                    padding: '6px 10px',
+                                    fontSize: '10px',
+                                    fontWeight: 500,
+                                    color: isDarkMode ? '#9ca3af' : '#4b5563',
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
                                     animation: 'fade-in-down 0.25s ease both',
                                     zIndex: 100,
                                 }}
                             >
-                                🔈 Click any text segment to start reading from that point
+                                Click any text segment to start reading
                             </div>
                         )}
                     </div>
 
-                    <div className={`flex rounded p-1 ${isDarkMode ? 'bg-gray-800' : 'bg-[#e5e7eb] dark:bg-[#1f2937]'}`}>
+                    <div className="flex gap-2">
                         <button
                             onClick={() => setActiveLang('original')}
-                            className={`px-3 py-1 text-sm rounded transition-all ${activeLang === 'original' ? tabActiveClass : tabInactiveClass}`}
+                            className={`px-3 py-1.5 rounded-md text-xs font-medium uppercase tracking-wider transition-colors ${activeLang === 'original' ? tabActiveClass : tabInactiveClass}`}
                         >
                             Original
                         </button>
@@ -600,7 +610,7 @@ const AudienceView: React.FC = () => {
                                 <button
                                     key={lang}
                                     onClick={() => setActiveLang(lang)}
-                                    className={`px-3 py-1 text-sm rounded transition-all uppercase ${activeLang === lang ? tabActiveClass : tabInactiveClass}`}
+                                    className={`px-3 py-1.5 rounded-md text-xs font-medium uppercase tracking-wider transition-colors ${activeLang === lang ? tabActiveClass : tabInactiveClass}`}
                                 >
                                     {lang}
                                 </button>
@@ -622,8 +632,9 @@ const AudienceView: React.FC = () => {
 
                     {/* Archive — No Transcript */}
                     {viewMode === 'archive' && segmentsOrder.length === 0 && (
-                        <div className="text-center text-gray-500 italic mt-20">
-                            No transcript available for this session.
+                        <div className="flex flex-col items-center justify-center h-64 text-gray-500 space-y-4">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="opacity-50"><path d="M12 2v20"></path><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                            <span className="text-sm font-medium">No transcript available for this session.</span>
                         </div>
                     )}
 
@@ -652,22 +663,14 @@ const AudienceView: React.FC = () => {
 
                     {/* Live — Empty, session active but no segments yet */}
                     {viewMode === 'live' && sessionInfo && segmentsOrder.length === 0 && (
-                        <div className="flex flex-col items-center justify-center min-h-[40vh] gap-6">
-                            <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '12px',
-                                background: isDarkMode ? 'rgba(79,70,229,0.1)' : 'rgba(79,70,229,0.05)',
-                                border: '1px solid rgba(99,102,241,0.3)',
-                                borderRadius: '16px',
-                                padding: '20px 36px',
-                            }}>
-                                <span style={{ fontSize: '32px', animation: 'spin 3s linear infinite', display: 'inline-block' }}>⚙️</span>
-                                <div style={{ textAlign: 'left' }}>
-                                    <div style={{ color: '#a5b4fc', fontWeight: 700, fontSize: '16px', marginBottom: '4px' }}>
-                                        🔬 치과 전문 AI 번역 시스템 준비 중...
+                        <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
+                            <div className={`flex items-center gap-3 px-6 py-4 rounded-xl border ${isDarkMode ? 'bg-white/3 border-white/5' : 'bg-gray-50 border-gray-200'}`}>
+                                <div className="w-5 h-5 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin flex-shrink-0"></div>
+                                <div>
+                                    <div className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-800'}`}>
+                                        AI 번역 시스템 대기 중
                                     </div>
-                                    <div style={{ color: isDarkMode ? '#6b7280' : '#9ca3af', fontSize: '13px' }}>
+                                    <div className="text-xs text-gray-500 mt-0.5">
                                         음성이 감지되면 자동으로 번역이 시작됩니다
                                     </div>
                                 </div>
@@ -697,6 +700,21 @@ const AudienceView: React.FC = () => {
 
                             if (!text || text.trim() === "") return null
 
+                            if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) {
+                                return (
+                                    <TextItem
+                                        key={id}
+                                        id={id}
+                                        text=""
+                                        isRaw={true}
+                                        targetLang={activeLang}
+                                        fontSize={`${fontSize}px`}
+                                        color={isDarkMode ? "#6b7280" : "#9ca3af"}
+                                        opacity={0.6}
+                                    />
+                                )
+                            }
+
                             const isFinal = seg.status === 'final'
                             const isTimeOut = viewMode === 'live' ? ((now - (seg.timestamp || 0)) > 5000) : true
                             const showAsRaw = viewMode === 'live' ? (!isFinal && !isTimeOut && !isFallback) : false
@@ -704,6 +722,7 @@ const AudienceView: React.FC = () => {
                             // hideRaw가 켜져있으면 번역/확정되기 전의 중간 상태를 보여주지 않음
                             if (hideRaw && !isFinal) return null
 
+                            // 만약 영어를 선택했는데 아직 번역이 안나와서 한국어 원문이 보인다면, 흐리게 표시하거나 번역중 표시
                             if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) {
                                 return (
                                     <TextItem
