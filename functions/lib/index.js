@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteSessionAPI = exports.deleteProjectAPI = exports.deleteConferenceAPI = exports.createConferenceAPI = exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.synthesizeSpeech = exports.processAudio = void 0;
+exports.replaceSessionsAPI = exports.deleteSessionAPI = exports.deleteProjectAPI = exports.deleteConferenceAPI = exports.createConferenceAPI = exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.synthesizeSpeech = exports.processAudio = void 0;
 const admin = __importStar(require("firebase-admin"));
 // Initialize Firebase Admin
 // Cloud Functions auto-initialize correctly. 
@@ -57,3 +57,4 @@ Object.defineProperty(exports, "createConferenceAPI", { enumerable: true, get: f
 Object.defineProperty(exports, "deleteConferenceAPI", { enumerable: true, get: function () { return api_1.deleteConferenceAPI; } });
 Object.defineProperty(exports, "deleteProjectAPI", { enumerable: true, get: function () { return api_1.deleteProjectAPI; } });
 Object.defineProperty(exports, "deleteSessionAPI", { enumerable: true, get: function () { return api_1.deleteSessionAPI; } });
+Object.defineProperty(exports, "replaceSessionsAPI", { enumerable: true, get: function () { return api_1.replaceSessionsAPI; } });

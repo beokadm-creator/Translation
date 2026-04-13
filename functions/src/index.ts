@@ -15,4 +15,4 @@ export { synthesizeSpeech } from "./tts";
 export { diagnoseSystem } from "./diagnose"; // New Diagnostic Tool
 export { archiveSession } from "./archive";
 export { purgeSession } from "./purge";
-export { createConferenceAPI, deleteConferenceAPI, deleteProjectAPI, deleteSessionAPI } from "./api";
+export { createConferenceAPI, deleteConferenceAPI, deleteProjectAPI, deleteSessionAPI, replaceSessionsAPI } from "./api";

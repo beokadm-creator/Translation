@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteSessionAPI = exports.deleteProjectAPI = exports.deleteConferenceAPI = exports.createConferenceAPI = void 0;
+exports.deleteSessionAPI = exports.replaceSessionsAPI = exports.deleteProjectAPI = exports.deleteConferenceAPI = exports.createConferenceAPI = void 0;
 const functions = __importStar(require("firebase-functions/v1"));
 const admin = __importStar(require("firebase-admin"));
 // API Key Auth middleware
@@ -224,6 +224,77 @@ exports.deleteProjectAPI = functions.https.onRequest(async (req, res) => {
     }
     catch (error) {
         functions.logger.error("[API] Failed to delete project", error);
+        res.status(500).json({ success: false, error: error.message || "Internal server error" });
+    }
+});
+exports.replaceSessionsAPI = functions.https.onRequest(async (req, res) => {
+    // 1. CORS Handling
+    const origin = req.headers.origin;
+    const allowedOrigin = process.env.ALLOWED_ORIGIN || functions.config()?.app?.allowed_origin || "*";
+    if (allowedOrigin === "*" || allowedOrigin === origin) {
+        res.set("Access-Control-Allow-Origin", allowedOrigin === "*" ? "*" : origin);
+    }
+    else {
+        res.set("Access-Control-Allow-Origin", origin || allowedOrigin);
+    }
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+    }
+    if (req.method !== "POST") {
+        res.status(405).json({ success: false, error: "Method not allowed" });
+        return;
+    }
+    // 2. Auth
+    if (!authenticateAPIKey(req)) {
+        res.status(401).json({ success: false, error: "Unauthorized" });
+        return;
+    }
+    try {
+        const { conferenceId, projectSlug, sessions } = req.body;
+        if (!projectSlug || !Array.isArray(sessions)) {
+            res.status(400).json({ success: false, error: "Missing required fields: projectSlug, sessions (array)" });
+            return;
+        }
+        const db = admin.database();
+        const projectId = projectSlug.replace(/[^a-z0-9-_]/gi, '').toLowerCase();
+        // 3. 기존 세션 데이터 검증 및 삭제
+        const projectRef = db.ref(`projects/${projectId}`);
+        const snap = await projectRef.child('settings').once('value');
+        if (!snap.exists()) {
+            res.status(404).json({ success: false, error: `Project ${projectId} not found` });
+            return;
+        }
+        // conferenceId가 제공된 경우 일치 여부 확인 (옵션)
+        if (conferenceId && snap.val().conferenceId !== conferenceId) {
+            res.status(400).json({ success: false, error: `Project ${projectId} does not belong to conference ${conferenceId}` });
+            return;
+        }
+        const sessionsObj = {};
+        // 4. 새 세션 데이터 포맷팅
+        sessions.forEach((sess, sIdx) => {
+            const sessionId = sess.id || `sess_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+            sessionsObj[sessionId] = {
+                id: sessionId,
+                speaker: sess.speaker || "",
+                affiliation: sess.affiliation || "",
+                topic: sess.topic || "",
+                abstract: sess.abstract || "",
+                keywords: sess.keywords || "",
+                startTime: sess.startTime || "00:00",
+                orderIndex: typeof sess.orderIndex === 'number' ? sess.orderIndex : sIdx,
+                sourceLanguage: sess.sourceLanguage || "ko",
+            };
+        });
+        // 5. 전체 덮어쓰기 (기존 sessions 노드를 완전히 교체)
+        await projectRef.child('sessions').set(sessionsObj);
+        functions.logger.info(`[API] Replaced sessions for project ${projectId}. Total: ${sessions.length}`);
+        res.status(200).json({ success: true, message: "Successfully replaced sessions.", count: sessions.length });
+    }
+    catch (error) {
+        functions.logger.error("[API] Failed to replace sessions", error);
         res.status(500).json({ success: false, error: error.message || "Internal server error" });
     }
 });
