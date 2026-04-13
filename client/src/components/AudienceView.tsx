@@ -704,24 +704,22 @@ const AudienceView: React.FC = () => {
                             const isTimeOut = viewMode === 'live' ? ((now - (seg.timestamp || 0)) > 5000) : true
                             const showAsRaw = viewMode === 'live' ? (!isFinal && !isTimeOut && !isFallback) : false
 
-                            // 1. 만약 영어를 선택했는데 아직 번역이 안나와서 한국어 원문이 보인다면, 흐리게 표시하거나 번역중 표시 (hideRaw 무시)
                             if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) {
                                 return (
                                     <TextItem
                                         key={id}
                                         id={id}
-                                        text={text + " (Translating...)"}
+                                        text=""
                                         isRaw={true}
                                         targetLang={activeLang}
                                         fontSize={`${fontSize}px`}
                                         color={isDarkMode ? "#6b7280" : "#9ca3af"}
-                                        opacity={0.5}
+                                        opacity={0.6}
                                     />
                                 )
                             }
 
-                            // 2. 그 외의 경우, hideRaw가 켜져있으면 번역/확정되기 전의 중간 상태를 보여주지 않음
-                            if (hideRaw && !isFinal) return null
+                            if (hideRaw && showAsRaw) return null
 
                             return (
                                 <TextItem

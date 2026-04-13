@@ -119,7 +119,7 @@ const isGarbage = (text, _originalText, promptText) => {
         return true;
     // 침묵 시 흔히 나오는 짧은 환각어 필터 (짧은 문구에서만 발동, 긴 정상 발화는 보존)
     // 주의: '좋아요' / '구독' 단독 사용 금지 - 정상 발화("좋아요, 다음으로...") 삭제됨
-    const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독과 좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사|^감사합니다\.?$|영상편집|자막 제공|광고를 포함|알 수 없는 소리|subtitles by|subtitle by|자막.*제작|번역.*제공|MBC 뉴스|SBS 뉴스|KBS 뉴스|임플란트.*상악동.*골이식|상악동.*골이식.*픽스처|픽스처.*어버트먼트)/i;
+    const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독과 좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사|^감사합니다\.?$|영상편집|자막 제공|광고를 포함|알 수 없는 소리|subtitles by|subtitle by|자막.*제작|번역.*제공|MBC 뉴스|SBS 뉴스|KBS 뉴스|임플란트.*상악동.*골이식|상악동.*골이식.*픽스처|픽스처.*어버트먼트|충분한.*수직|충분한.*수직이)/i;
     if (filterGarbage.test(text.trim()) && text.length < 150)
         return true;
     // 성음만으로 된 건 버림
