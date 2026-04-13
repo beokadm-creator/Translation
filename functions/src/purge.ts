@@ -31,8 +31,7 @@ export const purgeSession = functions
         await admin.database().ref(`projects/${projectId}/stream`).remove();
         await admin.database().ref(`projects/${projectId}/state`).update({
           bufferText: "",
-          bufferIds: [],
-          lastGeminiTime: Date.now()
+          bufferIds: []
         });
       }
       res.status(200).json({ success: true, target: projectId || "none" });

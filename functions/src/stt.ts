@@ -1,4 +1,4 @@
-﻿// Version: v12.3 (Stable - OpenAI Only)
+// Version: v12.3 (Stable - OpenAI Only)
 // STT:         gpt-4o-transcribe  (language + domain keyword prompt)
 // Translation: gpt-4o-mini        (JSON strict, temperature 0)
 // KEY FLOW:
@@ -145,11 +145,11 @@ const translateWithOpenAI = async (
         ].filter(Boolean).join('\n')
 
         const completion = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            temperature: 0,
-            max_tokens: 200,
-            response_format: { type: "json_object" },
-            messages: [
+        model: "gpt-4o-mini",
+        temperature: 0,
+        max_tokens: 1000,
+        response_format: { type: "json_object" },
+        messages: [
                 {
                     role: "system",
                     content: "You refine live medical speech-to-text output and produce Korean and English translations in strict JSON."
@@ -238,87 +238,33 @@ export const processAudio = functions
             const auth = (req.headers.authorization || "").toString()
             if (!auth.startsWith("Bearer ")) { res.status(401).json({ success: false }); return }
 
-            const projectId = (req.query.projectId || "").toString()
-            const sourceLabel = (req.query.sourceLabel || "").toString()
-            const queryLang = (req.query.sourceLang || "").toString()
-            if (!projectId) { res.status(400).json({ success: false }); return }
+            const projectId = (req.query.projectId || "").toString();
+        const sourceLabel = (req.query.sourceLabel || "").toString();
+        const queryLang = (req.query.sourceLang || "").toString();
 
-            let buf: Buffer | null = null
-            const raw = (req as Request & { rawBody?: Buffer }).rawBody as Buffer | undefined
-            if (raw && Buffer.isBuffer(raw)) buf = raw
-            else if (Buffer.isBuffer(req.body)) buf = req.body as Buffer
-            else if (typeof req.body === "string") buf = Buffer.from(req.body, "binary")
+        let buf: Buffer | null = null;
+        const raw = (req as Request & { rawBody?: Buffer }).rawBody as Buffer | undefined;
+        if (raw && Buffer.isBuffer(raw)) buf = raw;
+        else if (Buffer.isBuffer(req.body)) buf = req.body as Buffer;
+        else if (typeof req.body === "string") buf = Buffer.from(req.body, "binary");
 
-            if (!buf || buf.length === 0) { res.status(400).json({ success: false }); return }
-            if (buf.length < 2000) { res.status(200).json({ success: false, error: "TooSmall" }); return }
+        if (!buf || buf.length === 0) { res.status(400).json({ success: false }); return; }
+        if (buf.length < 2000) { res.status(200).json({ success: false, error: "TooSmall" }); return; }
 
-            const projectRef = admin.database().ref(`projects/${projectId}`)
-            let sourceLang = queryLang || 'ko' // Use query param if provided, otherwise default 'ko'
-            let activeSessionId: string | null = null
-            let sessionContext = ""
-            let previousContext = ""
-            let customKeywords = ""
-            let minLength = 35
-            let timeoutMs = 4500
-            let sentenceEnd = true
+        if (!projectId) { res.status(400).json({ success: false }); return; }
 
-            // 설정 로드
-            try {
-                const [activeSnap, stateSnap, chunkSnap, projectSettingsSnap] = await Promise.all([
-                    projectRef.child('activeSessionId').get(),
-                    projectRef.child('state').get(),
-                    projectRef.child('settings/chunk').get(),
-                    projectRef.child('settings').get()
-                ])
+        const projectRef = admin.database().ref(`projects/${projectId}`);
+        const sourceLang = queryLang || 'ko';
 
-                if (activeSnap.exists()) {
-                    // ── 우선순위 1: 활성 세션의 sourceLanguage ─────────────────────
-                    activeSessionId = activeSnap.val()
-                    functions.logger.info(`[STT] Active Session: ${activeSessionId}`)
-                    const sSnap = await projectRef.child(`sessions/${activeSessionId}`).get()
-                    if (sSnap.exists()) {
-                        const s = sSnap.val()
-                        sourceLang = s.sourceLanguage || sourceLang
-                        functions.logger.info(`[STT] Session language: ${sourceLang}`)
-                        const affiliationStr = s.affiliation ? `, Affiliation: ${s.affiliation}` : ''
-                        const abstractStr = s.abstract ? `, Abstract: ${s.abstract}` : ''
-                        const keywordsStr = s.keywords ? `, Keywords: ${s.keywords}` : ''
-                        sessionContext = `Speaker: ${s.speaker}${affiliationStr}, Topic: ${s.topic}${abstractStr}${keywordsStr}`
-                        // Whisper prompt: 연자명·소속·주제·키워드·초록(60자) 포함 → 고유명사·도메인 용어 오인식 방지
-                        const speakerTerms = [s.speaker, s.affiliation, s.topic].filter(Boolean).join(', ')
-                        const abstractSnippet = s.abstract ? s.abstract.slice(0, 60) : ''
-                        customKeywords = [s.keywords, speakerTerms, abstractSnippet].filter(Boolean).join(', ')
-                    } else {
-                        functions.logger.warn(`[STT] Active Session ${activeSessionId} data missing in DB`)
-                    }
-                } else {
-                    // ── 우선순위 2: 세션 없을 때 projectSettings targetLanguages 역추론 ──
-                    // queryLang(클라이언트 전달값)이 이미 초기값이므로 여기서만 보정
-                    const projectSettings = projectSettingsSnap.val() || {}
-                    const tgt = projectSettings.targetLanguages
-                    const tgtArr: string[] = Array.isArray(tgt) ? tgt : (tgt ? [tgt] : [])
-                    if (tgtArr.includes('ko') && !tgtArr.includes('en')) {
-                        sourceLang = 'en' // 타겟이 한국어면 소스는 영어
-                    } else if (tgtArr.includes('en') && !tgtArr.includes('ko')) {
-                        sourceLang = 'ko' // 타겟이 영어면 소스는 한국어
-                    }
-                    // 그 외(양방향이거나 타겟 미설정): queryLang || 'ko' 유지
-                    functions.logger.info(`[STT] No active session. Using lang: ${sourceLang}`)
-                }
-                if (chunkSnap.exists()) {
-                    const sett = chunkSnap.val()
-                    if (sett.minLength !== undefined) minLength = Math.max(10, Number(sett.minLength))
-                    if (sett.timeoutMs !== undefined) timeoutMs = Math.max(1000, Number(sett.timeoutMs))
-                    if (sett.sentenceEnd !== undefined) sentenceEnd = Boolean(sett.sentenceEnd)
-                }
-                if (stateSnap.exists()) {
-                    const st = stateSnap.val()
-                    const list: string[] = Array.isArray(st.lastRefinedList) ? st.lastRefinedList : []
-                    previousContext = list.slice(-2).join(' / ')
-                }
-            } catch { /* 무시 */ }
+        // 3. 클라이언트 헤더에서 메타데이터 추출 (2단계 최적화: DB Read 제거)
+        const activeSessionId = (req.headers['x-active-session-id'] || "").toString();
+        const customKeywords = decodeURIComponent((req.headers['x-custom-keywords'] || "").toString());
+        const sessionContext = decodeURIComponent((req.headers['x-session-context'] || "").toString());
+        const minLength = Number(req.headers['x-chunk-min-length'] || 35);
+        const timeoutMs = Number(req.headers['x-chunk-timeout-ms'] || 5000);
+        const sentenceEnd = (req.headers['x-chunk-sentence-end'] || "true") === "true";
 
-            // ── STEP 1: OpenAI STT ────────────────────────────────────────────
+        // ── STEP 1: OpenAI STT ────────────────────────────────────────────
             let openai = getOpenAI()
             const audioStream = Readable.from(buf) as Readable & { path: string }
             audioStream.path = "audio.webm"
@@ -364,9 +310,11 @@ export const processAudio = functions
             // ── STEP 3: 버퍼링 및 번역 (RTDB Transaction - Race condition 완전 제거) ──
             // transaction()은 read→modify→write를 서버 레벨에서 원자적으로 처리.
             // 동시 요청이 있으면 RTDB가 자동으로 재시도하여 데이터 유실 없음.
-            let flushData: { targetId: string; idsToDelete: string[]; bufferText: string } | null = null
+            let flushData: { targetId: string; idsToDelete: string[]; bufferText: string; previousContext: string } | null = null
 
             await projectRef.child('state').transaction((currentState: Record<string, unknown> | null) => {
+                // 트랜잭션 재시도(Retry) 시 이전 시도의 flushData를 반드시 초기화하여 덮어쓰기 방지
+                flushData = null;
                 const st = (currentState || {}) as Record<string, unknown>
                 const currentBufferText = ((st.bufferText as string) || '').toString()
                 const currentBufferIds: string[] = Array.isArray(st.bufferIds) ? (st.bufferIds as string[]) : []
@@ -374,7 +322,13 @@ export const processAudio = functions
                 // 버퍼가 비어있으면 지금부터 타이머 시작
                 const lastFlushTime = currentBufferIds.length === 0
                     ? Date.now()
-                    : Number(st.lastFlushTime || st.lastGeminiTime || Date.now())
+                    : Number(st.lastFlushTime || Date.now());
+
+                // ── 2단계 최적화: previousContext 지연 읽기 (Lazy Read) ──
+                // 버퍼 상태에서 lastRefinedList를 추출하여 flushData에 함께 넘김
+                let previousContext = "";
+                const list: string[] = Array.isArray(st.lastRefinedList) ? st.lastRefinedList : [];
+                previousContext = list.slice(-2).join(' / ');
 
                 const newBufferText = currentBufferText ? currentBufferText + ' ' + rawText : rawText
                 const newBufferIds = [...currentBufferIds, id]
@@ -389,8 +343,9 @@ export const processAudio = functions
                     flushData = {
                         targetId: newBufferIds[0],
                         idsToDelete: newBufferIds.slice(1),
-                        bufferText: newBufferText
-                    }
+                        bufferText: newBufferText,
+                        previousContext: previousContext
+                    } as any
                     return { bufferText: '', bufferIds: [], lastFlushTime: Date.now(), lastRefinedList: (st.lastRefinedList as string[]) || [] }
                 } else {
                     // BUFFERING: 현재 세그먼트 추가
@@ -399,7 +354,7 @@ export const processAudio = functions
             })
 
             if (flushData) {
-                const { targetId, idsToDelete, bufferText: flushText } = flushData as { targetId: string; idsToDelete: string[]; bufferText: string }
+                const { targetId, idsToDelete, bufferText: flushText, previousContext } = flushData as { targetId: string; idsToDelete: string[]; bufferText: string; previousContext: string }
                 try {
                     const { refined, ko, en, isMedical } = await translateWithFallback(
                         flushText, sourceLang, previousContext, sessionContext
@@ -417,22 +372,30 @@ export const processAudio = functions
                         updates[`projects/${projectId}/stream/${pid}/status`] = "merged"
                     }
 
-                    // context 리스트 업데이트
-                    try {
-                        const listSnap = await projectRef.child('state/lastRefinedList').get()
-                        const list: string[] = listSnap.exists() ? listSnap.val() : []
-                        updates[`projects/${projectId}/state/lastRefinedList`] = [...list, refined].slice(-5)
-                    } catch { }
+                    // ── 3단계 디테일 튜닝: 문맥(lastRefinedList) 업데이트 시 Race Condition 방지를 위한 개별 트랜잭션 처리 ──
+                    // 기존의 updates 객체 할당(updates[`.../lastRefinedList`] = ...) 방식은 
+                    // 병렬 번역 시 서로 덮어쓰는 문제가 있으므로, 별도의 트랜잭션으로 안전하게 꼬리물기 저장합니다.
+                    await projectRef.child('state/lastRefinedList').transaction((currentList: any) => {
+                        const list: string[] = Array.isArray(currentList) ? currentList : [];
+                        return [...list, refined].slice(-5);
+                    });
 
+                    // 나머지 일반 상태값들은 기존처럼 일괄 업데이트 (Multi-path)
                     await admin.database().ref().update(updates)
-                } catch {
-                    // 번역 실패 시 버퍼된 모든 세그먼트를 "final"로 복구
+                } catch (e: any) {
+                    // ── 3단계 디테일 튜닝: 번역 실패 및 에러 복구 시 확실한 로깅 및 무한 로딩 방지 ──
+                    functions.logger.error("[processAudio] Translation or update failed", { error: e.message || e })
+                    
                     const errorFixes: Record<string, unknown> = {}
                     errorFixes[`projects/${projectId}/stream/${targetId}/status`] = "final"
                     for (const pid of idsToDelete) {
                         errorFixes[`projects/${projectId}/stream/${pid}/status`] = "final"
                     }
-                    await admin.database().ref().update(errorFixes)
+                    
+                    // 복구 업데이트 자체도 실패할 수 있으므로 catch를 달아 Cloud Function 크래시를 방지
+                    await admin.database().ref().update(errorFixes).catch(err => {
+                        functions.logger.error("[processAudio] Fallback DB update failed", { error: err.message || err })
+                    })
                 }
             }
             // flushData가 null이면 버퍼링 중 → transaction이 이미 상태 저장 완료

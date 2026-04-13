@@ -97,37 +97,42 @@ const AdminDashboard: React.FC = () => {
     }, [activeProjectId]);
 
     const saveProjectSettings = async () => {
-        const updates: Record<string, unknown> = {};
-        updates[`projects/${activeProjectId}/settings/overlay`] = {
-            fontSize: projectSettings.fontSize,
-            fontColor: projectSettings.fontColor,
-            fontWeight: projectSettings.fontWeight,
-            bgColor: projectSettings.bgColor,
-            bgOpacity: projectSettings.bgOpacity,
-            padding: projectSettings.padding,
-            textEffect: projectSettings.textEffect,
-            align: projectSettings.align,
-            displayStyle: projectSettings.displayStyle,
-            letterSpacing: projectSettings.letterSpacing,
-            maxLines: projectSettings.maxLines,
-            lineHeight: projectSettings.lineHeight,
-            fontFamily: projectSettings.fontFamily,
-            typingSpeed: projectSettings.typingSpeed,
-            bottomOffset: projectSettings.bottomOffset,
-        };
-        updates[`projects/${activeProjectId}/settings/chunk`] = {
-            minLength: Number(projectSettings.minLength),
-            timeoutMs: Number(projectSettings.timeoutMs),
-            sentenceEnd: Boolean(projectSettings.sentenceEnd),
-            vadMaxCutMs: Number(projectSettings.vadMaxCutMs),
-            chunkInterval: Number(projectSettings.chunkInterval)
-        };
-        updates[`projects/${activeProjectId}/settings/recordMode`] = projectSettings.recordMode;
-        updates[`projects/${activeProjectId}/settings/hideRaw`] = Boolean(projectSettings.hideRaw);
+        try {
+            const updates: Record<string, unknown> = {};
+            updates[`projects/${activeProjectId}/settings/overlay`] = {
+                fontSize: projectSettings.fontSize,
+                fontColor: projectSettings.fontColor,
+                fontWeight: projectSettings.fontWeight,
+                bgColor: projectSettings.bgColor,
+                bgOpacity: projectSettings.bgOpacity,
+                padding: projectSettings.padding,
+                textEffect: projectSettings.textEffect,
+                align: projectSettings.align,
+                displayStyle: projectSettings.displayStyle,
+                letterSpacing: projectSettings.letterSpacing,
+                maxLines: projectSettings.maxLines,
+                lineHeight: projectSettings.lineHeight,
+                fontFamily: projectSettings.fontFamily,
+                typingSpeed: projectSettings.typingSpeed,
+                bottomOffset: projectSettings.bottomOffset,
+            };
+            updates[`projects/${activeProjectId}/settings/chunk`] = {
+                minLength: Number(projectSettings.minLength),
+                timeoutMs: Number(projectSettings.timeoutMs),
+                sentenceEnd: Boolean(projectSettings.sentenceEnd),
+                vadMaxCutMs: Number(projectSettings.vadMaxCutMs),
+                chunkInterval: Number(projectSettings.chunkInterval)
+            };
+            updates[`projects/${activeProjectId}/settings/recordMode`] = projectSettings.recordMode;
+            updates[`projects/${activeProjectId}/settings/hideRaw`] = Boolean(projectSettings.hideRaw);
 
-        await update(ref(database), updates);
-        alert("Settings Saved!");
-        setShowProjectSettings(false);
+            await update(ref(database), updates);
+            alert("Settings Saved!");
+            setShowProjectSettings(false);
+        } catch (e) {
+            console.error("설정 저장 실패:", e);
+            alert("설정 저장에 실패했습니다. 인터넷 연결을 확인해주세요.");
+        }
     };
 
 
@@ -283,24 +288,29 @@ const AdminDashboard: React.FC = () => {
     }, [segmentsMap]);
 
     // --- Handlers ---
-    const handleCreateSession = () => {
-        const newRef = push(ref(database, `projects/${activeProjectId}/sessions`));
-        const maxOrder = sessions.reduce((max, s) => Math.max(max, s.orderIndex || 0), 0);
-        const newSession: Session = {
-            id: newRef.key!,
-            speaker: "New Speaker",
-            affiliation: "Affiliation",
-            topic: "New Topic",
-            abstract: "",
-            keywords: "",
-            startTime: "09:00",
-            orderIndex: maxOrder + 1,
-            sourceLanguage: 'ko',
-            targetLanguages: ['en']
-        };
-        set(newRef, newSession);
-        setSelectedSessionId(newSession.id);
-        setFormData(newSession);
+    const handleCreateSession = async () => {
+        try {
+            const newRef = push(ref(database, `projects/${activeProjectId}/sessions`));
+            const maxOrder = sessions.reduce((max, s) => Math.max(max, s.orderIndex || 0), 0);
+            const newSession: Session = {
+                id: newRef.key!,
+                speaker: "New Speaker",
+                affiliation: "Affiliation",
+                topic: "New Topic",
+                abstract: "",
+                keywords: "",
+                startTime: "09:00",
+                orderIndex: maxOrder + 1,
+                sourceLanguage: 'ko',
+                targetLanguages: ['en']
+            };
+            await set(newRef, newSession);
+            setSelectedSessionId(newSession.id);
+            setFormData(newSession);
+        } catch (e) {
+            console.error("세션 생성 실패:", e);
+            alert("세션 생성에 실패했습니다. 네트워크를 확인해주세요.");
+        }
     };
 
     const handleSelectSession = (s: Session) => {
@@ -321,19 +331,20 @@ const AdminDashboard: React.FC = () => {
         const s1 = sessions[index];
         const s2 = sessions[targetIndex];
 
-        // Swap orderIndex
-        // If orderIndex is missing, treat as index
         const o1 = s1.orderIndex ?? index;
         const o2 = s2.orderIndex ?? targetIndex;
 
-        // To ensure swap works even if values are same or missing, we explicitly assign new values
-        // But simple swap of existing values might be enough if they are distinct.
-        // Let's just swap their entire orderIndex values in DB.
-        // If they don't have orderIndex, we should assign to all first? 
-        // Assuming they have orderIndex from creation or previous sort.
-
-        await update(ref(database, `projects/${activeProjectId}/sessions/${s1.id}`), { orderIndex: o2 });
-        await update(ref(database, `projects/${activeProjectId}/sessions/${s2.id}`), { orderIndex: o1 });
+        try {
+            // ── 3단계 디테일 튜닝: 다중 경로 업데이트(Multi-path Update)로 통신 낭비 및 불일치 방지 ──
+            const updates: Record<string, any> = {};
+            updates[`projects/${activeProjectId}/sessions/${s1.id}/orderIndex`] = o2;
+            updates[`projects/${activeProjectId}/sessions/${s2.id}/orderIndex`] = o1;
+            
+            await update(ref(database), updates);
+        } catch (e) {
+            console.error("순서 변경 실패:", e);
+            alert("세션 순서 변경에 실패했습니다.");
+        }
     };
 
     const triggerArchive = async (sessionIdToArchive: string) => {
@@ -358,15 +369,25 @@ const AdminDashboard: React.FC = () => {
             alert("Cannot delete active live session. Stop live first.");
             return;
         }
-        await set(ref(database, `projects/${activeProjectId}/sessions/${s.id}`), null);
-        if (selectedSessionId === s.id) setSelectedSessionId(null);
+        try {
+            await set(ref(database, `projects/${activeProjectId}/sessions/${s.id}`), null);
+            if (selectedSessionId === s.id) setSelectedSessionId(null);
+        } catch (e) {
+            console.error("삭제 실패:", e);
+            alert("세션 삭제에 실패했습니다.");
+        }
     };
 
     const handleClearTranscript = async () => {
         if (!selectedSessionId) return;
         if (!window.confirm("Clear all transcript data for this session?")) return;
-        await set(ref(database, `projects/${activeProjectId}/sessions/${selectedSessionId}/transcript`), null);
-        setSegmentsMap({});
+        try {
+            await set(ref(database, `projects/${activeProjectId}/sessions/${selectedSessionId}/transcript`), null);
+            setSegmentsMap({});
+        } catch (e) {
+            console.error("초기화 실패:", e);
+            alert("자막 데이터 초기화에 실패했습니다.");
+        }
     };
 
     const handleGoLive = async () => {
@@ -434,11 +455,37 @@ const AdminDashboard: React.FC = () => {
             const buf = await blob.arrayBuffer();
             const activeSession = sessions.find(s => s.id === activeSessionId);
             const currentLang = activeSession?.sourceLanguage || 'ko';
+            
+            // --- 2단계 최적화: 서버 DB 읽기 병목 제거를 위한 헤더 송장(Metadata) 생성 ---
+            // 1. Whisper용 단어장 (초록은 앞부분 60자만 포함하여 오인식 방지)
+            const speakerTerms = [activeSession?.speaker, activeSession?.affiliation, activeSession?.topic].filter(Boolean).join(', ');
+            const abstractSnippet = activeSession?.abstract ? activeSession.abstract.slice(0, 60) : '';
+            const customKeywords = [activeSession?.keywords, speakerTerms, abstractSnippet].filter(Boolean).join(', ');
+
+            // 2. GPT 번역용 배경지식 (환각 방지를 위해 초록 제외, 주제/키워드/연자 순으로 똑똑하게 배치)
+            const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}`;
+
+            // 3. 청크 설정값
+            const chunkMinLength = (projectSettings as any).chunk?.minLength?.toString() || "35";
+            const chunkTimeoutMs = (projectSettings as any).chunk?.timeoutMs?.toString() || "5000";
+            const chunkSentenceEnd = (projectSettings as any).chunk?.sentenceEnd ? "true" : "false";
+
             const url = `${CF_BASE}/processAudio?projectId=${encodeURIComponent(activeProjectId)}&sourceLabel=admin&sourceLang=${currentLang}`;
             console.log(`[Upload] Sending ${blob.size}B → CF (project=${activeProjectId}, lang=${currentLang})`);
+            
             fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${token}` },
+                headers: { 
+                    'Content-Type': 'application/octet-stream', 
+                    'Authorization': `Bearer ${token}`,
+                    // 한글 깨짐 방지를 위해 encodeURIComponent로 감싸서 헤더에 탑재
+                    'X-Active-Session-Id': activeSessionId || '',
+                    'X-Custom-Keywords': encodeURIComponent(customKeywords),
+                    'X-Session-Context': encodeURIComponent(sessionContext),
+                    'X-Chunk-Min-Length': chunkMinLength,
+                    'X-Chunk-Timeout-Ms': chunkTimeoutMs,
+                    'X-Chunk-Sentence-End': chunkSentenceEnd
+                },
                 body: buf
             }).then(async r => {
                 const data = await r.json().catch(() => ({}));
@@ -512,13 +559,19 @@ const AdminDashboard: React.FC = () => {
                 const nextIndex = activeIndexRef.current === 0 ? 1 : 0;
                 const nextMR = nextIndex === 0 ? mr1Ref.current : mr2Ref.current;
                 const currentMR = activeIndexRef.current === 0 ? mr1Ref.current : mr2Ref.current;
+                
+                // 1. 새로운 레코더를 먼저 시작 (오버랩 시작)
                 if (nextMR && nextMR.state === 'inactive') nextMR.start();
-                if (currentMR && currentMR.state === 'recording') currentMR.stop();
-                activeIndexRef.current = nextIndex;
+                
+                // 2. 아주 미세한 오버랩(100ms)을 주어 스위칭 순간의 단어 잘림 방지
+                setTimeout(() => {
+                    if (currentMR && currentMR.state === 'recording') currentMR.stop();
+                    activeIndexRef.current = nextIndex;
 
-                const currentMode = recordModeRef.current || 'chunk';
-                const interval = chunkIntervalRef.current || 2000;
-                scheduleNextCut(currentMode === 'vad' ? vadMaxCutMsRef.current : interval);
+                    const currentMode = recordModeRef.current || 'chunk';
+                    const interval = chunkIntervalRef.current || 2000;
+                    scheduleNextCut(currentMode === 'vad' ? vadMaxCutMsRef.current : interval);
+                }, 100);
             };
 
             const currentMode = recordModeRef.current || 'chunk';

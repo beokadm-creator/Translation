@@ -149,8 +149,7 @@ const AdminLanding: React.FC = () => {
       // Init State
       await set(child(projectRef, 'state'), {
           bufferText: "",
-          bufferIds: [],
-          lastGeminiTime: 0
+          bufferIds: []
       });
 
       setIsCreatingProj(false);

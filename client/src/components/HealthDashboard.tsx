@@ -4,10 +4,10 @@
  * 상태 판단 기준:
  * - SERVER: Firebase RTDB 연결 상태
  * - WHISPER: 마지막 STT 성공까지의 경과 시간 (processAudio가 status에 기록)
- * - GEMINI: 마지막 Gemini 처리 경과 시간 (onRefineRequest가 state에 기록)
+ * - REFINED: 마지막 텍스트 정제(GPT) 완료 시간
  * - DB: RTDB 읽기 레이턴시
  * 
- * ⚠️  주의: WHISPER/GEMINI는 녹음을 시작하고 오디오가 전송되어야 점등됩니다.
+ * ⚠️  주의: WHISPER/REFINED는 녹음을 시작하고 오디오가 전송되어야 점등됩니다.
  *       녹음 전에는 회색(idle)이 정상입니다.
  */
 
@@ -24,18 +24,18 @@ type Status = 'ok' | 'warn' | 'error' | 'idle';
 const HealthDashboard: React.FC<HealthProps> = ({ projectId }) => {
     const [serverStatus, setServerStatus] = useState<Status>('error');
     const [whisperStatus, setWhisperStatus] = useState<Status>('idle');
-    const [geminiStatus, setGeminiStatus] = useState<Status>('idle');
+    const [refinedStatus, setRefinedStatus] = useState<Status>('idle');
     const [dbStatus, setDbStatus] = useState<Status>('idle');
 
     const [lastWhisperMs, setLastWhisperMs] = useState<number | null>(null);
-    const [lastGeminiMs, setLastGeminiMs] = useState<number | null>(null);
+    const [lastRefinedMs, setLastRefinedMs] = useState<number | null>(null);
     const [dbLatencyMs, setDbLatencyMs] = useState<number | null>(null);
     const [cfStatus, setCfStatus] = useState<Status>('idle');
     const [cfMsg, setCfMsg] = useState<string>('');
 
     // Track last known timestamps to update displayed "X seconds ago" live
     const lastWhisperTsRef = useRef<number | null>(null);
-    const lastGeminiTsRef = useRef<number | null>(null);
+    const lastRefinedTsRef = useRef<number | null>(null);
 
     useEffect(() => {
         if (!projectId) return;
@@ -68,17 +68,21 @@ const HealthDashboard: React.FC<HealthProps> = ({ projectId }) => {
             }
         });
 
-        // ── 3. Gemini 상태: onRefineRequest 성공 시 state/lastGeminiTime 업데이트
-        const geminiRef = ref(database, `projects/${projectId}/state/lastGeminiTime`);
-        const unsubGemini = onValue(geminiRef, (snap) => {
-            const ts: number | null = snap.val();
-            if (ts && ts > 0) {
-                lastGeminiTsRef.current = ts;
+        // ── 3. REFINED 상태: GPT 정제 완료 시 state/lastFlushTime 업데이트 추적
+        const refinedRef = ref(database, `projects/${projectId}/state/lastFlushTime`);
+        const unsubRefined = onValue(refinedRef, (snap) => {
+            const ts = snap.val();
+            if (ts) {
+                lastRefinedTsRef.current = ts;
                 const diff = Date.now() - ts;
-                setLastGeminiMs(diff);
-                if (diff < 15000) setGeminiStatus('ok');
-                else if (diff < 40000) setGeminiStatus('warn');
-                else setGeminiStatus('idle');
+                setLastRefinedMs(diff);
+                if (diff < 15000) setRefinedStatus('ok');
+                else if (diff < 40000) setRefinedStatus('warn');
+                else setRefinedStatus('idle');
+            } else {
+                setRefinedStatus('idle');
+                setLastRefinedMs(null);
+                lastRefinedTsRef.current = null;
             }
         });
 
@@ -128,19 +132,19 @@ const HealthDashboard: React.FC<HealthProps> = ({ projectId }) => {
                 else if (diff < 20000) setWhisperStatus('warn');
                 else setWhisperStatus('error');
             }
-            if (lastGeminiTsRef.current) {
-                const diff = Date.now() - lastGeminiTsRef.current;
-                setLastGeminiMs(diff);
-                if (diff < 15000) setGeminiStatus('ok');
-                else if (diff < 40000) setGeminiStatus('warn');
-                else setGeminiStatus('idle');
+            if (lastRefinedTsRef.current) {
+                const diff = Date.now() - lastRefinedTsRef.current;
+                setLastRefinedMs(diff);
+                if (diff < 15000) setRefinedStatus('ok');
+                else if (diff < 40000) setRefinedStatus('warn');
+                else setRefinedStatus('idle');
             }
         }, 1000);
 
         return () => {
             unsubConn();
             unsubStatus();
-            unsubGemini();
+            unsubRefined();
             clearInterval(latencyInterval);
             clearInterval(cfInterval);
             clearInterval(liveTimer);
@@ -185,10 +189,9 @@ const HealthDashboard: React.FC<HealthProps> = ({ projectId }) => {
                 ? `🎙️ GPT Whisper: ${formatMs(lastWhisperMs)}`
                 : '🎙️ 아직 오디오 미전송 (녹음 시작 필요)'
             )}
-            {renderLight('GEMINI', geminiStatus, lastGeminiMs !== null
-                ? `🔬 Gemini 번역: ${formatMs(lastGeminiMs)}`
-                : '🔬 번역 대기 중'
-            )}
+            {renderLight('REFINED', refinedStatus, lastRefinedMs !== null
+                ? `🧠 GPT 정제: ${formatMs(lastRefinedMs)}`
+                : '대기 중')}
             {renderLight('DB', dbStatus, dbLatencyMs !== null
                 ? `💾 DB 레이턴시: ${dbLatencyMs}ms`
                 : '💾 DB 측정 중...'
