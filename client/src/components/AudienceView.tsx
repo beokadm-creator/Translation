@@ -697,26 +697,27 @@ const AudienceView: React.FC = () => {
 
                             if (!text || text.trim() === "") return null
 
+                            const isFinal = seg.status === 'final'
+                            const isTimeOut = viewMode === 'live' ? ((now - (seg.timestamp || 0)) > 5000) : true
+                            const showAsRaw = viewMode === 'live' ? (!isFinal && !isTimeOut && !isFallback) : false
+
+                            // hideRaw가 켜져있으면 번역/확정되기 전의 중간 상태를 보여주지 않음
+                            if (hideRaw && !isFinal) return null
+
                             if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) {
                                 return (
                                     <TextItem
                                         key={id}
                                         id={id}
-                                        text=""
+                                        text={text + " (Translating...)"}
                                         isRaw={true}
                                         targetLang={activeLang}
                                         fontSize={`${fontSize}px`}
                                         color={isDarkMode ? "#6b7280" : "#9ca3af"}
-                                        opacity={0.6}
+                                        opacity={0.5}
                                     />
                                 )
                             }
-
-                            const isFinal = seg.status === 'final'
-                            const isTimeOut = viewMode === 'live' ? ((now - (seg.timestamp || 0)) > 5000) : true
-                            const showAsRaw = viewMode === 'live' ? (!isFinal && !isTimeOut && !isFallback) : false
-
-                            if (hideRaw && showAsRaw) return null
 
                             return (
                                 <TextItem
