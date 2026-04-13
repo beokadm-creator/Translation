@@ -453,8 +453,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}`;
 
             // 3. 청크 설정값 (Auto-Pilot 기본값 강제 적용)
-            const chunkMinLength = "35";
-            const chunkTimeoutMs = "6000";
+            const chunkMinLength = "40"; // 40자로 증가 (문맥 확보)
+            const chunkTimeoutMs = "10000"; // 10초 대기 (말 끊김 방지)
             const chunkSentenceEnd = "true";
 
             const url = `${CF_BASE}/processAudio?projectId=${encodeURIComponent(activeProjectId)}&sourceLabel=admin&sourceLang=${currentLang}`;
@@ -559,13 +559,13 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                     if (currentMR && currentMR.state === 'recording') currentMR.stop();
                     activeIndexRef.current = nextIndex;
 
-                    const interval = 2500;
+                    const interval = 10000;
                     scheduleNextCut(interval);
                 }, 100);
             };
 
-            console.log("Starting Chunk Mode (2500ms)");
-            scheduleNextCut(2500);
+            console.log("Starting Chunk Mode (10000ms)");
+            scheduleNextCut(10000);
 
             const buf = new Float32Array(analyser.fftSize);
             const loop = () => {
