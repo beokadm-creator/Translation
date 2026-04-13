@@ -594,44 +594,59 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     }, [stream]);
 
     return (
-        <div className="flex h-screen bg-gray-900 text-white overflow-hidden">
+        <div className="flex h-screen bg-[#0a0a0a] text-gray-200 overflow-hidden font-sans selection:bg-blue-500/30">
             {/* Sidebar: Agenda */}
-            <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
-                <div className="p-4 border-b border-gray-700 font-bold text-lg flex justify-between items-center">
-                    <span>Agenda</span>
-                    <button onClick={() => setShowProjectSettings(true)} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded" title="Overlay & AI Settings">⚙️</button>
-                    <button onClick={handleCreateSession} className="text-blue-400 hover:text-blue-300 text-sm font-bold">+ New</button>
+            <div className="w-72 bg-[#0a0a0a] border-r border-white/5 flex flex-col z-10 shadow-xl">
+                <div className="p-5 border-b border-white/5 flex justify-between items-center">
+                    <span className="text-xs font-medium text-gray-400 uppercase tracking-widest">Agenda</span>
+                    <div className="flex gap-2">
+                        <button onClick={() => setShowProjectSettings(true)} className="text-gray-500 hover:text-white transition-colors p-1" title="Overlay & AI Settings">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                        </button>
+                        <button onClick={handleCreateSession} className="text-xs bg-white text-black px-2.5 py-1 rounded font-medium hover:bg-gray-200 transition-colors">+ New</button>
+                    </div>
                 </div>
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto p-3 space-y-1">
                     {sessions.map((s, idx) => (
                         <div
                             key={s.id}
                             onClick={() => handleSelectSession(s)}
-                            className={`p-3 border-b border-gray-700 cursor-pointer hover:bg-gray-700 flex gap-2 ${activeSessionId === s.id ? 'bg-red-900/30 border-l-4 border-red-500' : ''} ${selectedSessionId === s.id ? 'bg-gray-700' : ''}`}
+                            className={`p-3 rounded-lg cursor-pointer transition-all flex gap-3 group ${activeSessionId === s.id ? 'bg-red-500/10 border border-red-500/30' : selectedSessionId === s.id ? 'bg-white/10' : 'hover:bg-white/5'}`}
                         >
-                            <div className="flex flex-col gap-1 justify-center">
-                                <button onClick={(e) => { e.stopPropagation(); handleMove(idx, -1); }} className="text-gray-500 hover:text-white text-[10px]">▲</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleMove(idx, 1); }} className="text-gray-500 hover:text-white text-[10px]">▼</button>
+                            <div className="flex flex-col gap-1 justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={(e) => { e.stopPropagation(); handleMove(idx, -1); }} className="text-gray-500 hover:text-white">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"></path></svg>
+                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); handleMove(idx, 1); }} className="text-gray-500 hover:text-white">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
+                                </button>
                             </div>
                             <div className="flex-1 min-w-0">
-                                <div className="text-sm text-gray-400">{s.startTime}</div>
-                                <div className="font-semibold truncate">
-                                    {LANG_FLAGS[s.sourceLanguage || 'ko']} {s.speaker}
+                                <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-[10px] text-gray-500 font-mono">{s.startTime}</span>
+                                    {activeSessionId === s.id && <span className="text-[10px] text-red-400 font-bold flex items-center gap-1"><span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></span> LIVE</span>}
                                 </div>
-                                <div className="text-xs text-gray-500 truncate">{s.topic}</div>
-                                {activeSessionId === s.id && <span className="text-xs text-red-400 font-bold animate-pulse">● LIVE</span>}
+                                <div className="font-medium text-sm text-gray-200 truncate group-hover:text-white transition-colors">
+                                    <span className="text-xs mr-1 opacity-70">{LANG_FLAGS[s.sourceLanguage || 'ko']}</span>
+                                    {s.speaker}
+                                </div>
+                                <div className="text-[10px] text-gray-500 truncate mt-0.5">{s.topic}</div>
                             </div>
-                            <div className="flex flex-col gap-1">
+                            <div className="flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity justify-center">
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         const tgtLang = s.sourceLanguage === 'en' ? 'ko' : 'en';
                                         window.open(`/overlay/${activeProjectId}/${tgtLang}`, '_blank');
                                     }}
-                                    title="오버레이 열기 (번역 언어)"
-                                    className="text-gray-500 hover:text-blue-400 text-sm p-1 leading-none"
-                                >🖥️</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleDeleteSession(s); }} className="text-gray-600 hover:text-red-500 p-1 text-sm leading-none">🗑️</button>
+                                    title="Open Overlay"
+                                    className="text-gray-500 hover:text-white transition-colors"
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg>
+                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); handleDeleteSession(s); }} className="text-gray-500 hover:text-red-400 transition-colors">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+                                </button>
                             </div>
                         </div>
                     ))}
@@ -639,18 +654,18 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             </div>
 
             {/* Main: Workspace */}
-            <div className="flex-1 flex flex-col min-w-0">
-                {/* Top: Metadata Editor */}
-                <div className="h-1/2 p-6 border-b border-gray-700 bg-gray-900 overflow-y-auto">
+            <div className="flex-1 flex min-w-0">
+                {/* Left: Session Settings */}
+                <div className="w-1/2 p-6 border-r border-white/5 bg-[#0a0a0a] flex flex-col overflow-y-auto">
                     {selectedSessionId ? (
-                        <div className="max-w-3xl mx-auto space-y-4">
-                            <div className="flex justify-between items-center mb-3">
-                                <h2 className="text-xl font-bold">Edit Session</h2>
+                        <div className="max-w-2xl mx-auto flex flex-col h-full w-full">
+                            <div className="flex justify-between items-center mb-6 shrink-0">
+                                <h2 className="text-base font-semibold tracking-tight text-gray-100">Session Settings</h2>
                                 <div className="flex gap-2">
-                                    <button onClick={() => { if (window.confirm("Archive this session?")) triggerArchive(selectedSessionId); }} className="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600 text-sm">Force Archive</button>
-                                    <button onClick={handleSaveSession} className="px-4 py-2 bg-gray-600 rounded hover:bg-gray-500">Save</button>
-                                    <button onClick={handleGoLive} className={`px-4 py-2 rounded font-bold ${activeSessionId === selectedSessionId ? 'bg-red-600 cursor-default' : 'bg-green-600 hover:bg-green-500'}`}>
-                                        {activeSessionId === selectedSessionId ? 'Current Live' : 'Go Live'}
+                                    <button onClick={() => { if (window.confirm("Archive this session?")) triggerArchive(selectedSessionId); }} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-md text-xs font-medium text-gray-400 transition-colors">Archive</button>
+                                    <button onClick={handleSaveSession} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-md text-xs font-medium text-gray-300 transition-colors">Save</button>
+                                    <button onClick={handleGoLive} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors ${activeSessionId === selectedSessionId ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-green-600 text-white hover:bg-green-500'}`}>
+                                        {activeSessionId === selectedSessionId ? 'Live Active' : 'Go Live'}
                                     </button>
                                 </div>
                             </div>
@@ -665,162 +680,166 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                     { lang: 'refined', label: srcLang === 'ko' ? '🇰🇷 Korean (Raw)' : '🇺🇸 English (Raw)', primary: false },
                                 ];
                                 return (
-                                    <div className="flex gap-2 mb-4 p-3 bg-gray-800/60 rounded-lg border border-gray-700 flex-wrap">
-                                        <span className="text-xs text-gray-500 self-center mr-1 font-bold">🖥️ Overlay</span>
+                                    <div className="flex gap-2 mb-6 p-3 bg-[#111111] rounded-lg border border-white/5 flex-wrap items-center shrink-0">
+                                        <span className="text-[10px] text-gray-500 uppercase tracking-widest font-medium mr-2">Overlays</span>
                                         {links.map(({ lang, label, primary }) => {
                                             const url = `${origin}/overlay/${activeProjectId}/${lang}`;
                                             return (
                                                 <div key={lang} className="flex items-center gap-1">
                                                     <button
                                                         onClick={() => window.open(url, '_blank')}
-                                                        className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${primary ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+                                                        className={`px-3 py-1.5 rounded-md text-[10px] font-medium transition-colors ${primary ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'}`}
                                                     >
                                                         {label}
                                                     </button>
                                                     <button
                                                         onClick={() => { navigator.clipboard.writeText(url); }}
-                                                        title="URL 복사"
-                                                        className="text-gray-500 hover:text-gray-300 text-xs px-1"
-                                                    >📋</button>
+                                                        title="Copy URL"
+                                                        className="text-gray-500 hover:text-gray-300 p-1 transition-colors"
+                                                    >
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+                                                    </button>
                                                 </div>
                                             );
                                         })}
                                         <button
                                             onClick={() => window.open(`${origin}/overlay/${activeProjectId}/${tgtLang}?debug=true`, '_blank')}
-                                            className="px-2 py-1.5 rounded text-xs bg-gray-800 hover:bg-gray-700 text-gray-500 border border-gray-700 ml-auto"
+                                            className="px-2 py-1.5 rounded-md text-[10px] bg-white/5 hover:bg-white/10 text-gray-500 ml-auto transition-colors"
                                         >Debug</button>
                                     </div>
                                 );
                             })()}
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs text-gray-400">Speaker Name</label>
-                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.speaker || ''} onChange={e => setFormData({ ...formData, speaker: e.target.value })} />
-                                </div>
-                                <div>
-                                    <label className="block text-xs text-gray-400">Time</label>
-                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.startTime || ''} onChange={e => setFormData({ ...formData, startTime: e.target.value })} />
-                                </div>
-                                <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">Source Language (Speaker's Language)</label>
-                                    <select
-                                        className="w-full bg-gray-800 border border-gray-600 rounded p-2"
-                                        value={formData.sourceLanguage || 'ko'}
-                                        onChange={e => {
-                                            const src = e.target.value as 'ko' | 'en';
-                                            const tgt = src === 'ko' ? ['en'] : ['ko'];
-                                            setFormData({ ...formData, sourceLanguage: src, targetLanguages: tgt });
-                                        }}
-                                    >
-                                        <option value="ko">Korean (한국어)</option>
-                                        <option value="en">English (영어)</option>
-                                    </select>
-                                </div>
-                                <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">Target Languages (Automatically mapped)</label>
-                                    <div className="flex gap-4 p-2 bg-gray-800 rounded border border-gray-600 opacity-70">
-                                        {['ko', 'en'].map(l => (
-                                            <label key={l} className="flex items-center gap-2 cursor-not-allowed">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={(formData.targetLanguages || []).includes(l)}
-                                                    disabled
-                                                    className="cursor-not-allowed"
-                                                />
-                                                <span className="uppercase font-bold text-sm">{l}</span>
-                                            </label>
-                                        ))}
+
+                            <div className="flex flex-col gap-4 flex-1 overflow-y-auto">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Speaker Name</label>
+                                        <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors" value={formData.speaker || ''} onChange={e => setFormData({ ...formData, speaker: e.target.value })} />
                                     </div>
-                                    <p className="text-[10px] text-gray-500 mt-1">※ Target language is automatically set based on the source language.</p>
+                                    <div className="space-y-1.5">
+                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Time</label>
+                                        <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors font-mono" value={formData.startTime || ''} onChange={e => setFormData({ ...formData, startTime: e.target.value })} />
+                                    </div>
                                 </div>
-                                <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">Affiliation</label>
-                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.affiliation || ''} onChange={e => setFormData({ ...formData, affiliation: e.target.value })} />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Source Language</label>
+                                        <select
+                                            className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 transition-colors"
+                                            value={formData.sourceLanguage || 'ko'}
+                                            onChange={e => {
+                                                const src = e.target.value as 'ko' | 'en';
+                                                const tgt = src === 'ko' ? ['en'] : ['ko'];
+                                                setFormData({ ...formData, sourceLanguage: src, targetLanguages: tgt });
+                                            }}
+                                        >
+                                            <option value="ko">Korean (한국어)</option>
+                                            <option value="en">English (영어)</option>
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Target Language <span className="normal-case tracking-normal text-gray-600 ml-1">(Auto)</span></label>
+                                        <div className="flex gap-3 px-3 py-1.5 bg-[#111111]/50 rounded-md border border-white/5 h-[34px] items-center">
+                                            {['ko', 'en'].map(l => (
+                                                <label key={l} className={`flex items-center gap-2 ${(formData.targetLanguages || []).includes(l) ? 'text-gray-200' : 'text-gray-600'} cursor-not-allowed`}>
+                                                    <input type="checkbox" checked={(formData.targetLanguages || []).includes(l)} disabled className="cursor-not-allowed" />
+                                                    <span className="uppercase text-xs font-medium">{l}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">Topic</label>
-                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.topic || ''} onChange={e => setFormData({ ...formData, topic: e.target.value })} />
+                                <div className="space-y-1.5">
+                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Affiliation</label>
+                                    <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors" value={formData.affiliation || ''} onChange={e => setFormData({ ...formData, affiliation: e.target.value })} />
                                 </div>
-                                <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">
+                                <div className="space-y-1.5">
+                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Topic</label>
+                                    <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors" value={formData.topic || ''} onChange={e => setFormData({ ...formData, topic: e.target.value })} />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">
                                         Abstract (Context for AI)
-                                        <span className="ml-2 text-[10px] text-blue-400 font-normal">STT 인식 + 번역 품질 모두 향상</span>
+                                        <span className="ml-2 text-[9px] bg-white/5 border border-white/10 text-blue-400 px-1.5 py-0.5 rounded normal-case tracking-normal">Improves STT + Translation</span>
                                     </label>
-                                    <textarea className="w-full bg-gray-800 border border-gray-600 rounded p-2 h-32" placeholder="강연 초록 또는 발표 내용을 입력하세요. 앞부분 60자는 Whisper STT에도 직접 전달되어 도메인 용어 인식 정확도가 높아집니다." value={formData.abstract || ''} onChange={e => setFormData({ ...formData, abstract: e.target.value })} />
+                                    <textarea className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-2 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors resize-none h-28 leading-relaxed" placeholder="Enter abstract or presentation content. First 60 characters are used by Whisper STT for domain terminology recognition." value={formData.abstract || ''} onChange={e => setFormData({ ...formData, abstract: e.target.value })} />
                                 </div>
-                                <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">Keywords (Comma separated)</label>
-                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.keywords || ''} onChange={e => setFormData({ ...formData, keywords: e.target.value })} />
+                                <div className="space-y-1.5">
+                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Keywords <span className="normal-case tracking-normal text-gray-600 ml-1">(Comma separated)</span></label>
+                                    <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors" placeholder="e.g. Implant, Sinus, Bone Graft" value={formData.keywords || ''} onChange={e => setFormData({ ...formData, keywords: e.target.value })} />
                                 </div>
                             </div>
                         </div>
                     ) : (
-                        <div className="flex items-center justify-center h-full text-gray-500">Select a session to edit</div>
+                        <div className="flex flex-col items-center justify-center h-full text-gray-600 space-y-3">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="opacity-40"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                            <span className="text-sm">Select a session from the agenda</span>
+                        </div>
                     )}
                 </div>
 
-                {/* Bottom: Monitor & Controls */}
-                <div className="h-1/2 bg-black flex flex-col p-4">
-                    <div className="flex justify-between items-center mb-2">
+                {/* Right: Monitor & Controls */}
+                <div className="w-1/2 bg-[#0a0a0a] flex flex-col p-6">
+                    <div className="flex justify-between items-center mb-4 shrink-0">
                         <div className="flex items-center gap-3">
-                            <div className="flex bg-gray-800 rounded p-1">
-                                <button onClick={() => setSourceType('mic')} className={`px-3 py-1 text-sm rounded ${sourceType === 'mic' ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>Mic</button>
-                                <button onClick={() => setSourceType('system')} className={`px-3 py-1 text-sm rounded ${sourceType === 'system' ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>System</button>
+                            <div className="flex bg-[#111111] rounded-md p-1 border border-white/5">
+                                <button onClick={() => setSourceType('mic')} className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${sourceType === 'mic' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-gray-300'}`}>Mic</button>
+                                <button onClick={() => setSourceType('system')} className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${sourceType === 'system' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-gray-300'}`}>System</button>
                             </div>
-                            <button onClick={isRecording ? stopRecording : startRecording} className={`px-4 py-1 rounded font-bold ${isRecording ? "bg-red-600" : "bg-green-600"}`}>
-                                {isRecording ? "ON AIR (Stop)" : "START BROADCAST"}
+                            <button onClick={isRecording ? stopRecording : startRecording} className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${isRecording ? "bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20" : "bg-white text-black hover:bg-gray-200"}`}>
+                                {isRecording ? "STOP BROADCAST" : "START BROADCAST"}
                             </button>
 
-                            {/* Remaster Button for Admin */}
-                            {/* REMOVED from here as per user request */}
-
-                            <div className="w-32 h-2 bg-gray-700 rounded ml-2 relative">
-                                <div className="h-2 bg-green-500 rounded" style={{ width: `${Math.min(100, Math.max(0, ((currentDb + 90) / 60) * 100))}%` }} />
+                            <div className="w-24 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                <div className="h-full bg-green-500 rounded-full transition-all duration-75" style={{ width: `${Math.min(100, Math.max(0, ((currentDb + 90) / 60) * 100))}%` }} />
                             </div>
-                            {/* Health Dashboard */}
                             <HealthDashboard projectId={activeProjectId} />
                         </div>
-                        <div className="text-xs text-gray-400">Status: {status}</div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-gray-600 uppercase tracking-widest">Status</span>
+                            <span className={`text-xs font-medium font-mono ${status === 'recording' || status === 'streaming' ? 'text-green-400' : 'text-gray-500'}`}>{status}</span>
+                        </div>
                     </div>
 
-                    <AudioVisualizer stream={stream} width={800} height={40} />
+                    <AudioVisualizer stream={stream} width={800} height={36} />
 
-                    {/* Log Window with Header */}
-                    <div className="flex-1 flex flex-col mt-2 border border-gray-800 rounded overflow-hidden">
-                        <div className="bg-gray-800 p-2 flex justify-between items-center">
-                            <span className="text-xs font-bold text-gray-300">
-                                {selectedSessionId ? `Session: ${formData.speaker} (${viewMode === 'live' ? 'LIVE STREAM' : 'ARCHIVED RECORD'})` : "No Session Selected"}
-                            </span>
-
-                            <div className="flex gap-2">
-                                {/* Manual Remaster Button (For Live Monitoring Cleanup) */}
-                                {viewMode === 'live' && activeSessionId && (
-                                    <div className="flex gap-1">
-                                        <button
-                                            onClick={triggerPurge}
-                                            className="px-2 py-1 text-xs rounded bg-red-900/50 hover:bg-red-800 border border-red-700 text-red-100 flex items-center gap-1"
-                                            title="완전 삭제 (클랜징)"
-                                        >
-                                            🧹 Purge
-                                        </button>
-                                    </div>
+                    {/* Transcript Viewer */}
+                    <div className="flex-1 flex flex-col mt-4 border border-white/5 rounded-xl overflow-hidden bg-[#111111]">
+                        <div className="bg-[#1a1a1a] px-4 py-2.5 flex justify-between items-center border-b border-white/5 shrink-0">
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium text-gray-400">
+                                    {selectedSessionId ? `Transcript — ${formData.speaker}` : "Transcript Viewer"}
+                                </span>
+                                {selectedSessionId && (
+                                    <span className={`text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider font-bold ${viewMode === 'live' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-white/5 text-gray-500 border border-white/10'}`}>
+                                        {viewMode === 'live' ? 'LIVE' : 'ARCHIVED'}
+                                    </span>
                                 )}
-
-
+                            </div>
+                            <div className="flex gap-1.5">
+                                {viewMode === 'live' && activeSessionId && (
+                                    <button
+                                        onClick={triggerPurge}
+                                        className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 transition-colors"
+                                        title="완전 삭제"
+                                    >
+                                        Purge
+                                    </button>
+                                )}
                                 {viewMode === 'archive' && (
                                     <>
-                                        <button onClick={handleExport} className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-xs rounded text-white flex items-center gap-1">
-                                            📥 Export Script
+                                        <button onClick={handleExport} className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-[10px] font-bold uppercase tracking-wider rounded-md text-gray-300 transition-colors">
+                                            Export
                                         </button>
-                                        <button onClick={handleClearTranscript} className="px-2 py-1 bg-red-900/50 hover:bg-red-900 text-xs rounded text-red-200 border border-red-800 flex items-center gap-1">
-                                            🧹 Clear
+                                        <button onClick={handleClearTranscript} className="px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 text-[10px] font-bold uppercase tracking-wider rounded-md text-red-400 border border-red-500/20 transition-colors">
+                                            Clear
                                         </button>
                                     </>
                                 )}
                             </div>
                         </div>
-                        <div className="flex-1 overflow-y-auto bg-gray-900 p-4">
-                            <div className="text-lg break-words leading-relaxed">
+                        <div className="flex-1 overflow-y-auto p-5">
+                            <div className="text-sm break-words leading-relaxed space-y-2">
                                 {segmentsOrder.map((id) => {
                                     const seg = segmentsMap[id];
                                     if (seg?.status === 'merged') return null;
@@ -835,264 +854,261 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                     </div>
                 </div>
             </div>
+
             {/* Settings Modal */}
-            {
-                showProjectSettings && (
-                    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-                        <div className="bg-gray-800 p-6 rounded-lg w-full max-w-xl space-y-4 border border-gray-600">
-                            <div className="flex justify-between items-start">
-                                <h2 className="text-xl font-bold">Project Settings</h2>
-                                <div className="flex gap-1.5 text-[10px]">
-                                    <span className="bg-green-900/50 text-green-400 border border-green-700 px-2 py-0.5 rounded-full font-mono">STT: gpt-4o-transcribe</span>
-                                    <span className="bg-blue-900/50 text-blue-400 border border-blue-700 px-2 py-0.5 rounded-full font-mono">Trans: gpt-4o-mini</span>
-                                </div>
-                            </div>
-
-                            {/* Tabs */}
-                            <div className="flex border-b border-gray-600 mb-4">
-                                <button onClick={() => setSettingsTab('overlay')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'overlay' ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}>Overlay Design</button>
-                                <button onClick={() => setSettingsTab('ai')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'ai' ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}>Audio & AI</button>
-                            </div>
-
-                            <div className="space-y-6 overflow-y-auto max-h-[60vh]">
-                                {/* Section 0: Model Info + Audio Engine */}
-                                {settingsTab === 'ai' && <>
-                                    <div className="bg-gray-900 border border-gray-600 p-3 rounded-lg">
-                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 flex justify-between">
-                                            <span>AI 모델 설정</span>
-                                        </h3>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            {/* STT 엔진 설정 */}
-                                            <div className="space-y-3">
-                                                <h4 className="text-sm font-bold text-gray-300">🎙️ STT (음성인식)</h4>
-                                                <div>
-                                                    <label className="text-[10px] text-gray-500 mb-1 block">메인 엔진 (Primary)</label>
-                                                    <select 
-                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-green-400"
-                                                        value={projectSettings.primarySTT}
-                                                        onChange={e => setProjectSettings({...projectSettings, primarySTT: e.target.value as 'openai' | 'deepgram'})}
-                                                    >
-                                                        <option value="openai">OpenAI (gpt-4o-transcribe)</option>
-                                                        <option value="deepgram">Deepgram (Nova-3)</option>
-                                                    </select>
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] text-gray-500 mb-1 block">보조 엔진 (Fallback)</label>
-                                                    <select 
-                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-gray-400"
-                                                        value={projectSettings.fallbackSTT}
-                                                        onChange={e => setProjectSettings({...projectSettings, fallbackSTT: e.target.value as 'openai' | 'deepgram'})}
-                                                    >
-                                                        <option value="deepgram">Deepgram (Nova-3)</option>
-                                                        <option value="openai">OpenAI (gpt-4o-transcribe)</option>
-                                                    </select>
-                                                </div>
-                                            </div>
-
-                                            {/* 번역 엔진 설정 */}
-                                            <div className="space-y-3 border-l border-gray-700 pl-4">
-                                                <h4 className="text-sm font-bold text-gray-300">🌐 Translation (번역)</h4>
-                                                <div>
-                                                    <label className="text-[10px] text-gray-500 mb-1 block">메인 엔진 (Primary)</label>
-                                                    <select 
-                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-blue-400"
-                                                        value={projectSettings.primaryTrans}
-                                                        onChange={e => setProjectSettings({...projectSettings, primaryTrans: e.target.value as 'openai' | 'claude'})}
-                                                    >
-                                                        <option value="openai">OpenAI (gpt-4o-mini)</option>
-                                                        <option value="claude">Anthropic (Claude 3 Haiku)</option>
-                                                    </select>
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] text-gray-500 mb-1 block">보조 엔진 (Fallback)</label>
-                                                    <select 
-                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-gray-400"
-                                                        value={projectSettings.fallbackTrans}
-                                                        onChange={e => setProjectSettings({...projectSettings, fallbackTrans: e.target.value as 'openai' | 'claude'})}
-                                                    >
-                                                        <option value="claude">Anthropic (Claude 3 Haiku)</option>
-                                                        <option value="openai">OpenAI (gpt-4o-mini)</option>
-                                                    </select>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="bg-blue-900/20 border border-blue-700/50 p-4 rounded-lg">
-                                        <h3 className="text-sm font-bold text-blue-400 mb-2 flex items-center gap-2">
-                                            🤖 Auto-Pilot 활성화됨
-                                        </h3>
-                                        <p className="text-xs text-gray-300 leading-relaxed">
-                                            가장 안정적이고 빠른 <strong>"2.5초 간격 연속 전송(Chunk)"</strong> 모드가 기본으로 적용되어 있습니다.<br/>
-                                            오디오 유실이나 지연 없이 서버가 알아서 문맥을 재조립하여 최적의 번역을 수행합니다.
-                                        </p>
-                                    </div>
-                                    
-                                    <div className="flex items-start gap-2 pt-2 border-t border-gray-700">
-                                        <input type="checkbox" id="chkHideRaw"
-                                            checked={projectSettings.hideRaw}
-                                            onChange={e => setProjectSettings({ ...projectSettings, hideRaw: e.target.checked })}
-                                            className="mt-0.5" />
-                                        <div>
-                                            <label htmlFor="chkHideRaw" className="text-sm text-gray-300 cursor-pointer font-bold">
-                                                🔒 Raw STT 숨김 (번역 완료 전 원문 미표시)
-                                            </label>
-                                            <p className="text-[10px] text-gray-500 mt-0.5">체크 시 번역기가 정제한 텍스트만 청중 화면에 표시됩니다.</p>
-                                        </div>
-                                    </div>
-                                </>}
-
-                                {/* Section 1: Overlay */}
-                                {settingsTab === 'overlay' && <div className="space-y-5">
-
-                                    {/* Display Style */}
-                                    <div>
-                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Display Style</h3>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            {(['youtube', 'typing'] as const).map(style => (
-                                                <button key={style}
-                                                    onClick={() => setProjectSettings({ ...projectSettings, displayStyle: style })}
-                                                    className={`py-3 rounded-lg border text-sm font-bold transition-all ${projectSettings.displayStyle === style ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-400 hover:border-gray-400'}`}>
-                                                    {style === 'youtube' ? '🎬 YouTube 스타일' : '⌨️ 타이핑 스타일'}
-                                                </button>
-                                            ))}
-                                        </div>
-                                        {projectSettings.displayStyle === 'typing' && (
-                                            <div className="mt-3">
-                                                <label className="text-xs text-gray-400 block flex justify-between">
-                                                    <span>타이핑 속도 (글자/초)</span>
-                                                    <span className="text-white font-bold">{projectSettings.typingSpeed} chars/s</span>
-                                                </label>
-                                                <input type="range" min="10" max="100" step="5" className="w-full mt-1"
-                                                    value={projectSettings.typingSpeed}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, typingSpeed: Number(e.target.value) })} />
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Layout */}
-                                    <div>
-                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Layout</h3>
-                                        <div className="grid grid-cols-3 gap-3">
-                                            <div>
-                                                <label className="text-xs text-gray-400 block mb-1">표시 줄 수</label>
-                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.maxLines}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, maxLines: Number(e.target.value) })}>
-                                                    {[1,2,3,4,5].map(n => <option key={n} value={n}>{n}줄</option>)}
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="text-xs text-gray-400 block mb-1">정렬</label>
-                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.align}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, align: e.target.value })}>
-                                                    <option value="left">왼쪽</option>
-                                                    <option value="center">가운데</option>
-                                                    <option value="right">오른쪽</option>
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="text-xs text-gray-400 block mb-1">하단 여백 (px)</label>
-                                                <input type="number" className="w-full bg-gray-700 p-2 rounded text-sm"
-                                                    value={projectSettings.bottomOffset}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, bottomOffset: Number(e.target.value) })} />
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Font */}
-                                    <div>
-                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Font</h3>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label className="text-xs text-gray-400 block mb-1">크기 (px)</label>
-                                                <input type="number" min="12" max="120" className="w-full bg-gray-700 p-2 rounded text-sm"
-                                                    value={projectSettings.fontSize}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, fontSize: Number(e.target.value) })} />
-                                            </div>
-                                            <div>
-                                                <label className="text-xs text-gray-400 block mb-1">굵기</label>
-                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.fontWeight}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, fontWeight: e.target.value })}>
-                                                    <option value="normal">Normal</option>
-                                                    <option value="bold">Bold</option>
-                                                    <option value="800">Extra Bold</option>
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="text-xs text-gray-400 block mb-1">자간 (px)</label>
-                                                <input type="number" min="-5" max="20" step="0.5" className="w-full bg-gray-700 p-2 rounded text-sm"
-                                                    value={projectSettings.letterSpacing}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, letterSpacing: Number(e.target.value) })} />
-                                            </div>
-                                            <div>
-                                                <label className="text-xs text-gray-400 block mb-1">행간</label>
-                                                <input type="number" min="1" max="3" step="0.1" className="w-full bg-gray-700 p-2 rounded text-sm"
-                                                    value={projectSettings.lineHeight}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, lineHeight: Number(e.target.value) })} />
-                                            </div>
-                                            <div>
-                                                <label className="text-xs text-gray-400 block mb-1">글자 색</label>
-                                                <input type="color" className="w-full h-9 bg-gray-700 rounded cursor-pointer"
-                                                    value={projectSettings.fontColor}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, fontColor: e.target.value })} />
-                                            </div>
-                                            <div>
-                                                <label className="text-xs text-gray-400 block mb-1">텍스트 효과</label>
-                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.textEffect}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, textEffect: e.target.value })}>
-                                                    <option value="shadow">드롭 쉐도우</option>
-                                                    <option value="stroke">아웃라인</option>
-                                                    <option value="none">없음</option>
-                                                </select>
-                                            </div>
-                                            <div className="col-span-2">
-                                                <label className="text-xs text-gray-400 block mb-1">폰트 패밀리 (CSS)</label>
-                                                <input type="text" className="w-full bg-gray-700 p-2 rounded text-sm"
-                                                    placeholder="sans-serif, Arial, 'Noto Sans KR', ..."
-                                                    value={projectSettings.fontFamily}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, fontFamily: e.target.value })} />
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Background */}
-                                    <div>
-                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Background</h3>
-                                        <div className="grid grid-cols-3 gap-3">
-                                            <div>
-                                                <label className="text-xs text-gray-400 block mb-1">배경색</label>
-                                                <input type="color" className="w-full h-9 bg-gray-700 rounded cursor-pointer"
-                                                    value={projectSettings.bgColor}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, bgColor: e.target.value })} />
-                                            </div>
-                                            <div>
-                                                <label className="text-xs text-gray-400 block mb-1">투명도 (0~1)</label>
-                                                <input type="number" step="0.05" min="0" max="1" className="w-full bg-gray-700 p-2 rounded text-sm"
-                                                    value={projectSettings.bgOpacity}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, bgOpacity: Number(e.target.value) })} />
-                                            </div>
-                                            <div>
-                                                <label className="text-xs text-gray-400 block mb-1">좌우 패딩 (px)</label>
-                                                <input type="number" className="w-full bg-gray-700 p-2 rounded text-sm"
-                                                    value={projectSettings.padding}
-                                                    onChange={e => setProjectSettings({ ...projectSettings, padding: Number(e.target.value) })} />
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="text-[10px] text-gray-500">※ 저장 즉시 오버레이에 실시간 반영됩니다.</div>
-                                </div>}
-                            </div>
-
-                            <div className="flex justify-end gap-2 mt-4">
-                                <button onClick={() => setShowProjectSettings(false)} className="px-4 py-2 text-gray-400">Cancel</button>
-                                <button onClick={saveProjectSettings} className="px-4 py-2 bg-blue-600 rounded font-bold">Save Apply</button>
+            {showProjectSettings && (
+                <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+                    <div className="bg-[#111111] p-6 rounded-xl w-full max-w-2xl space-y-5 border border-white/10 shadow-2xl">
+                        <div className="flex justify-between items-center border-b border-white/5 pb-4">
+                            <h2 className="text-base font-semibold tracking-tight text-gray-100">Project Settings</h2>
+                            <div className="flex gap-2 text-[10px]">
+                                <span className="bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-1 rounded-md font-mono">STT: gpt-4o-transcribe</span>
+                                <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded-md font-mono">Trans: gpt-4o-mini</span>
                             </div>
                         </div>
-                    </div>
-                )
-            }
 
-        </div >
+                        {/* Tabs */}
+                        <div className="flex border-b border-white/5">
+                            <button onClick={() => setSettingsTab('overlay')} className={`px-4 py-2 text-sm font-medium transition-colors ${settingsTab === 'overlay' ? 'border-b-2 border-white text-white' : 'text-gray-500 hover:text-gray-300'}`}>Overlay Design</button>
+                            <button onClick={() => setSettingsTab('ai')} className={`px-4 py-2 text-sm font-medium transition-colors ${settingsTab === 'ai' ? 'border-b-2 border-white text-white' : 'text-gray-500 hover:text-gray-300'}`}>Audio & AI</button>
+                        </div>
+
+                        <div className="space-y-5 overflow-y-auto max-h-[60vh] pr-1">
+                            {/* AI Settings */}
+                            {settingsTab === 'ai' && <>
+                                <div className="bg-[#1a1a1a] border border-white/5 p-4 rounded-lg space-y-4">
+                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">AI Models</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-3">
+                                            <p className="text-xs font-medium text-gray-400">STT (Speech to Text)</p>
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] text-gray-600 uppercase tracking-wider block">Primary</label>
+                                                <select
+                                                    className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs font-medium text-green-400 outline-none focus:border-white/20"
+                                                    value={projectSettings.primarySTT}
+                                                    onChange={e => setProjectSettings({...projectSettings, primarySTT: e.target.value as 'openai' | 'deepgram'})}
+                                                >
+                                                    <option value="openai">OpenAI (gpt-4o-transcribe)</option>
+                                                    <option value="deepgram">Deepgram (Nova-3)</option>
+                                                </select>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] text-gray-600 uppercase tracking-wider block">Fallback</label>
+                                                <select
+                                                    className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs font-medium text-gray-400 outline-none focus:border-white/20"
+                                                    value={projectSettings.fallbackSTT}
+                                                    onChange={e => setProjectSettings({...projectSettings, fallbackSTT: e.target.value as 'openai' | 'deepgram'})}
+                                                >
+                                                    <option value="deepgram">Deepgram (Nova-3)</option>
+                                                    <option value="openai">OpenAI (gpt-4o-transcribe)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-3 border-l border-white/5 pl-4">
+                                            <p className="text-xs font-medium text-gray-400">Translation</p>
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] text-gray-600 uppercase tracking-wider block">Primary</label>
+                                                <select
+                                                    className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs font-medium text-blue-400 outline-none focus:border-white/20"
+                                                    value={projectSettings.primaryTrans}
+                                                    onChange={e => setProjectSettings({...projectSettings, primaryTrans: e.target.value as 'openai' | 'claude'})}
+                                                >
+                                                    <option value="openai">OpenAI (gpt-4o-mini)</option>
+                                                    <option value="claude">Anthropic (Claude 3 Haiku)</option>
+                                                </select>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] text-gray-600 uppercase tracking-wider block">Fallback</label>
+                                                <select
+                                                    className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs font-medium text-gray-400 outline-none focus:border-white/20"
+                                                    value={projectSettings.fallbackTrans}
+                                                    onChange={e => setProjectSettings({...projectSettings, fallbackTrans: e.target.value as 'openai' | 'claude'})}
+                                                >
+                                                    <option value="claude">Anthropic (Claude 3 Haiku)</option>
+                                                    <option value="openai">OpenAI (gpt-4o-mini)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-blue-500/5 border border-blue-500/15 p-4 rounded-lg">
+                                    <p className="text-xs font-medium text-blue-400 mb-1">Auto-Pilot Active</p>
+                                    <p className="text-xs text-gray-500 leading-relaxed">
+                                        2.5s interval chunk mode is enabled by default — the most stable and low-latency configuration.
+                                        The server reassembles context automatically for optimal translation quality.
+                                    </p>
+                                </div>
+
+                                <div className="flex items-start gap-3 pt-3 border-t border-white/5">
+                                    <input type="checkbox" id="chkHideRaw"
+                                        checked={projectSettings.hideRaw}
+                                        onChange={e => setProjectSettings({ ...projectSettings, hideRaw: e.target.checked })}
+                                        className="mt-0.5 w-4 h-4 rounded border-gray-600 bg-[#111111] accent-white" />
+                                    <div>
+                                        <label htmlFor="chkHideRaw" className="text-sm text-gray-300 cursor-pointer font-medium">
+                                            Hide Raw STT Text
+                                        </label>
+                                        <p className="text-[10px] text-gray-500 mt-0.5">Only display text after refinement. Prevents unprocessed STT output from appearing on the audience screen.</p>
+                                    </div>
+                                </div>
+                            </>}
+
+                            {/* Overlay Settings */}
+                            {settingsTab === 'overlay' && <div className="space-y-6">
+                                <div className="space-y-3">
+                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Display Style</h3>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {(['youtube', 'typing'] as const).map(style => (
+                                            <button key={style}
+                                                onClick={() => setProjectSettings({ ...projectSettings, displayStyle: style })}
+                                                className={`py-3 rounded-lg border text-sm font-medium transition-all ${projectSettings.displayStyle === style ? 'bg-white/10 border-white/20 text-white' : 'bg-[#1a1a1a] border-white/5 text-gray-400 hover:border-white/10 hover:text-gray-300'}`}>
+                                                {style === 'youtube' ? 'YouTube Style' : 'Typing Style'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {projectSettings.displayStyle === 'typing' && (
+                                        <div className="mt-3 bg-[#1a1a1a] p-4 rounded-lg border border-white/5">
+                                            <label className="text-xs text-gray-400 flex justify-between mb-2">
+                                                <span>Typing Speed</span>
+                                                <span className="text-gray-200 font-mono">{projectSettings.typingSpeed} chars/s</span>
+                                            </label>
+                                            <input type="range" min="10" max="100" step="5" className="w-full accent-white"
+                                                value={projectSettings.typingSpeed}
+                                                onChange={e => setProjectSettings({ ...projectSettings, typingSpeed: Number(e.target.value) })} />
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="space-y-3">
+                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Layout</h3>
+                                    <div className="grid grid-cols-3 gap-4">
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Max Lines</label>
+                                            <select className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20" value={projectSettings.maxLines}
+                                                onChange={e => setProjectSettings({ ...projectSettings, maxLines: Number(e.target.value) })}>
+                                                {[1,2,3,4,5].map(n => <option key={n} value={n}>{n} Lines</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Align</label>
+                                            <select className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20" value={projectSettings.align}
+                                                onChange={e => setProjectSettings({ ...projectSettings, align: e.target.value })}>
+                                                <option value="left">Left</option>
+                                                <option value="center">Center</option>
+                                                <option value="right">Right</option>
+                                            </select>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Bottom Offset</label>
+                                            <input type="number" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                                value={projectSettings.bottomOffset}
+                                                onChange={e => setProjectSettings({ ...projectSettings, bottomOffset: Number(e.target.value) })} />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Typography</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Size (px)</label>
+                                            <input type="number" min="12" max="120" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                                value={projectSettings.fontSize}
+                                                onChange={e => setProjectSettings({ ...projectSettings, fontSize: Number(e.target.value) })} />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Weight</label>
+                                            <select className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20" value={projectSettings.fontWeight}
+                                                onChange={e => setProjectSettings({ ...projectSettings, fontWeight: e.target.value })}>
+                                                <option value="normal">Normal</option>
+                                                <option value="bold">Bold</option>
+                                                <option value="800">Extra Bold</option>
+                                            </select>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Letter Spacing</label>
+                                            <input type="number" min="-5" max="20" step="0.5" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                                value={projectSettings.letterSpacing}
+                                                onChange={e => setProjectSettings({ ...projectSettings, letterSpacing: Number(e.target.value) })} />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Line Height</label>
+                                            <input type="number" min="1" max="3" step="0.1" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                                value={projectSettings.lineHeight}
+                                                onChange={e => setProjectSettings({ ...projectSettings, lineHeight: Number(e.target.value) })} />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Text Color</label>
+                                            <div className="flex items-center gap-2">
+                                                <input type="color" className="h-9 w-12 bg-transparent cursor-pointer rounded"
+                                                    value={projectSettings.fontColor}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, fontColor: e.target.value })} />
+                                                <span className="text-xs font-mono text-gray-500">{projectSettings.fontColor}</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Text Effect</label>
+                                            <select className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20" value={projectSettings.textEffect}
+                                                onChange={e => setProjectSettings({ ...projectSettings, textEffect: e.target.value })}>
+                                                <option value="shadow">Drop Shadow</option>
+                                                <option value="stroke">Outline</option>
+                                                <option value="none">None</option>
+                                            </select>
+                                        </div>
+                                        <div className="col-span-2 space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Font Family</label>
+                                            <input type="text" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                                placeholder="sans-serif, Arial, 'Noto Sans KR', ..."
+                                                value={projectSettings.fontFamily}
+                                                onChange={e => setProjectSettings({ ...projectSettings, fontFamily: e.target.value })} />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Background</h3>
+                                    <div className="grid grid-cols-3 gap-4">
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Color</label>
+                                            <div className="flex items-center gap-2">
+                                                <input type="color" className="h-9 w-10 bg-transparent cursor-pointer rounded"
+                                                    value={projectSettings.bgColor}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, bgColor: e.target.value })} />
+                                                <span className="text-xs font-mono text-gray-600">{projectSettings.bgColor}</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Opacity</label>
+                                            <input type="number" step="0.05" min="0" max="1" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                                value={projectSettings.bgOpacity}
+                                                onChange={e => setProjectSettings({ ...projectSettings, bgOpacity: Number(e.target.value) })} />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Padding (px)</label>
+                                            <input type="number" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                                value={projectSettings.padding}
+                                                onChange={e => setProjectSettings({ ...projectSettings, padding: Number(e.target.value) })} />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="text-[10px] text-gray-600 flex items-center gap-2 bg-white/5 p-2 rounded-md">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                                    Changes apply to overlay in real-time upon saving.
+                                </div>
+                            </div>}
+                        </div>
+
+                        <div className="flex justify-end gap-3 pt-4 border-t border-white/5">
+                            <button onClick={() => setShowProjectSettings(false)} className="px-4 py-2 text-xs font-medium text-gray-500 hover:text-white transition-colors">Cancel</button>
+                            <button onClick={saveProjectSettings} className="px-4 py-2 bg-white text-black rounded-md text-xs font-medium hover:bg-gray-200 transition-colors">Save Changes</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+        </div>
     );
 };
 
