@@ -444,13 +444,22 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             const currentLang = activeSession?.sourceLanguage || 'ko';
             
             // --- 2단계 최적화: 서버 DB 읽기 병목 제거를 위한 헤더 송장(Metadata) 생성 ---
-            // 1. Whisper용 단어장 (초록은 통문장이 들어가면 환각을 일으키므로 STT 프롬프트에서 완전 제외)
-            const speakerTerms = [activeSession?.speaker, activeSession?.affiliation, activeSession?.topic].filter(Boolean).join(', ');
-            const customKeywords = [activeSession?.keywords, speakerTerms].filter(Boolean).join(', ');
+            // 1. 초록(Abstract)을 형태소/단어 위주로 단순화 (문장형 환각 방지)
+            const abstractWords = activeSession?.abstract 
+                ? activeSession.abstract
+                    .replace(/[^a-zA-Z가-힣0-9\s,]/g, ' ') // 특수기호 제거
+                    .split(/\s+/) // 공백 기준으로 나눔
+                    .filter(w => w.length >= 2) // 2글자 이상인 의미 있는 단어만
+                    .slice(0, 15) // 상위 15개 핵심 단어만 추출
+                    .join(', ')
+                : '';
 
-            // 2. GPT 번역용 배경지식 (환각 방지를 위해 초록은 번역 컨텍스트로만 제한적 사용)
-            const abstractSnippet = activeSession?.abstract ? activeSession.abstract.slice(0, 100) : '';
-            const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}, Context: ${abstractSnippet}`;
+            // 2. Whisper용 단어장 (초록의 핵심 '단어'들만 포함하여 환각 없이 오인식만 방지)
+            const speakerTerms = [activeSession?.speaker, activeSession?.affiliation, activeSession?.topic].filter(Boolean).join(', ');
+            const customKeywords = [activeSession?.keywords, speakerTerms, abstractWords].filter(Boolean).join(', ');
+
+            // 3. GPT 번역용 배경지식 (마찬가지로 초록은 '단어 나열' 형태로만 제공)
+            const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}, ContextWords: ${abstractWords}`;
 
             // 3. 청크 설정값 (Auto-Pilot 기본값 강제 적용)
             const chunkMinLength = "35";
