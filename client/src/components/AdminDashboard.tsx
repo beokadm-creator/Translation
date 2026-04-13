@@ -447,14 +447,14 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             // 1. 초록(Abstract)을 형태소/단어 위주로 단순화 (문장형 환각 방지)
             const abstractWords = activeSession?.abstract 
                 ? activeSession.abstract
-                    .replace(/[^a-zA-Z가-힣0-9\s,]/g, ' ') // 특수기호 제거
+                    .replace(/[^a-zA-Z가-힣0-9\s]/g, ' ') // 특수기호 및 쉼표 완전 제거 (순수 단어만)
                     .split(/\s+/) // 공백 기준으로 나눔
-                    .filter(w => w.length >= 2) // 2글자 이상인 의미 있는 단어만
-                    .slice(0, 15) // 상위 15개 핵심 단어만 추출
-                    .join(', ')
+                    .filter(w => w.length >= 3 && !['은', '는', '이', '가', '을', '를', '에', '의', '과', '와', '로', '으로', '에서', '부터', '까지', '입니다', '합니다', '한다', '했다', '이다'].includes(w)) // 3글자 이상 + 쓸데없는 조사/어미 제거
+                    .slice(0, 10) // 상위 10개 핵심 단어만
+                    .join(' ') // 쉼표 말고 띄어쓰기로 연결
                 : '';
 
-            // 2. Whisper용 단어장 (초록의 핵심 '단어'들만 포함하여 환각 없이 오인식만 방지)
+            // 2. Whisper용 단어장 (초록의 핵심 '단어'들만 띄어쓰기로 포함하여 환각 완전 방지)
             const speakerTerms = [activeSession?.speaker, activeSession?.affiliation, activeSession?.topic].filter(Boolean).join(', ');
             const customKeywords = [activeSession?.keywords, speakerTerms, abstractWords].filter(Boolean).join(', ');
 
