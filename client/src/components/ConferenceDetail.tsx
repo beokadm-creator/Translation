@@ -7,7 +7,6 @@ import type { ProjectSettings } from '../types';
 interface Conference {
   id: string;
   title: string;
-  accessCode: string;
   dates: string;
 }
 
@@ -17,10 +16,6 @@ const ConferenceDetail: React.FC = () => {
 
   const [conference, setConference] = useState<Conference | null>(null);
   const [projects, setProjects] = useState<ProjectSettings[]>([]);
-  const [accessCode, setAccessCode] = useState("");
-  const [accessRequired, setAccessRequired] = useState(false);
-  const [accessGranted, setAccessGranted] = useState(false);
-  const [accessError, setAccessError] = useState(false);
   const [status, setStatus] = useState<'loading' | 'error' | 'success'>('loading');
   useEffect(() => {
     const loadData = async () => {
@@ -58,17 +53,6 @@ const ConferenceDetail: React.FC = () => {
     loadData();
   }, [conferenceId]);
 
-  const handleAccessSubmit = () => {
-    if (!conference) return;
-
-    if (accessCode.toUpperCase() === conference.accessCode.toUpperCase()) {
-      setAccessGranted(true);
-      setAccessRequired(false);
-    } else {
-      setStatus('error');
-    }
-  };
-
   const handleProjectClick = (slug: string) => {
     navigate(`/${slug}`);
   };
@@ -100,109 +84,100 @@ const ConferenceDetail: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col p-4 md:p-8 font-sans selection:bg-blue-500/30">
-        <div className="max-w-4xl mx-auto w-full space-y-8 animate-in fade-in duration-500">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-white/5 pb-6 gap-4">
-                <div className="space-y-2">
-                    <button onClick={handleBack} className="text-xs text-gray-500 hover:text-gray-300 font-medium transition-colors flex items-center gap-2">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"></path></svg>
-                        Back to Conferences
-                    </button>
-                    <h1 className="text-2xl font-semibold tracking-tight text-gray-100 flex items-center gap-3">
-                        {conference?.title || 'Loading...'}
-                        <span className="px-2 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 font-bold text-[10px] uppercase tracking-widest flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
-                            Conference
-                        </span>
-                    </h1>
-                    <div className="text-sm text-gray-500 font-mono flex items-center gap-2">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect><line x1="16" x2="16" y1="2" y2="6"></line><line x1="8" x2="8" y1="2" y2="6"></line><line x1="3" x2="21" y1="10" y2="10"></line></svg>
-                        {conference?.dates}
-                    </div>
-                </div>
-            </div>
+    <div className="min-h-screen bg-gray-900 text-white">
+      {/* Header */}
+      <div className="border-b border-gray-800">
+        <div className="container mx-auto px-6 py-6">
+          <button
+            onClick={handleBack}
+            className="flex items-center text-gray-400 hover:text-white transition-colors mb-6"
+          >
+            <svg className="w-5 h-5 mr-2" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+              <path d="M15 19l-7-7 7-7"></path>
+            </svg>
+            Back to Conferences
+          </button>
 
-            {/* Content */}
-            <div>
-                {/* Access Code Gate */}
-                {accessRequired && !accessGranted && (
-                    <div className="max-w-sm mx-auto mt-12 bg-[#111111] p-8 rounded-xl border border-white/5 shadow-2xl space-y-6">
-                        <div className="text-center space-y-2">
-                            <h2 className="text-lg font-medium text-gray-100">Enter Access Code</h2>
-                            <p className="text-xs text-gray-500">This conference requires an access code.</p>
-                        </div>
-                        
-                        <div className="space-y-4">
-                            <input
-                                type="text"
-                                className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-4 py-3 text-center text-xl font-mono tracking-widest focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all placeholder-gray-600 text-gray-100"
-                                placeholder="CODE"
-                                value={accessCode}
-                                onChange={e => {
-                                    setAccessCode(e.target.value.toUpperCase());
-                                    setAccessError(false);
-                                }}
-                                onKeyDown={e => e.key === 'Enter' && handleAccessSubmit()}
-                            />
-                            
-                            {accessError && (
-                                <div className="text-red-400 text-xs flex items-center justify-center gap-2">
-                                    <span className="w-1 h-1 bg-red-400 rounded-full"></span>
-                                    Invalid Access Code
-                                </div>
-                            )}
+          <div className="mb-4">
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 mb-4">
+              <span className="w-2 h-2 rounded-full bg-blue-400 mr-2 animate-pulse"></span>
+              CONFERENCE
+            </span>
+          </div>
 
-                            <button
-                                onClick={handleAccessSubmit}
-                                className="w-full bg-white text-black hover:bg-gray-200 font-medium py-3 rounded-lg transition-colors text-sm"
-                            >
-                                Enter Conference
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Projects List */}
-                {(!accessRequired || accessGranted) && (
-                    <div className="space-y-6">
-                        <div className="flex items-center gap-2">
-                            <h2 className="text-sm font-medium text-gray-300 uppercase tracking-widest">Select a Hall</h2>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {projects.map(p => (
-                                <div 
-                                    key={p.slug}
-                                    onClick={() => handleProjectClick(p.slug)}
-                                    className="bg-[#111111] hover:bg-[#1a1a1a] border border-white/5 hover:border-white/20 p-6 rounded-xl cursor-pointer transition-all flex flex-col justify-between group h-32"
-                                >
-                                    <div className="flex justify-between items-start">
-                                        <h3 className="text-lg font-medium text-gray-200 group-hover:text-white transition-colors">{p.name}</h3>
-                                        <div className="text-gray-500 group-hover:text-white transition-colors">
-                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-2 mt-auto">
-                                        {(p.targetLanguages ?? []).map(l => (
-                                            <span key={l} className="text-[10px] uppercase bg-white/5 text-gray-400 px-2 py-0.5 rounded-md font-medium tracking-wider">
-                                                {l === 'ko' ? 'KO' : l === 'en' ? 'EN' : l === 'ja' ? 'JA' : l}
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        {projects.length === 0 && (
-                            <div className="text-center text-gray-500 py-12 border border-dashed border-white/10 rounded-xl bg-[#111111]/50 text-sm">
-                                No halls found for this conference.
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
+          <h1 className="text-4xl md:text-5xl font-black mb-2 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
+            {conference.title}
+          </h1>
+          <div className="flex items-center text-gray-400 mt-4">
+            <svg className="w-5 h-5 mr-2" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+              <path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+            </svg>
+            {conference.dates}
+          </div>
         </div>
+      </div>
+
+      {/* Content */}
+      <div className="container mx-auto px-6 py-16">
+        {/* Projects List */}
+        <div>
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-bold mb-4">Select a Hall</h2>
+            <p className="text-gray-400">Choose from available halls below</p>
+          </div>
+
+          {projects.length === 0 ? (
+            <div className="text-center py-20">
+              <div className="text-6xl mb-4">🏛️</div>
+              <h3 className="text-2xl font-bold text-gray-400 mb-2">No Halls Available</h3>
+              <p className="text-gray-500">Check back later for hall assignments</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
+              {projects.map((project) => (
+                <div
+                  key={project.slug}
+                  onClick={() => handleProjectClick(project.slug)}
+                  className="group relative bg-gray-800/50 backdrop-blur-sm border border-gray-700 hover:border-blue-500 rounded-2xl p-8 cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-blue-500/20"
+                >
+                  {/* Hover Effect */}
+                  <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
+
+                  {/* Content */}
+                  <div className="relative z-10">
+                    <h3 className="text-2xl font-bold text-white mb-3 group-hover:text-blue-400 transition-colors">
+                      {project.name}
+                    </h3>
+
+                    <div className="flex gap-2 mb-6">
+                      {project.targetLanguages.map((lang) => (
+                        <span
+                          key={lang}
+                          className="text-xs uppercase bg-gray-900 text-gray-300 px-3 py-1 rounded-full border border-gray-700"
+                        >
+                          {lang === 'ko' ? '🇰🇷 Korean' :
+                            lang === 'en' ? '🇺🇸 English' : lang}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-6 border-t border-gray-700">
+                      <span className="text-sm text-gray-400 group-hover:text-white transition-colors">
+                        Enter Hall
+                      </span>
+                      <div className="w-10 h-10 rounded-full bg-gray-900 group-hover:bg-gradient-to-r group-hover:from-blue-500 group-hover:to-purple-500 flex items-center justify-center transition-all duration-300">
+                        <svg className="w-5 h-5 text-gray-400 group-hover:text-white transform group-hover:translate-x-1 transition-transform" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                          <path d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

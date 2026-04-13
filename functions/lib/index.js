@@ -33,10 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.helloWorld = exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.synthesizeSpeech = exports.verifyPipeline = exports.onRefineRequest = exports.processAudio = void 0;
-// Version: Quality Stable v1
-const functions = __importStar(require("firebase-functions"));
-const https_1 = require("firebase-functions/v2/https");
+exports.deleteSessionAPI = exports.deleteProjectAPI = exports.deleteConferenceAPI = exports.createConferenceAPI = exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.synthesizeSpeech = exports.processAudio = void 0;
 const admin = __importStar(require("firebase-admin"));
 // Initialize Firebase Admin
 // Cloud Functions auto-initialize correctly. 
@@ -47,20 +44,16 @@ if (!admin.apps.length) {
 // Export functions
 var stt_1 = require("./stt");
 Object.defineProperty(exports, "processAudio", { enumerable: true, get: function () { return stt_1.processAudio; } });
-Object.defineProperty(exports, "onRefineRequest", { enumerable: true, get: function () { return stt_1.onRefineRequest; } });
-Object.defineProperty(exports, "verifyPipeline", { enumerable: true, get: function () { return stt_1.verifyPipeline; } });
 var tts_1 = require("./tts");
 Object.defineProperty(exports, "synthesizeSpeech", { enumerable: true, get: function () { return tts_1.synthesizeSpeech; } });
 var diagnose_1 = require("./diagnose"); // New Diagnostic Tool
 Object.defineProperty(exports, "diagnoseSystem", { enumerable: true, get: function () { return diagnose_1.diagnoseSystem; } });
-// export { translateNewSegment } from "./translate"; // DEPRECATED: Moved to inline processing in stt.ts
 var archive_1 = require("./archive");
 Object.defineProperty(exports, "archiveSession", { enumerable: true, get: function () { return archive_1.archiveSession; } });
 var purge_1 = require("./purge");
 Object.defineProperty(exports, "purgeSession", { enumerable: true, get: function () { return purge_1.purgeSession; } });
-// Start writing functions
-// https://firebase.google.com/docs/functions/typescript
-exports.helloWorld = (0, https_1.onRequest)((request, response) => {
-    functions.logger.info("Hello logs!", { structuredData: true });
-    response.send("Hello from Firebase!");
-});
+var api_1 = require("./api");
+Object.defineProperty(exports, "createConferenceAPI", { enumerable: true, get: function () { return api_1.createConferenceAPI; } });
+Object.defineProperty(exports, "deleteConferenceAPI", { enumerable: true, get: function () { return api_1.deleteConferenceAPI; } });
+Object.defineProperty(exports, "deleteProjectAPI", { enumerable: true, get: function () { return api_1.deleteProjectAPI; } });
+Object.defineProperty(exports, "deleteSessionAPI", { enumerable: true, get: function () { return api_1.deleteSessionAPI; } });

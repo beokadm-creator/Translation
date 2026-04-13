@@ -1,4 +1,4 @@
-﻿// Version: v12.3 (Stable - OpenAI Only)
+// Version: v12.3 (Stable - OpenAI Only)
 // STT:         gpt-4o-transcribe  (language + domain keyword prompt)
 // Translation: gpt-4o-mini        (JSON strict, temperature 0)
 // KEY FLOW:
@@ -97,6 +97,71 @@ const isGarbage = (text: string, _originalText?: string, promptText?: string): b
     return false
 }
 
+interface STTResult {
+    text: string;
+    ms: number;
+    provider: string;
+}
+
+interface STTProvider {
+    name: string;
+    transcribe(audioStream: Readable, sourceLang: string, prompt: string): Promise<STTResult>;
+}
+
+class OpenAISTTProvider implements STTProvider {
+    name = "openai";
+    async transcribe(audioStream: Readable, sourceLang: string, prompt: string): Promise<STTResult> {
+        const tStart = Date.now();
+        const stt = await getOpenAI().audio.transcriptions.create({
+            file: audioStream as any, model: "gpt-4o-transcribe", language: sourceLang,
+            prompt: prompt, temperature: 0,
+        });
+        return { text: (stt?.text || "").trim(), ms: Date.now() - tStart, provider: this.name };
+    }
+}
+
+class DeepgramSTTProvider implements STTProvider {
+    name = "deepgram";
+    async transcribe(_audioStream: Readable, _sourceLang: string, _prompt: string): Promise<STTResult> {
+        throw new Error("Deepgram not implemented yet");
+    }
+}
+
+class STTFactory {
+    static async executeWithFallback(
+        audioBuffer: Buffer, 
+        sourceLang: string, 
+        prompt: string,
+        primaryEngineName: string = 'openai',
+        fallbackEngineName: string = 'deepgram'
+    ): Promise<STTResult> {
+        
+        const getProvider = (name: string): STTProvider => {
+            if (name === 'deepgram') return new DeepgramSTTProvider();
+            return new OpenAISTTProvider();
+        };
+
+        const primary = getProvider(primaryEngineName);
+        const fallback = getProvider(fallbackEngineName);
+
+        try {
+            const stream = Readable.from(audioBuffer) as Readable & { path: string };
+            stream.path = "audio.webm";
+            return await primary.transcribe(stream, sourceLang, prompt);
+        } catch (e: any) {
+            functions.logger.error("[STT] Primary engine failed, attempting fallback", { error: e.message });
+            try {
+                const streamFallback = Readable.from(audioBuffer) as Readable & { path: string };
+                streamFallback.path = "audio.webm";
+                return await fallback.transcribe(streamFallback, sourceLang, prompt);
+            } catch (fallbackError: any) {
+                functions.logger.error("[STT] Fallback engine also failed", { error: fallbackError.message });
+                throw fallbackError;
+            }
+        }
+    }
+}
+
 // ── 번역 파이프라인 ───────────────────────────────────────────────────────────
 
 // 번역 결과 유효성 검사 (필수 target 필드가 모두 채워졌는지 확인)
@@ -123,13 +188,24 @@ const buildTranslationResult = (
     }
 }
 
-const translateWithOpenAI = async (
-    rawText: string,
-    sourceLang: string,
-    previousContext: string,
-    sessionContext: string
-) : Promise<{ refined: string; ko: string; en: string; isMedical: boolean } | null> => {
-    try {
+interface TranslationResult {
+    refined: string;
+    ko: string;
+    en: string;
+    isMedical: boolean;
+    provider: string;
+    ms: number;
+}
+
+interface TranslationProvider {
+    name: string;
+    translate(rawText: string, sourceLang: string, previousContext: string, sessionContext: string): Promise<TranslationResult | null>;
+}
+
+class OpenAITranslationProvider implements TranslationProvider {
+    name = "openai";
+    async translate(rawText: string, sourceLang: string, previousContext: string, sessionContext: string): Promise<TranslationResult | null> {
+        const tStart = Date.now();
         const openai = getOpenAI()
         const contextLine = sanitize(sessionContext).slice(0, 180)
         const previousLine = sanitize(previousContext.split(' / ').slice(-1)[0] || '').slice(0, 80)
@@ -145,11 +221,11 @@ const translateWithOpenAI = async (
         ].filter(Boolean).join('\n')
 
         const completion = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            temperature: 0,
-            max_tokens: 200,
-            response_format: { type: "json_object" },
-            messages: [
+        model: "gpt-4o-mini",
+        temperature: 0,
+        max_tokens: 1000,
+        response_format: { type: "json_object" },
+        messages: [
                 {
                     role: "system",
                     content: "You refine live medical speech-to-text output and produce Korean and English translations in strict JSON."
@@ -167,35 +243,59 @@ const translateWithOpenAI = async (
         const data = JSON.parse(content) as Record<string, unknown>
         if (!validateTranslation(data, ['ko', 'en'])) return null
 
-        return buildTranslationResult(data, sourceLang, rawText)
-    } catch (e: any) {
-        functions.logger.warn("[Translate][OpenAI] Failed", {
-            err: String(e).slice(0, 180)
-        })
-        return null
+        const result = buildTranslationResult(data, sourceLang, rawText);
+        return { ...result, provider: this.name, ms: Date.now() - tStart };
     }
 }
 
-const translateWithFallback = async (
-    rawText: string,
-    sourceLang: string,
-    previousContext: string,
-    sessionContext: string
-): Promise<{ refined: string; ko: string; en: string; isMedical: boolean }> => {
-    const tStart = Date.now()
-    const result = await translateWithOpenAI(rawText, sourceLang, previousContext, sessionContext)
-
-    if (result) {
-        functions.logger.info("[Translate][OpenAI] OK", {
-            ms: Date.now() - tStart,
-            srcLen: rawText.length
-        })
-        return result
+class ClaudeTranslationProvider implements TranslationProvider {
+    name = "claude";
+    async translate(_rawText: string, _sourceLang: string, _previousContext: string, _sessionContext: string): Promise<TranslationResult | null> {
+        throw new Error("Claude not implemented yet");
     }
+}
 
-    functions.logger.error("[Translate][OpenAI] Failed, raw text fallback", { input: rawText.slice(0, 50) })
-    const fallback = sanitize(rawText)
-    return { refined: fallback, ko: fallback, en: fallback, isMedical: false }
+class TranslationFactory {
+    static async executeWithFallback(
+        rawText: string,
+        sourceLang: string,
+        previousContext: string,
+        sessionContext: string,
+        primaryEngineName: string = 'openai',
+        fallbackEngineName: string = 'claude'
+    ): Promise<{ refined: string; ko: string; en: string; isMedical: boolean }> {
+        
+        const getProvider = (name: string): TranslationProvider => {
+            if (name === 'claude') return new ClaudeTranslationProvider();
+            return new OpenAITranslationProvider();
+        };
+
+        const primary = getProvider(primaryEngineName);
+        const fallback = getProvider(fallbackEngineName);
+
+        try {
+            const result = await primary.translate(rawText, sourceLang, previousContext, sessionContext);
+            if (result) {
+                functions.logger.info(`[Translate][${result.provider}] OK`, { ms: result.ms, srcLen: rawText.length });
+                return result;
+            }
+        } catch (e: any) {
+            functions.logger.warn(`[Translate][${primary.name}] Failed, attempting fallback`, { err: String(e).slice(0, 180) });
+            try {
+                const fbResult = await fallback.translate(rawText, sourceLang, previousContext, sessionContext);
+                if (fbResult) {
+                    functions.logger.info(`[Translate][${fbResult.provider}] OK (Fallback)`, { ms: fbResult.ms, srcLen: rawText.length });
+                    return fbResult;
+                }
+            } catch (fallbackErr: any) {
+                functions.logger.warn(`[Translate][${fallback.name}] Fallback failed`, { err: String(fallbackErr).slice(0, 180) });
+            }
+        }
+
+        functions.logger.error("[Translate] All engines failed, raw text fallback", { input: rawText.slice(0, 50) });
+        const safeRaw = sanitize(rawText);
+        return { refined: safeRaw, ko: safeRaw, en: safeRaw, isMedical: false };
+    }
 }
 
 // ── OpenAI 클라이언트 ─────────────────────────────────────────────────────────
@@ -238,106 +338,47 @@ export const processAudio = functions
             const auth = (req.headers.authorization || "").toString()
             if (!auth.startsWith("Bearer ")) { res.status(401).json({ success: false }); return }
 
-            const projectId = (req.query.projectId || "").toString()
-            const sourceLabel = (req.query.sourceLabel || "").toString()
-            const queryLang = (req.query.sourceLang || "").toString()
-            if (!projectId) { res.status(400).json({ success: false }); return }
+            const projectId = (req.query.projectId || "").toString();
+        const sourceLabel = (req.query.sourceLabel || "").toString();
+        const queryLang = (req.query.sourceLang || "").toString();
 
-            let buf: Buffer | null = null
-            const raw = (req as Request & { rawBody?: Buffer }).rawBody as Buffer | undefined
-            if (raw && Buffer.isBuffer(raw)) buf = raw
-            else if (Buffer.isBuffer(req.body)) buf = req.body as Buffer
-            else if (typeof req.body === "string") buf = Buffer.from(req.body, "binary")
+        let buf: Buffer | null = null;
+        const raw = (req as Request & { rawBody?: Buffer }).rawBody as Buffer | undefined;
+        if (raw && Buffer.isBuffer(raw)) buf = raw;
+        else if (Buffer.isBuffer(req.body)) buf = req.body as Buffer;
+        else if (typeof req.body === "string") buf = Buffer.from(req.body, "binary");
 
-            if (!buf || buf.length === 0) { res.status(400).json({ success: false }); return }
-            if (buf.length < 2000) { res.status(200).json({ success: false, error: "TooSmall" }); return }
+        if (!buf || buf.length === 0) { res.status(400).json({ success: false }); return; }
+        if (buf.length < 2000) { res.status(200).json({ success: false, error: "TooSmall" }); return; }
 
-            const projectRef = admin.database().ref(`projects/${projectId}`)
-            let sourceLang = queryLang || 'ko' // Use query param if provided, otherwise default 'ko'
-            let activeSessionId: string | null = null
-            let sessionContext = ""
-            let previousContext = ""
-            let customKeywords = ""
-            let minLength = 35
-            let timeoutMs = 4500
-            let sentenceEnd = true
+        if (!projectId) { res.status(400).json({ success: false }); return; }
 
-            // 설정 로드
-            try {
-                const [activeSnap, stateSnap, chunkSnap, projectSettingsSnap] = await Promise.all([
-                    projectRef.child('activeSessionId').get(),
-                    projectRef.child('state').get(),
-                    projectRef.child('settings/chunk').get(),
-                    projectRef.child('settings').get()
-                ])
+        const projectRef = admin.database().ref(`projects/${projectId}`);
+        const sourceLang = queryLang || 'ko';
 
-                if (activeSnap.exists()) {
-                    // ── 우선순위 1: 활성 세션의 sourceLanguage ─────────────────────
-                    activeSessionId = activeSnap.val()
-                    functions.logger.info(`[STT] Active Session: ${activeSessionId}`)
-                    const sSnap = await projectRef.child(`sessions/${activeSessionId}`).get()
-                    if (sSnap.exists()) {
-                        const s = sSnap.val()
-                        sourceLang = s.sourceLanguage || sourceLang
-                        functions.logger.info(`[STT] Session language: ${sourceLang}`)
-                        const affiliationStr = s.affiliation ? `, Affiliation: ${s.affiliation}` : ''
-                        const abstractStr = s.abstract ? `, Abstract: ${s.abstract}` : ''
-                        const keywordsStr = s.keywords ? `, Keywords: ${s.keywords}` : ''
-                        sessionContext = `Speaker: ${s.speaker}${affiliationStr}, Topic: ${s.topic}${abstractStr}${keywordsStr}`
-                        // Whisper prompt: 연자명·소속·주제·키워드·초록(60자) 포함 → 고유명사·도메인 용어 오인식 방지
-                        const speakerTerms = [s.speaker, s.affiliation, s.topic].filter(Boolean).join(', ')
-                        const abstractSnippet = s.abstract ? s.abstract.slice(0, 60) : ''
-                        customKeywords = [s.keywords, speakerTerms, abstractSnippet].filter(Boolean).join(', ')
-                    } else {
-                        functions.logger.warn(`[STT] Active Session ${activeSessionId} data missing in DB`)
-                    }
-                } else {
-                    // ── 우선순위 2: 세션 없을 때 projectSettings targetLanguages 역추론 ──
-                    // queryLang(클라이언트 전달값)이 이미 초기값이므로 여기서만 보정
-                    const projectSettings = projectSettingsSnap.val() || {}
-                    const tgt = projectSettings.targetLanguages
-                    const tgtArr: string[] = Array.isArray(tgt) ? tgt : (tgt ? [tgt] : [])
-                    if (tgtArr.includes('ko') && !tgtArr.includes('en')) {
-                        sourceLang = 'en' // 타겟이 한국어면 소스는 영어
-                    } else if (tgtArr.includes('en') && !tgtArr.includes('ko')) {
-                        sourceLang = 'ko' // 타겟이 영어면 소스는 한국어
-                    }
-                    // 그 외(양방향이거나 타겟 미설정): queryLang || 'ko' 유지
-                    functions.logger.info(`[STT] No active session. Using lang: ${sourceLang}`)
-                }
-                if (chunkSnap.exists()) {
-                    const sett = chunkSnap.val()
-                    if (sett.minLength !== undefined) minLength = Math.max(10, Number(sett.minLength))
-                    if (sett.timeoutMs !== undefined) timeoutMs = Math.max(1000, Number(sett.timeoutMs))
-                    if (sett.sentenceEnd !== undefined) sentenceEnd = Boolean(sett.sentenceEnd)
-                }
-                if (stateSnap.exists()) {
-                    const st = stateSnap.val()
-                    const list: string[] = Array.isArray(st.lastRefinedList) ? st.lastRefinedList : []
-                    previousContext = list.slice(-2).join(' / ')
-                }
-            } catch { /* 무시 */ }
+        // 3. 클라이언트 헤더에서 메타데이터 추출 (2단계 최적화: DB Read 제거)
+        const activeSessionId = (req.headers['x-active-session-id'] || "").toString();
+        const customKeywords = decodeURIComponent((req.headers['x-custom-keywords'] || "").toString());
+        const sessionContext = decodeURIComponent((req.headers['x-session-context'] || "").toString());
+        const minLength = Number(req.headers['x-chunk-min-length'] || 35);
+        const timeoutMs = Number(req.headers['x-chunk-timeout-ms'] || 5000);
+        const sentenceEnd = (req.headers['x-chunk-sentence-end'] || "true") === "true";
+        const primarySTT = (req.headers['x-stt-primary'] || "openai").toString();
+        const fallbackSTT = (req.headers['x-stt-fallback'] || "deepgram").toString();
+        const primaryTrans = (req.headers['x-trans-primary'] || "openai").toString();
+        const fallbackTrans = (req.headers['x-trans-fallback'] || "claude").toString();
 
-            // ── STEP 1: OpenAI STT ────────────────────────────────────────────
-            let openai = getOpenAI()
-            const audioStream = Readable.from(buf) as Readable & { path: string }
-            audioStream.path = "audio.webm"
-
-            const tWhisper = Date.now()
+        // ── STEP 1: AI STT ────────────────────────────────────────────
             const basePrompt = sourceLang === 'ko' ? DENTAL_PROMPT_KO : DENTAL_PROMPT_EN;
             const whisperPrompt = customKeywords ? `${basePrompt}, ${customKeywords}` : basePrompt;
 
-            const stt = await openai.audio.transcriptions.create({
-                file: audioStream, model: "gpt-4o-transcribe", language: sourceLang,
-                prompt: whisperPrompt, temperature: 0,
-            })
-            const whisperMs = Date.now() - tWhisper
-            functions.logger.info("[Whisper]", { ms: whisperMs })
+            const sttResult = await STTFactory.executeWithFallback(buf, sourceLang, whisperPrompt, primarySTT, fallbackSTT);
+            functions.logger.info(`[STT][${sttResult.provider}]`, { ms: sttResult.ms });
 
             // HealthDashboard WHISPER 상태 표시용 타임스탬프 기록 (비차단)
-            projectRef.child('status/services/openai').update({ ts: Date.now() }).catch(() => {})
+            projectRef.child(`status/services/${sttResult.provider}`).update({ ts: Date.now() }).catch(() => {})
 
-            const sttText = (stt?.text || "").trim()
+            const sttText = sttResult.text;
             const rawText = sanitize(sttText)
 
             if (rawText.length < 2 || isGarbage(rawText, sttText, whisperPrompt)) {
@@ -364,9 +405,11 @@ export const processAudio = functions
             // ── STEP 3: 버퍼링 및 번역 (RTDB Transaction - Race condition 완전 제거) ──
             // transaction()은 read→modify→write를 서버 레벨에서 원자적으로 처리.
             // 동시 요청이 있으면 RTDB가 자동으로 재시도하여 데이터 유실 없음.
-            let flushData: { targetId: string; idsToDelete: string[]; bufferText: string } | null = null
+            let flushData: { targetId: string; idsToDelete: string[]; bufferText: string; previousContext: string } | null = null
 
             await projectRef.child('state').transaction((currentState: Record<string, unknown> | null) => {
+                // 트랜잭션 재시도(Retry) 시 이전 시도의 flushData를 반드시 초기화하여 덮어쓰기 방지
+                flushData = null;
                 const st = (currentState || {}) as Record<string, unknown>
                 const currentBufferText = ((st.bufferText as string) || '').toString()
                 const currentBufferIds: string[] = Array.isArray(st.bufferIds) ? (st.bufferIds as string[]) : []
@@ -374,7 +417,13 @@ export const processAudio = functions
                 // 버퍼가 비어있으면 지금부터 타이머 시작
                 const lastFlushTime = currentBufferIds.length === 0
                     ? Date.now()
-                    : Number(st.lastFlushTime || st.lastGeminiTime || Date.now())
+                    : Number(st.lastFlushTime || Date.now());
+
+                // ── 2단계 최적화: previousContext 지연 읽기 (Lazy Read) ──
+                // 버퍼 상태에서 lastRefinedList를 추출하여 flushData에 함께 넘김
+                let previousContext = "";
+                const list: string[] = Array.isArray(st.lastRefinedList) ? st.lastRefinedList : [];
+                previousContext = list.slice(-2).join(' / ');
 
                 const newBufferText = currentBufferText ? currentBufferText + ' ' + rawText : rawText
                 const newBufferIds = [...currentBufferIds, id]
@@ -389,8 +438,9 @@ export const processAudio = functions
                     flushData = {
                         targetId: newBufferIds[0],
                         idsToDelete: newBufferIds.slice(1),
-                        bufferText: newBufferText
-                    }
+                        bufferText: newBufferText,
+                        previousContext: previousContext
+                    } as any
                     return { bufferText: '', bufferIds: [], lastFlushTime: Date.now(), lastRefinedList: (st.lastRefinedList as string[]) || [] }
                 } else {
                     // BUFFERING: 현재 세그먼트 추가
@@ -399,10 +449,10 @@ export const processAudio = functions
             })
 
             if (flushData) {
-                const { targetId, idsToDelete, bufferText: flushText } = flushData as { targetId: string; idsToDelete: string[]; bufferText: string }
+                const { targetId, idsToDelete, bufferText: flushText, previousContext } = flushData as { targetId: string; idsToDelete: string[]; bufferText: string; previousContext: string }
                 try {
-                    const { refined, ko, en, isMedical } = await translateWithFallback(
-                        flushText, sourceLang, previousContext, sessionContext
+                    const { refined, ko, en, isMedical } = await TranslationFactory.executeWithFallback(
+                        flushText, sourceLang, previousContext, sessionContext, primaryTrans, fallbackTrans
                     )
                     const updates: Record<string, unknown> = {}
                     const base = `projects/${projectId}/stream/${targetId}`
@@ -417,22 +467,30 @@ export const processAudio = functions
                         updates[`projects/${projectId}/stream/${pid}/status`] = "merged"
                     }
 
-                    // context 리스트 업데이트
-                    try {
-                        const listSnap = await projectRef.child('state/lastRefinedList').get()
-                        const list: string[] = listSnap.exists() ? listSnap.val() : []
-                        updates[`projects/${projectId}/state/lastRefinedList`] = [...list, refined].slice(-5)
-                    } catch { }
+                    // ── 3단계 디테일 튜닝: 문맥(lastRefinedList) 업데이트 시 Race Condition 방지를 위한 개별 트랜잭션 처리 ──
+                    // 기존의 updates 객체 할당(updates[`.../lastRefinedList`] = ...) 방식은 
+                    // 병렬 번역 시 서로 덮어쓰는 문제가 있으므로, 별도의 트랜잭션으로 안전하게 꼬리물기 저장합니다.
+                    await projectRef.child('state/lastRefinedList').transaction((currentList: any) => {
+                        const list: string[] = Array.isArray(currentList) ? currentList : [];
+                        return [...list, refined].slice(-5);
+                    });
 
+                    // 나머지 일반 상태값들은 기존처럼 일괄 업데이트 (Multi-path)
                     await admin.database().ref().update(updates)
-                } catch {
-                    // 번역 실패 시 버퍼된 모든 세그먼트를 "final"로 복구
+                } catch (e: any) {
+                    // ── 3단계 디테일 튜닝: 번역 실패 및 에러 복구 시 확실한 로깅 및 무한 로딩 방지 ──
+                    functions.logger.error("[processAudio] Translation or update failed", { error: e.message || e })
+                    
                     const errorFixes: Record<string, unknown> = {}
                     errorFixes[`projects/${projectId}/stream/${targetId}/status`] = "final"
                     for (const pid of idsToDelete) {
                         errorFixes[`projects/${projectId}/stream/${pid}/status`] = "final"
                     }
-                    await admin.database().ref().update(errorFixes)
+                    
+                    // 복구 업데이트 자체도 실패할 수 있으므로 catch를 달아 Cloud Function 크래시를 방지
+                    await admin.database().ref().update(errorFixes).catch(err => {
+                        functions.logger.error("[processAudio] Fallback DB update failed", { error: err.message || err })
+                    })
                 }
             }
             // flushData가 null이면 버퍼링 중 → transaction이 이미 상태 저장 완료
@@ -441,18 +499,3 @@ export const processAudio = functions
             try { res.status(500).json({ success: false, error: e.message }) } catch { }
         }
     })
-
-// ── Legacy Triggers (Disabled) ───────────────────────────────────────────────
-export const onRefineRequest = functions.database.ref("projects/{projectId}/stream/{dataId}").onCreate(() => null)
-
-// ── Remaster (미구현 stub - 비활성화) ────────────────────────────────────────
-// remasterSession pubsub은 구현체가 없으므로 비용/로그 낭비를 막기 위해 비활성화.
-// 추후 실제 리마스터 로직 구현 시 아래 주석을 해제할 것.
-// export const remasterSession = functions.pubsub.schedule("every 2 minutes").onRun(() => runRemasterLogic())
-
-// ── 진단 툴 ─────────────────────────────────────────────────────────────────
-export const verifyPipeline = functions.https.onRequest(async (_req, res) => {
-    res.set("Access-Control-Allow-Origin", "*")
-    const result = await translateWithFallback("임플란트 픽스처를 식립했습니다.", "ko", "", "Live Medical Lecture")
-    res.json({ success: true, version: "v12.3_openai_only", stt: "gpt-4o-transcribe", translation: "gpt-4o-mini", result })
-})

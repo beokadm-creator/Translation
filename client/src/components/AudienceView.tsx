@@ -108,7 +108,7 @@ const AudienceView: React.FC = () => {
     }, [currentSession?.id]);
 
     // --- Stream State ---
-    const { streamData } = useProjectStream(activeProjectId, { subscribe: viewMode === 'live' });
+    const { streamData, loadOlderMessages, hasMore } = useProjectStream(activeProjectId, { subscribe: viewMode === 'live' });
     type SegmentMap = Record<string, {
         original?: string;
         refined?: string;
@@ -189,9 +189,32 @@ const AudienceView: React.FC = () => {
         playNext();
     }, [stopAudio, playNext, segmentsOrder, segmentsMap]);
 
+    // 5. Scroll & Paging Logic
     useEffect(() => {
+        // 새로운 메시지가 도착하거나 처음 로드될 때 스크롤을 맨 아래로
         scrollToBottom();
-    }, [segmentsOrder, scrollToBottom]);
+    }, [segmentsOrder.length, scrollToBottom]);
+
+    // 무한 스크롤 트리거 (Intersection Observer)
+    const topObserverRef = React.useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+        if (!hasMore || viewMode !== 'live') return;
+        
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0].isIntersecting) {
+                    loadOlderMessages();
+                }
+            },
+            { threshold: 0.1 }
+        );
+
+        if (topObserverRef.current) {
+            observer.observe(topObserverRef.current);
+        }
+
+        return () => observer.disconnect();
+    }, [hasMore, viewMode, loadOlderMessages]);
 
     // 연속재생 중 신규 세그먼트 자동 추가 (클릭으로 시작된 재생 중에만)
     // TTS 활성화 단독으로는 재생 시작하지 않음 — 반드시 세그먼트 클릭으로 시작
@@ -265,41 +288,39 @@ const AudienceView: React.FC = () => {
     // 2. Data Handling
     useEffect(() => {
         if (viewMode === 'live') {
-            if (!streamData) {
-                return;
-            }
-            Promise.resolve().then(() => {
-                setSegmentsMap(prev => {
-                    const next = { ...prev };
-                    let changed = false;
-                    Object.keys(next).forEach(key => {
-                        if (!activeSessionId || next[key].sessionId !== activeSessionId) {
-                            delete next[key];
-                            changed = true;
-                        }
-                    });
-                    Object.entries(streamData).forEach(([k, v]: [string, unknown]) => {
-                        const segment = v as SegmentMap[string];
-                        if (!activeSessionId || segment.sessionId !== activeSessionId) return;
-                        if (isGarbage(segment.original || "")) {
-                            if (next[k]) { delete next[k]; changed = true; }
-                            return;
-                        }
-                        if (segment.mergedIds && Array.isArray(segment.mergedIds)) {
-                            segment.mergedIds.forEach((pid: string) => {
-                                if (next[pid]) { delete next[pid]; changed = true; }
-                            });
-                        }
-                        if (JSON.stringify(prev[k]) !== JSON.stringify(segment)) {
-                            next[k] = segment;
-                            changed = true;
-                        }
-                    });
-                    return changed ? next : prev;
+            if (!streamData) return;
+            
+            setSegmentsMap(prev => {
+                const next = { ...prev };
+                let changed = false;
+                
+                Object.entries(streamData).forEach(([k, v]: [string, unknown]) => {
+                    const segment = v as SegmentMap[string];
+                    if (!activeSessionId || segment.sessionId !== activeSessionId) return;
+                    
+                    // 가비지 처리
+                    if (isGarbage(segment.original || "")) {
+                        if (next[k]) { delete next[k]; changed = true; }
+                        return;
+                    }
+                    
+                    // 병합된 이전 세그먼트 삭제
+                    if (segment.mergedIds && Array.isArray(segment.mergedIds)) {
+                        segment.mergedIds.forEach((pid: string) => {
+                            if (next[pid]) { delete next[pid]; changed = true; }
+                        });
+                    }
+                    
+                    // 새로운 데이터 추가 또는 갱신
+                    if (JSON.stringify(prev[k]) !== JSON.stringify(segment)) {
+                        next[k] = segment;
+                        changed = true;
+                    }
                 });
+                return changed ? next : prev;
             });
         } else if (viewMode === 'archive' && archiveSessionId) {
-            Promise.resolve().then(() => setSegmentsMap({}));
+            setSegmentsMap({});
             get(ref(database, `projects/${activeProjectId}/sessions/${archiveSessionId}/transcript`)).then(snap => {
                 if (snap.exists()) {
                     setSegmentsMap(snap.val());
@@ -311,8 +332,7 @@ const AudienceView: React.FC = () => {
     }, [streamData, viewMode, archiveSessionId, activeProjectId, activeSessionId]);
 
     useEffect(() => {
-        const sorted = Object.keys(segmentsMap).sort((a, b) => Number(a.split('_')[0]) - Number(b.split('_')[0]));
-        Promise.resolve().then(() => setSegmentsOrder(sorted));
+        setSegmentsOrder(Object.keys(segmentsMap).sort((a, b) => Number(a.split('_')[0]) - Number(b.split('_')[0])));
     }, [segmentsMap]);
 
     // 3. Time-based Force Final Logic
@@ -599,6 +619,13 @@ const AudienceView: React.FC = () => {
             {/* Main Subtitles Area */}
             <div className="flex-1 overflow-y-auto p-6 md:p-12 scroll-smooth">
                 <div className="max-w-5xl mx-auto space-y-6">
+
+                    {/* 무한 스크롤(페이징) 트리거 요소 */}
+                    {viewMode === 'live' && hasMore && (
+                        <div ref={topObserverRef} className="w-full h-8 flex items-center justify-center text-gray-500 text-sm">
+                            이전 메시지 불러오는 중...
+                        </div>
+                    )}
 
                     {/* Archive — No Transcript */}
                     {viewMode === 'archive' && segmentsOrder.length === 0 && (

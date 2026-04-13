@@ -2,10 +2,10 @@ import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { rtdb as database, auth } from '../firebase';
 import { ref, onValue, push, set, update, get } from 'firebase/database';
 import { useParams } from 'react-router-dom';
+import AudioVisualizer from './AudioVisualizer';
 import TextItem from './TextItem';
 import { useProjectStream } from '../hooks/useProjectStream';
 import HealthDashboard from './HealthDashboard';
-import { VADRecorder } from '../utils/vad';
 import type { StreamSegment } from '../types';
 
 
@@ -55,23 +55,22 @@ const AdminDashboard: React.FC = () => {
         fontFamily: string;
         typingSpeed: number;
         bottomOffset: number;
-        minLength: number;
-        timeoutMs: number;
-        sentenceEnd: boolean;
-        vadMaxCutMs: number;
-        recordMode: 'chunk' | 'vad';
         hideRaw: boolean;
-        chunkInterval: number;
-    }
+        primarySTT: 'openai' | 'deepgram';
+        fallbackSTT: 'openai' | 'deepgram';
+        primaryTrans: 'openai' | 'claude';
+        fallbackTrans: 'openai' | 'claude';
+}
 
-    const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
-        fontSize: 48, fontColor: '#ffffff', fontWeight: 'bold', bgColor: '#000000', bgOpacity: 0.6,
-        padding: 40, textEffect: 'shadow', align: 'center',
-        displayStyle: 'youtube', letterSpacing: 0, maxLines: 2, lineHeight: 1.5,
-        fontFamily: 'sans-serif', typingSpeed: 35, bottomOffset: 60,
-        minLength: 20, timeoutMs: 3000, sentenceEnd: true, vadMaxCutMs: 15000, chunkInterval: 4000,
-        recordMode: 'chunk', hideRaw: true,
-    });
+const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
+    fontSize: 48, fontColor: '#ffffff', fontWeight: 'bold', bgColor: '#000000', bgOpacity: 0.6,
+    padding: 40, textEffect: 'shadow', align: 'center',
+    displayStyle: 'youtube', letterSpacing: 0, maxLines: 2, lineHeight: 1.5,
+    fontFamily: 'sans-serif', typingSpeed: 35, bottomOffset: 60,
+    hideRaw: true,
+    primarySTT: 'openai', fallbackSTT: 'deepgram',
+    primaryTrans: 'openai', fallbackTrans: 'claude'
+});
 
     // Load Project Settings
     useEffect(() => {
@@ -80,53 +79,54 @@ const AdminDashboard: React.FC = () => {
         get(ref(database, `projects/${activeProjectId}/settings`)).then(snap => {
             if (snap.exists()) {
                 const val = snap.val();
-                // Merge overlay and chunk settings flatly for easier state management, or keep structure
-                // Let's keep it flat in state for simplicity, but save structurally
                 setProjectSettings((prev) => ({
-                    ...prev,
-                    ...(val.overlay || {}),
-                    ...(val.chunk || {}),
-                    vadMaxCutMs: val.chunk?.vadMaxCutMs || 15000,
-                    chunkInterval: val.chunk?.chunkInterval || 4000,
-                    recordMode: val.recordMode || 'chunk',
-                    hideRaw: val.hideRaw !== undefined ? val.hideRaw : true,
-                }));
+                ...prev,
+                ...(val.overlay || {}),
+                hideRaw: val.hideRaw !== undefined ? val.hideRaw : true,
+                primarySTT: val.ai?.primarySTT || 'openai',
+                fallbackSTT: val.ai?.fallbackSTT || 'deepgram',
+                primaryTrans: val.ai?.primaryTrans || 'openai',
+                fallbackTrans: val.ai?.fallbackTrans || 'claude',
+            }));
             }
         });
     }, [activeProjectId]);
 
     const saveProjectSettings = async () => {
-        const updates: Record<string, unknown> = {};
-        updates[`projects/${activeProjectId}/settings/overlay`] = {
-            fontSize: projectSettings.fontSize,
-            fontColor: projectSettings.fontColor,
-            fontWeight: projectSettings.fontWeight,
-            bgColor: projectSettings.bgColor,
-            bgOpacity: projectSettings.bgOpacity,
-            padding: projectSettings.padding,
-            textEffect: projectSettings.textEffect,
-            align: projectSettings.align,
-            displayStyle: projectSettings.displayStyle,
-            letterSpacing: projectSettings.letterSpacing,
-            maxLines: projectSettings.maxLines,
-            lineHeight: projectSettings.lineHeight,
-            fontFamily: projectSettings.fontFamily,
-            typingSpeed: projectSettings.typingSpeed,
-            bottomOffset: projectSettings.bottomOffset,
-        };
-        updates[`projects/${activeProjectId}/settings/chunk`] = {
-            minLength: Number(projectSettings.minLength),
-            timeoutMs: Number(projectSettings.timeoutMs),
-            sentenceEnd: Boolean(projectSettings.sentenceEnd),
-            vadMaxCutMs: Number(projectSettings.vadMaxCutMs),
-            chunkInterval: Number(projectSettings.chunkInterval)
-        };
-        updates[`projects/${activeProjectId}/settings/recordMode`] = projectSettings.recordMode;
-        updates[`projects/${activeProjectId}/settings/hideRaw`] = Boolean(projectSettings.hideRaw);
+        try {
+            const updates: Record<string, unknown> = {};
+            updates[`projects/${activeProjectId}/settings/overlay`] = {
+                fontSize: projectSettings.fontSize,
+                fontColor: projectSettings.fontColor,
+                fontWeight: projectSettings.fontWeight,
+                bgColor: projectSettings.bgColor,
+                bgOpacity: projectSettings.bgOpacity,
+                padding: projectSettings.padding,
+                textEffect: projectSettings.textEffect,
+                align: projectSettings.align,
+                displayStyle: projectSettings.displayStyle,
+                letterSpacing: projectSettings.letterSpacing,
+                maxLines: projectSettings.maxLines,
+                lineHeight: projectSettings.lineHeight,
+                fontFamily: projectSettings.fontFamily,
+                typingSpeed: projectSettings.typingSpeed,
+                bottomOffset: projectSettings.bottomOffset,
+            };
+            updates[`projects/${activeProjectId}/settings/ai`] = {
+                primarySTT: projectSettings.primarySTT,
+                fallbackSTT: projectSettings.fallbackSTT,
+                primaryTrans: projectSettings.primaryTrans,
+                fallbackTrans: projectSettings.fallbackTrans,
+            };
+            updates[`projects/${activeProjectId}/settings/hideRaw`] = Boolean(projectSettings.hideRaw);
 
-        await update(ref(database), updates);
-        alert("Settings Saved!");
-        setShowProjectSettings(false);
+            await update(ref(database), updates);
+            alert("Settings Saved!");
+            setShowProjectSettings(false);
+        } catch (e) {
+            console.error("설정 저장 실패:", e);
+            alert("설정 저장에 실패했습니다. 인터넷 연결을 확인해주세요.");
+        }
     };
 
 
@@ -176,21 +176,6 @@ const AdminDashboard: React.FC = () => {
     const analyserRef = useRef<AnalyserNode | null>(null);
     const rafIdRef = useRef<number | null>(null);
     const [sourceType, setSourceType] = useState<'mic' | 'system'>('mic');
-    const vadRef = useRef<VADRecorder | null>(null);
-
-    // Ref로 최신 설정값 추적 (startRecording 클로저 stale 방지)
-    const recordModeRef = useRef(projectSettings.recordMode);
-    const chunkIntervalRef = useRef(projectSettings.chunkInterval);
-    const vadMaxCutMsRef = useRef(projectSettings.vadMaxCutMs);
-    useEffect(() => {
-        recordModeRef.current = projectSettings.recordMode;
-    }, [projectSettings.recordMode]);
-    useEffect(() => {
-        chunkIntervalRef.current = projectSettings.chunkInterval;
-    }, [projectSettings.chunkInterval]);
-    useEffect(() => {
-        vadMaxCutMsRef.current = projectSettings.vadMaxCutMs;
-    }, [projectSettings.vadMaxCutMs]);
 
     // --- Isolation View State ---
     const [viewMode, setViewMode] = useState<'live' | 'archive'>('live');
@@ -282,24 +267,29 @@ const AdminDashboard: React.FC = () => {
     }, [segmentsMap]);
 
     // --- Handlers ---
-    const handleCreateSession = () => {
-        const newRef = push(ref(database, `projects/${activeProjectId}/sessions`));
-        const maxOrder = sessions.reduce((max, s) => Math.max(max, s.orderIndex || 0), 0);
-        const newSession: Session = {
-            id: newRef.key!,
-            speaker: "New Speaker",
-            affiliation: "Affiliation",
-            topic: "New Topic",
-            abstract: "",
-            keywords: "",
-            startTime: "09:00",
-            orderIndex: maxOrder + 1,
-            sourceLanguage: 'ko',
-            targetLanguages: ['en']
-        };
-        set(newRef, newSession);
-        setSelectedSessionId(newSession.id);
-        setFormData(newSession);
+    const handleCreateSession = async () => {
+        try {
+            const newRef = push(ref(database, `projects/${activeProjectId}/sessions`));
+            const maxOrder = sessions.reduce((max, s) => Math.max(max, s.orderIndex || 0), 0);
+            const newSession: Session = {
+                id: newRef.key!,
+                speaker: "New Speaker",
+                affiliation: "Affiliation",
+                topic: "New Topic",
+                abstract: "",
+                keywords: "",
+                startTime: "09:00",
+                orderIndex: maxOrder + 1,
+                sourceLanguage: 'ko',
+                targetLanguages: ['en']
+            };
+            await set(newRef, newSession);
+            setSelectedSessionId(newSession.id);
+            setFormData(newSession);
+        } catch (e) {
+            console.error("세션 생성 실패:", e);
+            alert("세션 생성에 실패했습니다. 네트워크를 확인해주세요.");
+        }
     };
 
     const handleSelectSession = (s: Session) => {
@@ -309,8 +299,16 @@ const AdminDashboard: React.FC = () => {
 
     const handleSaveSession = async () => {
         if (!selectedSessionId) return;
-        await update(ref(database, `projects/${activeProjectId}/sessions/${selectedSessionId}`), formData);
-        alert("Saved!");
+        try {
+            const updates: Record<string, any> = {};
+            updates[`projects/${activeProjectId}/sessions/${selectedSessionId}`] = formData;
+            
+            await update(ref(database), updates);
+            alert("Saved!");
+        } catch (error) {
+            console.error("Failed to save session:", error);
+            alert("세션 저장에 실패했습니다. 네트워크를 확인해주세요.");
+        }
     };
 
     const handleMove = async (index: number, direction: -1 | 1) => {
@@ -320,19 +318,20 @@ const AdminDashboard: React.FC = () => {
         const s1 = sessions[index];
         const s2 = sessions[targetIndex];
 
-        // Swap orderIndex
-        // If orderIndex is missing, treat as index
         const o1 = s1.orderIndex ?? index;
         const o2 = s2.orderIndex ?? targetIndex;
 
-        // To ensure swap works even if values are same or missing, we explicitly assign new values
-        // But simple swap of existing values might be enough if they are distinct.
-        // Let's just swap their entire orderIndex values in DB.
-        // If they don't have orderIndex, we should assign to all first? 
-        // Assuming they have orderIndex from creation or previous sort.
-
-        await update(ref(database, `projects/${activeProjectId}/sessions/${s1.id}`), { orderIndex: o2 });
-        await update(ref(database, `projects/${activeProjectId}/sessions/${s2.id}`), { orderIndex: o1 });
+        try {
+            // ── 3단계 디테일 튜닝: 다중 경로 업데이트(Multi-path Update)로 통신 낭비 및 불일치 방지 ──
+            const updates: Record<string, any> = {};
+            updates[`projects/${activeProjectId}/sessions/${s1.id}/orderIndex`] = o2;
+            updates[`projects/${activeProjectId}/sessions/${s2.id}/orderIndex`] = o1;
+            
+            await update(ref(database), updates);
+        } catch (e) {
+            console.error("순서 변경 실패:", e);
+            alert("세션 순서 변경에 실패했습니다.");
+        }
     };
 
     const triggerArchive = async (sessionIdToArchive: string) => {
@@ -357,15 +356,25 @@ const AdminDashboard: React.FC = () => {
             alert("Cannot delete active live session. Stop live first.");
             return;
         }
-        await set(ref(database, `projects/${activeProjectId}/sessions/${s.id}`), null);
-        if (selectedSessionId === s.id) setSelectedSessionId(null);
+        try {
+            await set(ref(database, `projects/${activeProjectId}/sessions/${s.id}`), null);
+            if (selectedSessionId === s.id) setSelectedSessionId(null);
+        } catch (e) {
+            console.error("삭제 실패:", e);
+            alert("세션 삭제에 실패했습니다.");
+        }
     };
 
     const handleClearTranscript = async () => {
         if (!selectedSessionId) return;
         if (!window.confirm("Clear all transcript data for this session?")) return;
-        await set(ref(database, `projects/${activeProjectId}/sessions/${selectedSessionId}/transcript`), null);
-        setSegmentsMap({});
+        try {
+            await set(ref(database, `projects/${activeProjectId}/sessions/${selectedSessionId}/transcript`), null);
+            setSegmentsMap({});
+        } catch (e) {
+            console.error("초기화 실패:", e);
+            alert("자막 데이터 초기화에 실패했습니다.");
+        }
     };
 
     const handleGoLive = async () => {
@@ -433,11 +442,41 @@ const AdminDashboard: React.FC = () => {
             const buf = await blob.arrayBuffer();
             const activeSession = sessions.find(s => s.id === activeSessionId);
             const currentLang = activeSession?.sourceLanguage || 'ko';
+            
+            // --- 2단계 최적화: 서버 DB 읽기 병목 제거를 위한 헤더 송장(Metadata) 생성 ---
+            // 1. Whisper용 단어장 (초록은 앞부분 60자만 포함하여 오인식 방지)
+            const speakerTerms = [activeSession?.speaker, activeSession?.affiliation, activeSession?.topic].filter(Boolean).join(', ');
+            const abstractSnippet = activeSession?.abstract ? activeSession.abstract.slice(0, 60) : '';
+            const customKeywords = [activeSession?.keywords, speakerTerms, abstractSnippet].filter(Boolean).join(', ');
+
+            // 2. GPT 번역용 배경지식 (환각 방지를 위해 초록 제외, 주제/키워드/연자 순으로 똑똑하게 배치)
+            const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}`;
+
+            // 3. 청크 설정값 (Auto-Pilot 기본값 강제 적용)
+            const chunkMinLength = "35";
+            const chunkTimeoutMs = "6000";
+            const chunkSentenceEnd = "true";
+
             const url = `${CF_BASE}/processAudio?projectId=${encodeURIComponent(activeProjectId)}&sourceLabel=admin&sourceLang=${currentLang}`;
             console.log(`[Upload] Sending ${blob.size}B → CF (project=${activeProjectId}, lang=${currentLang})`);
+            
             fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${token}` },
+                headers: { 
+                    'Content-Type': 'application/octet-stream', 
+                    'Authorization': `Bearer ${token}`,
+                    // 한글 깨짐 방지를 위해 encodeURIComponent로 감싸서 헤더에 탑재
+                    'X-Active-Session-Id': activeSessionId || '',
+                    'X-Custom-Keywords': encodeURIComponent(customKeywords),
+                    'X-Session-Context': encodeURIComponent(sessionContext),
+                    'X-Chunk-Min-Length': chunkMinLength,
+                    'X-Chunk-Timeout-Ms': chunkTimeoutMs,
+                    'X-Chunk-Sentence-End': chunkSentenceEnd,
+                    'X-STT-Primary': projectSettings.primarySTT,
+                    'X-STT-Fallback': projectSettings.fallbackSTT,
+                    'X-Trans-Primary': projectSettings.primaryTrans,
+                    'X-Trans-Fallback': projectSettings.fallbackTrans
+                },
                 body: buf
             }).then(async r => {
                 const data = await r.json().catch(() => ({}));
@@ -511,33 +550,22 @@ const AdminDashboard: React.FC = () => {
                 const nextIndex = activeIndexRef.current === 0 ? 1 : 0;
                 const nextMR = nextIndex === 0 ? mr1Ref.current : mr2Ref.current;
                 const currentMR = activeIndexRef.current === 0 ? mr1Ref.current : mr2Ref.current;
+                
+                // 1. 새로운 레코더를 먼저 시작 (오버랩 시작)
                 if (nextMR && nextMR.state === 'inactive') nextMR.start();
-                if (currentMR && currentMR.state === 'recording') currentMR.stop();
-                activeIndexRef.current = nextIndex;
+                
+                // 2. 아주 미세한 오버랩(100ms)을 주어 스위칭 순간의 단어 잘림 방지
+                setTimeout(() => {
+                    if (currentMR && currentMR.state === 'recording') currentMR.stop();
+                    activeIndexRef.current = nextIndex;
 
-                const currentMode = recordModeRef.current || 'chunk';
-                const interval = chunkIntervalRef.current || 2000;
-                scheduleNextCut(currentMode === 'vad' ? vadMaxCutMsRef.current : interval);
+                    const interval = 2500;
+                    scheduleNextCut(interval);
+                }, 100);
             };
 
-            const currentMode = recordModeRef.current || 'chunk';
-            console.log("Start Recording with Mode:", currentMode);
-
-            if (currentMode === 'vad') {
-                // VAD Mode: Switch on silence
-                console.log("Starting VAD Mode");
-                vadRef.current = new VADRecorder(mic, () => {
-                    console.log("VAD: Silence Detected -> Cutting");
-                    switchRecorders();
-                });
-                // Safety: Force cut every configured ms if no silence
-                scheduleNextCut(vadMaxCutMsRef.current);
-            } else {
-                // Chunk Mode: Switch every N ms
-                const interval = chunkIntervalRef.current || 2000;
-                console.log(`Starting Chunk Mode (${interval}ms)`);
-                scheduleNextCut(interval);
-            }
+            console.log("Starting Chunk Mode (2500ms)");
+            scheduleNextCut(2500);
 
             const buf = new Float32Array(analyser.fftSize);
             const loop = () => {
@@ -555,10 +583,6 @@ const AdminDashboard: React.FC = () => {
 
     const stopRecording = useCallback(() => {
         if (segmentTimerRef.current) window.clearTimeout(segmentTimerRef.current);
-        if (vadRef.current) {
-            vadRef.current.destroy();
-            vadRef.current = null;
-        }
         if (mr1Ref.current?.state === 'recording') mr1Ref.current.stop();
         if (mr2Ref.current?.state === 'recording') mr2Ref.current.stop();
         stream?.getTracks().forEach(t => t.stop());
@@ -569,90 +593,64 @@ const AdminDashboard: React.FC = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [stream]);
 
-    // Effect: Restart recording if mode changes while recording
-    useEffect(() => {
-        if (isRecording) {
-            console.log("Record Mode Changed, Restarting...");
-            stopRecording();
-            const t = setTimeout(() => startRecording(), 500);
-            return () => clearTimeout(t);
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [projectSettings.recordMode, projectSettings.chunkInterval]);
-
     return (
-        <div className="flex h-screen bg-[#0a0a0a] text-gray-200 overflow-hidden font-sans selection:bg-blue-500/30">
+        <div className="flex h-screen bg-gray-900 text-white overflow-hidden">
             {/* Sidebar: Agenda */}
-            <div className="w-72 bg-[#0a0a0a] border-r border-white/5 flex flex-col z-10 shadow-xl">
-                <div className="p-5 border-b border-white/5 flex justify-between items-center">
-                    <span className="text-sm font-medium text-gray-300 uppercase tracking-widest">Agenda</span>
-                    <div className="flex gap-2">
-                        <button onClick={() => setShowProjectSettings(true)} className="text-xs text-gray-400 hover:text-white transition-colors" title="Overlay & AI Settings">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-                        </button>
-                        <button onClick={handleCreateSession} className="text-xs bg-white text-black px-2.5 py-1 rounded font-medium hover:bg-gray-200 transition-colors">+ New</button>
-                    </div>
+            <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
+                <div className="p-4 border-b border-gray-700 font-bold text-lg flex justify-between items-center">
+                    <span>Agenda</span>
+                    <button onClick={() => setShowProjectSettings(true)} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded" title="Overlay & AI Settings">⚙️</button>
+                    <button onClick={handleCreateSession} className="text-blue-400 hover:text-blue-300 text-sm font-bold">+ New</button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-3 space-y-1">
+                <div className="flex-1 overflow-y-auto">
                     {sessions.map((s, idx) => (
                         <div
                             key={s.id}
                             onClick={() => handleSelectSession(s)}
-                            className={`p-3 rounded-lg cursor-pointer transition-all flex gap-3 group ${activeSessionId === s.id ? 'bg-red-500/10 border border-red-500/30' : selectedSessionId === s.id ? 'bg-white/10' : 'hover:bg-white/5'}`}
+                            className={`p-3 border-b border-gray-700 cursor-pointer hover:bg-gray-700 flex gap-2 ${activeSessionId === s.id ? 'bg-red-900/30 border-l-4 border-red-500' : ''} ${selectedSessionId === s.id ? 'bg-gray-700' : ''}`}
                         >
-                            <div className="flex flex-col gap-1 justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={(e) => { e.stopPropagation(); handleMove(idx, -1); }} className="text-gray-500 hover:text-white">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"></path></svg>
-                                </button>
-                                <button onClick={(e) => { e.stopPropagation(); handleMove(idx, 1); }} className="text-gray-500 hover:text-white">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
-                                </button>
+                            <div className="flex flex-col gap-1 justify-center">
+                                <button onClick={(e) => { e.stopPropagation(); handleMove(idx, -1); }} className="text-gray-500 hover:text-white text-[10px]">▲</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleMove(idx, 1); }} className="text-gray-500 hover:text-white text-[10px]">▼</button>
                             </div>
                             <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-[10px] text-gray-500 font-mono">{s.startTime}</span>
-                                    {activeSessionId === s.id && <span className="text-[10px] text-red-400 font-bold flex items-center gap-1"><span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></span> LIVE</span>}
+                                <div className="text-sm text-gray-400">{s.startTime}</div>
+                                <div className="font-semibold truncate">
+                                    {LANG_FLAGS[s.sourceLanguage || 'ko']} {s.speaker}
                                 </div>
-                                <div className="font-medium text-sm text-gray-200 truncate group-hover:text-white transition-colors">
-                                    <span className="text-xs mr-1 opacity-70">{LANG_FLAGS[s.sourceLanguage || 'ko']}</span>
-                                    {s.speaker}
-                                </div>
-                                <div className="text-[10px] text-gray-500 truncate mt-0.5">{s.topic}</div>
+                                <div className="text-xs text-gray-500 truncate">{s.topic}</div>
+                                {activeSessionId === s.id && <span className="text-xs text-red-400 font-bold animate-pulse">● LIVE</span>}
                             </div>
-                            <div className="flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity justify-center">
+                            <div className="flex flex-col gap-1">
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         const tgtLang = s.sourceLanguage === 'en' ? 'ko' : 'en';
                                         window.open(`/overlay/${activeProjectId}/${tgtLang}`, '_blank');
                                     }}
-                                    title="Open Overlay"
-                                    className="text-gray-500 hover:text-white"
-                                >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg>
-                                </button>
-                                <button onClick={(e) => { e.stopPropagation(); handleDeleteSession(s); }} className="text-gray-500 hover:text-red-400">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
-                                </button>
+                                    title="오버레이 열기 (번역 언어)"
+                                    className="text-gray-500 hover:text-blue-400 text-sm p-1 leading-none"
+                                >🖥️</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleDeleteSession(s); }} className="text-gray-600 hover:text-red-500 p-1 text-sm leading-none">🗑️</button>
                             </div>
                         </div>
                     ))}
                 </div>
             </div>
 
-
             {/* Main: Workspace */}
-            <div className="flex-1 flex min-w-0">
-                {/* Left: Metadata Editor (Session Settings) */}
-                <div className="w-1/2 p-6 border-r border-white/5 bg-[#0a0a0a] flex flex-col">
+            <div className="flex-1 flex flex-col min-w-0">
+                {/* Top: Metadata Editor */}
+                <div className="h-1/2 p-6 border-b border-gray-700 bg-gray-900 overflow-y-auto">
                     {selectedSessionId ? (
-                        <div className="max-w-2xl mx-auto flex flex-col h-full w-full">
-                            <div className="flex justify-between items-center mb-6 shrink-0">
-                                <h2 className="text-xl font-semibold tracking-tight text-gray-100">Session Settings</h2>
+                        <div className="max-w-3xl mx-auto space-y-4">
+                            <div className="flex justify-between items-center mb-3">
+                                <h2 className="text-xl font-bold">Edit Session</h2>
                                 <div className="flex gap-2">
-                                    <button onClick={handleSaveSession} className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-md text-xs font-medium text-gray-300 transition-colors">Save</button>
-                                    <button onClick={handleGoLive} className={`px-4 py-2 rounded-md text-xs font-bold transition-colors ${activeSessionId === selectedSessionId ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-green-600 text-white hover:bg-green-500'}`}>
-                                        {activeSessionId === selectedSessionId ? 'Live Active' : 'Go Live'}
+                                    <button onClick={() => { if (window.confirm("Archive this session?")) triggerArchive(selectedSessionId); }} className="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600 text-sm">Force Archive</button>
+                                    <button onClick={handleSaveSession} className="px-4 py-2 bg-gray-600 rounded hover:bg-gray-500">Save</button>
+                                    <button onClick={handleGoLive} className={`px-4 py-2 rounded font-bold ${activeSessionId === selectedSessionId ? 'bg-red-600 cursor-default' : 'bg-green-600 hover:bg-green-500'}`}>
+                                        {activeSessionId === selectedSessionId ? 'Current Live' : 'Go Live'}
                                     </button>
                                 </div>
                             </div>
@@ -667,159 +665,132 @@ const AdminDashboard: React.FC = () => {
                                     { lang: 'refined', label: srcLang === 'ko' ? '🇰🇷 Korean (Raw)' : '🇺🇸 English (Raw)', primary: false },
                                 ];
                                 return (
-                                    <div className="flex gap-2 mb-6 p-3 bg-[#111111] rounded-lg border border-white/5 flex-wrap items-center shrink-0">
-                                        <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mr-2">Overlays</span>
+                                    <div className="flex gap-2 mb-4 p-3 bg-gray-800/60 rounded-lg border border-gray-700 flex-wrap">
+                                        <span className="text-xs text-gray-500 self-center mr-1 font-bold">🖥️ Overlay</span>
                                         {links.map(({ lang, label, primary }) => {
                                             const url = `${origin}/overlay/${activeProjectId}/${lang}`;
                                             return (
                                                 <div key={lang} className="flex items-center gap-1">
                                                     <button
                                                         onClick={() => window.open(url, '_blank')}
-                                                        className={`px-3 py-1.5 rounded-md text-[10px] font-medium transition-colors ${primary ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'}`}
+                                                        className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${primary ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
                                                     >
                                                         {label}
                                                     </button>
                                                     <button
                                                         onClick={() => { navigator.clipboard.writeText(url); }}
-                                                        title="Copy URL"
-                                                        className="text-gray-500 hover:text-gray-300 p-1"
-                                                    >
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
-                                                    </button>
+                                                        title="URL 복사"
+                                                        className="text-gray-500 hover:text-gray-300 text-xs px-1"
+                                                    >📋</button>
                                                 </div>
                                             );
                                         })}
+                                        <button
+                                            onClick={() => window.open(`${origin}/overlay/${activeProjectId}/${tgtLang}?debug=true`, '_blank')}
+                                            className="px-2 py-1.5 rounded text-xs bg-gray-800 hover:bg-gray-700 text-gray-500 border border-gray-700 ml-auto"
+                                        >Debug</button>
                                     </div>
                                 );
                             })()}
-                            
-                            <div className="flex flex-col gap-4 flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Speaker Name</label>
-                                        <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors" value={formData.speaker || ''} onChange={e => setFormData({ ...formData, speaker: e.target.value })} />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Affiliation</label>
-                                        <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors" value={formData.affiliation || ''} onChange={e => setFormData({ ...formData, affiliation: e.target.value })} />
-                                    </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs text-gray-400">Speaker Name</label>
+                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.speaker || ''} onChange={e => setFormData({ ...formData, speaker: e.target.value })} />
                                 </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Time</label>
-                                        <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors font-mono" value={formData.startTime || ''} onChange={e => setFormData({ ...formData, startTime: e.target.value })} />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Topic</label>
-                                        <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors" value={formData.topic || ''} onChange={e => setFormData({ ...formData, topic: e.target.value })} />
-                                    </div>
+                                <div>
+                                    <label className="block text-xs text-gray-400">Time</label>
+                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.startTime || ''} onChange={e => setFormData({ ...formData, startTime: e.target.value })} />
                                 </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Source Language</label>
-                                        <div className="relative">
-                                            <select
-                                                className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 transition-colors appearance-none"
-                                                value={formData.sourceLanguage || 'ko'}
-                                                onChange={e => {
-                                                    const src = e.target.value as 'ko' | 'en';
-                                                    const tgt = src === 'ko' ? ['en'] : ['ko'];
-                                                    setFormData({ ...formData, sourceLanguage: src, targetLanguages: tgt });
-                                                }}
-                                            >
-                                                <option value="ko">Korean (한국어)</option>
-                                                <option value="en">English (영어)</option>
-                                            </select>
-                                            <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-gray-500">
-                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Target Language <span className="normal-case tracking-normal text-gray-600 ml-1">(Auto)</span></label>
-                                        <div className="flex gap-3 px-3 py-1.5 bg-[#111111]/50 rounded-md border border-white/5 h-[34px] items-center">
-                                            {['ko', 'en'].map(l => (
-                                                <label key={l} className={`flex items-center gap-2 ${(formData.targetLanguages || []).includes(l) ? 'text-gray-200' : 'text-gray-600'} cursor-not-allowed`}>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={(formData.targetLanguages || []).includes(l)}
-                                                        disabled
-                                                        className="rounded border-white/10 bg-black/50 accent-gray-500"
-                                                    />
-                                                    <span className="uppercase text-xs font-medium">{l}</span>
-                                                </label>
-                                            ))}
-                                        </div>
-                                    </div>
+                                <div className="col-span-2">
+                                    <label className="block text-xs text-gray-400">Source Language (Speaker's Language)</label>
+                                    <select
+                                        className="w-full bg-gray-800 border border-gray-600 rounded p-2"
+                                        value={formData.sourceLanguage || 'ko'}
+                                        onChange={e => {
+                                            const src = e.target.value as 'ko' | 'en';
+                                            const tgt = src === 'ko' ? ['en'] : ['ko'];
+                                            setFormData({ ...formData, sourceLanguage: src, targetLanguages: tgt });
+                                        }}
+                                    >
+                                        <option value="ko">Korean (한국어)</option>
+                                        <option value="en">English (영어)</option>
+                                    </select>
                                 </div>
-
-                                <div className="space-y-1.5 flex flex-col min-h-[80px]">
-                                    <label className="flex items-center text-[10px] text-gray-500 uppercase tracking-wider font-medium mb-1.5 shrink-0">
-                                        Keywords
-                                        <span className="ml-2 text-[9px] bg-white/5 border border-white/10 text-gray-400 px-1.5 py-0.5 rounded normal-case tracking-normal">Comma separated</span>
+                                <div className="col-span-2">
+                                    <label className="block text-xs text-gray-400">Target Languages (Automatically mapped)</label>
+                                    <div className="flex gap-4 p-2 bg-gray-800 rounded border border-gray-600 opacity-70">
+                                        {['ko', 'en'].map(l => (
+                                            <label key={l} className="flex items-center gap-2 cursor-not-allowed">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={(formData.targetLanguages || []).includes(l)}
+                                                    disabled
+                                                    className="cursor-not-allowed"
+                                                />
+                                                <span className="uppercase font-bold text-sm">{l}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                    <p className="text-[10px] text-gray-500 mt-1">※ Target language is automatically set based on the source language.</p>
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="block text-xs text-gray-400">Affiliation</label>
+                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.affiliation || ''} onChange={e => setFormData({ ...formData, affiliation: e.target.value })} />
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="block text-xs text-gray-400">Topic</label>
+                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.topic || ''} onChange={e => setFormData({ ...formData, topic: e.target.value })} />
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="block text-xs text-gray-400">
+                                        Abstract (Context for AI)
+                                        <span className="ml-2 text-[10px] text-blue-400 font-normal">STT 인식 + 번역 품질 모두 향상</span>
                                     </label>
-                                    <textarea className="w-full flex-1 bg-[#111111] border border-white/10 rounded-md px-3 py-2 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors resize-none leading-relaxed" placeholder="e.g. Implant, Sinus, Bone Graft" value={formData.keywords || ''} onChange={e => setFormData({ ...formData, keywords: e.target.value })} />
+                                    <textarea className="w-full bg-gray-800 border border-gray-600 rounded p-2 h-32" placeholder="강연 초록 또는 발표 내용을 입력하세요. 앞부분 60자는 Whisper STT에도 직접 전달되어 도메인 용어 인식 정확도가 높아집니다." value={formData.abstract || ''} onChange={e => setFormData({ ...formData, abstract: e.target.value })} />
                                 </div>
-
-                                <div className="space-y-1.5 flex flex-col flex-1 min-h-[120px]">
-                                    <label className="flex items-center text-[10px] text-gray-500 uppercase tracking-wider font-medium mb-1.5 shrink-0">
-                                        Abstract (초록)
-                                        <span className="ml-2 text-[9px] bg-white/5 border border-white/10 text-gray-400 px-1.5 py-0.5 rounded normal-case tracking-normal">Improves AI Context</span>
-                                    </label>
-                                    <textarea className="w-full flex-1 bg-[#111111] border border-white/10 rounded-md px-3 py-3 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors resize-none leading-relaxed" placeholder="Enter abstract or presentation content. The first 60 characters are sent to the STT model to improve domain terminology recognition." value={formData.abstract || ''} onChange={e => setFormData({ ...formData, abstract: e.target.value })} />
+                                <div className="col-span-2">
+                                    <label className="block text-xs text-gray-400">Keywords (Comma separated)</label>
+                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.keywords || ''} onChange={e => setFormData({ ...formData, keywords: e.target.value })} />
                                 </div>
                             </div>
                         </div>
                     ) : (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-500 space-y-4">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="opacity-50"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                            <span className="text-sm">Select a session from the agenda</span>
-                        </div>
+                        <div className="flex items-center justify-center h-full text-gray-500">Select a session to edit</div>
                     )}
                 </div>
 
-                {/* Right: Monitor & Controls */}
-                <div className="w-1/2 bg-[#0a0a0a] flex flex-col p-6">
-                    <div className="flex justify-between items-center mb-4">
-                        <div className="flex items-center gap-4">
-                            <div className="flex bg-[#111111] rounded-md p-1 border border-white/5">
-                                <button onClick={() => setSourceType('mic')} className={`px-3 py-1.5 text-xs font-medium rounded ${sourceType === 'mic' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-400 hover:text-gray-300'}`}>Mic</button>
-                                <button onClick={() => setSourceType('system')} className={`px-3 py-1.5 text-xs font-medium rounded ${sourceType === 'system' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-400 hover:text-gray-300'}`}>System</button>
+                {/* Bottom: Monitor & Controls */}
+                <div className="h-1/2 bg-black flex flex-col p-4">
+                    <div className="flex justify-between items-center mb-2">
+                        <div className="flex items-center gap-3">
+                            <div className="flex bg-gray-800 rounded p-1">
+                                <button onClick={() => setSourceType('mic')} className={`px-3 py-1 text-sm rounded ${sourceType === 'mic' ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>Mic</button>
+                                <button onClick={() => setSourceType('system')} className={`px-3 py-1 text-sm rounded ${sourceType === 'system' ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>System</button>
                             </div>
-                            <button onClick={isRecording ? stopRecording : startRecording} className={`px-5 py-2 rounded-md text-xs font-bold transition-all ${isRecording ? "bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20" : "bg-white text-black hover:bg-gray-200"}`}>
-                                {isRecording ? "STOP BROADCAST" : "START BROADCAST"}
+                            <button onClick={isRecording ? stopRecording : startRecording} className={`px-4 py-1 rounded font-bold ${isRecording ? "bg-red-600" : "bg-green-600"}`}>
+                                {isRecording ? "ON AIR (Stop)" : "START BROADCAST"}
                             </button>
 
                             {/* Remaster Button for Admin */}
                             {/* REMOVED from here as per user request */}
 
-                            <div className="w-32 h-1.5 bg-white/10 rounded-full ml-2 relative overflow-hidden">
-                                <div className="h-full bg-green-500 rounded-full transition-all duration-75" style={{ width: `${Math.min(100, Math.max(0, ((currentDb + 90) / 60) * 100))}%` }} />
+                            <div className="w-32 h-2 bg-gray-700 rounded ml-2 relative">
+                                <div className="h-2 bg-green-500 rounded" style={{ width: `${Math.min(100, Math.max(0, ((currentDb + 90) / 60) * 100))}%` }} />
                             </div>
                             {/* Health Dashboard */}
                             <HealthDashboard projectId={activeProjectId} />
                         </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Status</span>
-                            <span className={`text-xs font-medium ${status === 'recording' || status === 'streaming' ? 'text-green-400' : 'text-gray-400'}`}>{status}</span>
-                        </div>
+                        <div className="text-xs text-gray-400">Status: {status}</div>
                     </div>
 
+                    <AudioVisualizer stream={stream} width={800} height={40} />
+
                     {/* Log Window with Header */}
-                    <div className="flex-1 flex flex-col border border-white/5 rounded-xl overflow-hidden bg-[#111111] shadow-inner">
-                        <div className="bg-[#1a1a1a] p-3 flex justify-between items-center border-b border-white/5">
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs font-medium text-gray-300">
-                                    {selectedSessionId ? `Transcript: ${formData.speaker}` : "Transcript Viewer"}
-                                </span>
-                                {selectedSessionId && (
-                                    <span className={`text-[9px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold ${viewMode === 'live' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-white/5 text-gray-400 border border-white/10'}`}>
-                                        {viewMode === 'live' ? 'LIVE' : 'ARCHIVED'}
-                                    </span>
-                                )}
-                            </div>
+                    <div className="flex-1 flex flex-col mt-2 border border-gray-800 rounded overflow-hidden">
+                        <div className="bg-gray-800 p-2 flex justify-between items-center">
+                            <span className="text-xs font-bold text-gray-300">
+                                {selectedSessionId ? `Session: ${formData.speaker} (${viewMode === 'live' ? 'LIVE STREAM' : 'ARCHIVED RECORD'})` : "No Session Selected"}
+                            </span>
 
                             <div className="flex gap-2">
                                 {/* Manual Remaster Button (For Live Monitoring Cleanup) */}
@@ -827,10 +798,10 @@ const AdminDashboard: React.FC = () => {
                                     <div className="flex gap-1">
                                         <button
                                             onClick={triggerPurge}
-                                            className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 transition-colors"
+                                            className="px-2 py-1 text-xs rounded bg-red-900/50 hover:bg-red-800 border border-red-700 text-red-100 flex items-center gap-1"
                                             title="완전 삭제 (클랜징)"
                                         >
-                                            Purge
+                                            🧹 Purge
                                         </button>
                                     </div>
                                 )}
@@ -838,18 +809,18 @@ const AdminDashboard: React.FC = () => {
 
                                 {viewMode === 'archive' && (
                                     <>
-                                        <button onClick={handleExport} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-[10px] font-bold uppercase tracking-wider rounded-md text-gray-300 transition-colors">
-                                            Export
+                                        <button onClick={handleExport} className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-xs rounded text-white flex items-center gap-1">
+                                            📥 Export Script
                                         </button>
-                                        <button onClick={handleClearTranscript} className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-[10px] font-bold uppercase tracking-wider rounded-md text-red-400 border border-red-500/20 transition-colors">
-                                            Clear
+                                        <button onClick={handleClearTranscript} className="px-2 py-1 bg-red-900/50 hover:bg-red-900 text-xs rounded text-red-200 border border-red-800 flex items-center gap-1">
+                                            🧹 Clear
                                         </button>
                                     </>
                                 )}
                             </div>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-5 scroll-smooth">
-                            <div className="text-sm break-words leading-relaxed space-y-2">
+                        <div className="flex-1 overflow-y-auto bg-gray-900 p-4">
+                            <div className="text-lg break-words leading-relaxed">
                                 {segmentsOrder.map((id) => {
                                     const seg = segmentsMap[id];
                                     if (seg?.status === 'merged') return null;
@@ -867,90 +838,131 @@ const AdminDashboard: React.FC = () => {
             {/* Settings Modal */}
             {
                 showProjectSettings && (
-                    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-                        <div className="bg-[#111111] p-6 rounded-xl w-full max-w-2xl space-y-5 border border-white/10 shadow-2xl">
-                            <div className="flex justify-between items-center border-b border-white/5 pb-4">
-                                <h2 className="text-lg font-semibold tracking-tight text-gray-100">Project Settings</h2>
-                                <div className="flex gap-2 text-[10px]">
-                                    <span className="bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-1 rounded-md font-mono">STT: gpt-4o-transcribe</span>
-                                    <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded-md font-mono">Trans: gpt-4o-mini</span>
+                    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+                        <div className="bg-gray-800 p-6 rounded-lg w-full max-w-xl space-y-4 border border-gray-600">
+                            <div className="flex justify-between items-start">
+                                <h2 className="text-xl font-bold">Project Settings</h2>
+                                <div className="flex gap-1.5 text-[10px]">
+                                    <span className="bg-green-900/50 text-green-400 border border-green-700 px-2 py-0.5 rounded-full font-mono">STT: gpt-4o-transcribe</span>
+                                    <span className="bg-blue-900/50 text-blue-400 border border-blue-700 px-2 py-0.5 rounded-full font-mono">Trans: gpt-4o-mini</span>
                                 </div>
                             </div>
 
                             {/* Tabs */}
-                            <div className="flex border-b border-white/5 mb-4">
-                                <button onClick={() => setSettingsTab('overlay')} className={`px-4 py-2 text-sm font-medium transition-colors ${settingsTab === 'overlay' ? 'border-b-2 border-white text-white' : 'text-gray-500 hover:text-gray-300'}`}>Overlay Design</button>
-                                <button onClick={() => setSettingsTab('ai')} className={`px-4 py-2 text-sm font-medium transition-colors ${settingsTab === 'ai' ? 'border-b-2 border-white text-white' : 'text-gray-500 hover:text-gray-300'}`}>Audio & AI</button>
+                            <div className="flex border-b border-gray-600 mb-4">
+                                <button onClick={() => setSettingsTab('overlay')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'overlay' ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}>Overlay Design</button>
+                                <button onClick={() => setSettingsTab('ai')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'ai' ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}>Audio & AI</button>
                             </div>
 
-                            <div className="space-y-6 overflow-y-auto max-h-[60vh] pr-2 custom-scrollbar">
+                            <div className="space-y-6 overflow-y-auto max-h-[60vh]">
                                 {/* Section 0: Model Info + Audio Engine */}
                                 {settingsTab === 'ai' && <>
-                                    <div className="bg-[#1a1a1a] border border-white/5 p-4 rounded-lg space-y-3">
-                                        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Active Models</h3>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div className="bg-[#111111] rounded-md p-3 border border-white/5">
-                                                <div className="text-[10px] text-gray-500 mb-1 uppercase tracking-widest">STT (Speech to Text)</div>
-                                                <div className="text-sm font-medium text-green-400">gpt-4o-transcribe</div>
+                                    <div className="bg-gray-900 border border-gray-600 p-3 rounded-lg">
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 flex justify-between">
+                                            <span>AI 모델 설정</span>
+                                        </h3>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            {/* STT 엔진 설정 */}
+                                            <div className="space-y-3">
+                                                <h4 className="text-sm font-bold text-gray-300">🎙️ STT (음성인식)</h4>
+                                                <div>
+                                                    <label className="text-[10px] text-gray-500 mb-1 block">메인 엔진 (Primary)</label>
+                                                    <select 
+                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-green-400"
+                                                        value={projectSettings.primarySTT}
+                                                        onChange={e => setProjectSettings({...projectSettings, primarySTT: e.target.value as 'openai' | 'deepgram'})}
+                                                    >
+                                                        <option value="openai">OpenAI (gpt-4o-transcribe)</option>
+                                                        <option value="deepgram">Deepgram (Nova-3)</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] text-gray-500 mb-1 block">보조 엔진 (Fallback)</label>
+                                                    <select 
+                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-gray-400"
+                                                        value={projectSettings.fallbackSTT}
+                                                        onChange={e => setProjectSettings({...projectSettings, fallbackSTT: e.target.value as 'openai' | 'deepgram'})}
+                                                    >
+                                                        <option value="deepgram">Deepgram (Nova-3)</option>
+                                                        <option value="openai">OpenAI (gpt-4o-transcribe)</option>
+                                                    </select>
+                                                </div>
                                             </div>
-                                            <div className="bg-[#111111] rounded-md p-3 border border-white/5">
-                                                <div className="text-[10px] text-gray-500 mb-1 uppercase tracking-widest">Translation</div>
-                                                <div className="text-sm font-medium text-blue-400">gpt-4o-mini</div>
+
+                                            {/* 번역 엔진 설정 */}
+                                            <div className="space-y-3 border-l border-gray-700 pl-4">
+                                                <h4 className="text-sm font-bold text-gray-300">🌐 Translation (번역)</h4>
+                                                <div>
+                                                    <label className="text-[10px] text-gray-500 mb-1 block">메인 엔진 (Primary)</label>
+                                                    <select 
+                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-blue-400"
+                                                        value={projectSettings.primaryTrans}
+                                                        onChange={e => setProjectSettings({...projectSettings, primaryTrans: e.target.value as 'openai' | 'claude'})}
+                                                    >
+                                                        <option value="openai">OpenAI (gpt-4o-mini)</option>
+                                                        <option value="claude">Anthropic (Claude 3 Haiku)</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] text-gray-500 mb-1 block">보조 엔진 (Fallback)</label>
+                                                    <select 
+                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-gray-400"
+                                                        value={projectSettings.fallbackTrans}
+                                                        onChange={e => setProjectSettings({...projectSettings, fallbackTrans: e.target.value as 'openai' | 'claude'})}
+                                                    >
+                                                        <option value="claude">Anthropic (Claude 3 Haiku)</option>
+                                                        <option value="openai">OpenAI (gpt-4o-mini)</option>
+                                                    </select>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="bg-[#1a1a1a] p-4 rounded-lg border border-white/5 space-y-3">
-                                        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest flex items-center gap-2">
-                                            Audio Capture Mode <span className="text-[10px] font-normal normal-case tracking-normal text-gray-400 bg-white/5 px-1.5 py-0.5 rounded">(Can change during live)</span>
+                                    <div className="bg-blue-900/20 border border-blue-700/50 p-4 rounded-lg">
+                                        <h3 className="text-sm font-bold text-blue-400 mb-2 flex items-center gap-2">
+                                            🤖 Auto-Pilot 활성화됨
                                         </h3>
-                                        <div className="flex gap-4">
-                                            <label className={`flex-1 p-4 rounded-lg border cursor-pointer transition-all ${projectSettings.recordMode === 'chunk' ? 'bg-blue-500/10 border-blue-500/30' : 'bg-[#111111] border-white/5 hover:border-white/20'}`}>
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    <input type="radio" name="recordMode" value="chunk" checked={projectSettings.recordMode === 'chunk'} onChange={() => setProjectSettings({ ...projectSettings, recordMode: 'chunk' })} className="hidden" />
-                                                    <span className={`font-medium text-sm ${projectSettings.recordMode === 'chunk' ? 'text-blue-400' : 'text-gray-300'}`}>Interval (Chunk)</span>
-                                                </div>
-                                                <p className="text-xs text-gray-500 leading-relaxed">
-                                                    Fixed interval transmission. Recommended for Q&A and multi-speaker.<br/>
-                                                    <span className="text-[10px] text-gray-600 mt-1 block">Shorter intervals may reduce context.</span>
-                                                </p>
+                                        <p className="text-xs text-gray-300 leading-relaxed">
+                                            가장 안정적이고 빠른 <strong>"2.5초 간격 연속 전송(Chunk)"</strong> 모드가 기본으로 적용되어 있습니다.<br/>
+                                            오디오 유실이나 지연 없이 서버가 알아서 문맥을 재조립하여 최적의 번역을 수행합니다.
+                                        </p>
+                                    </div>
+                                    
+                                    <div className="flex items-start gap-2 pt-2 border-t border-gray-700">
+                                        <input type="checkbox" id="chkHideRaw"
+                                            checked={projectSettings.hideRaw}
+                                            onChange={e => setProjectSettings({ ...projectSettings, hideRaw: e.target.checked })}
+                                            className="mt-0.5" />
+                                        <div>
+                                            <label htmlFor="chkHideRaw" className="text-sm text-gray-300 cursor-pointer font-bold">
+                                                🔒 Raw STT 숨김 (번역 완료 전 원문 미표시)
                                             </label>
-
-                                            <label className={`flex-1 p-4 rounded-lg border cursor-pointer transition-all ${projectSettings.recordMode === 'vad' ? 'bg-green-500/10 border-green-500/30' : 'bg-[#111111] border-white/5 hover:border-white/20'}`}>
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    <input type="radio" name="recordMode" value="vad" checked={projectSettings.recordMode === 'vad'} onChange={() => setProjectSettings({ ...projectSettings, recordMode: 'vad' })} className="hidden" />
-                                                    <span className={`font-medium text-sm ${projectSettings.recordMode === 'vad' ? 'text-green-400' : 'text-gray-300'}`}>Silence (VAD)</span>
-                                                </div>
-                                                <p className="text-xs text-gray-500 leading-relaxed">
-                                                    Auto transmission on pause. Recommended for keynotes.<br/>
-                                                    <span className="text-[10px] text-gray-600 mt-1 block">May need tuning for fast speakers.</span>
-                                                </p>
-                                            </label>
+                                            <p className="text-[10px] text-gray-500 mt-0.5">체크 시 번역기가 정제한 텍스트만 청중 화면에 표시됩니다.</p>
                                         </div>
                                     </div>
                                 </>}
 
                                 {/* Section 1: Overlay */}
-                                {settingsTab === 'overlay' && <div className="space-y-6">
+                                {settingsTab === 'overlay' && <div className="space-y-5">
 
                                     {/* Display Style */}
-                                    <div className="space-y-3">
-                                        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Display Style</h3>
-                                        <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Display Style</h3>
+                                        <div className="grid grid-cols-2 gap-2">
                                             {(['youtube', 'typing'] as const).map(style => (
                                                 <button key={style}
                                                     onClick={() => setProjectSettings({ ...projectSettings, displayStyle: style })}
-                                                    className={`py-3 rounded-lg border text-sm font-medium transition-all ${projectSettings.displayStyle === style ? 'bg-white/10 border-white/20 text-white' : 'bg-[#1a1a1a] border-white/5 text-gray-400 hover:border-white/10 hover:text-gray-300'}`}>
-                                                    {style === 'youtube' ? 'YouTube Style' : 'Typing Style'}
+                                                    className={`py-3 rounded-lg border text-sm font-bold transition-all ${projectSettings.displayStyle === style ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-400 hover:border-gray-400'}`}>
+                                                    {style === 'youtube' ? '🎬 YouTube 스타일' : '⌨️ 타이핑 스타일'}
                                                 </button>
                                             ))}
                                         </div>
                                         {projectSettings.displayStyle === 'typing' && (
-                                            <div className="mt-4 bg-[#1a1a1a] p-4 rounded-lg border border-white/5">
-                                                <label className="text-xs text-gray-400 flex justify-between mb-2">
-                                                    <span>Typing Speed</span>
-                                                    <span className="text-gray-200 font-mono">{projectSettings.typingSpeed} chars/s</span>
+                                            <div className="mt-3">
+                                                <label className="text-xs text-gray-400 block flex justify-between">
+                                                    <span>타이핑 속도 (글자/초)</span>
+                                                    <span className="text-white font-bold">{projectSettings.typingSpeed} chars/s</span>
                                                 </label>
-                                                <input type="range" min="10" max="100" step="5" className="w-full accent-white"
+                                                <input type="range" min="10" max="100" step="5" className="w-full mt-1"
                                                     value={projectSettings.typingSpeed}
                                                     onChange={e => setProjectSettings({ ...projectSettings, typingSpeed: Number(e.target.value) })} />
                                             </div>
@@ -958,28 +970,28 @@ const AdminDashboard: React.FC = () => {
                                     </div>
 
                                     {/* Layout */}
-                                    <div className="space-y-3">
-                                        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Layout</h3>
-                                        <div className="grid grid-cols-3 gap-4">
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Max Lines</label>
-                                                <select className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20" value={projectSettings.maxLines}
+                                    <div>
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Layout</h3>
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">표시 줄 수</label>
+                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.maxLines}
                                                     onChange={e => setProjectSettings({ ...projectSettings, maxLines: Number(e.target.value) })}>
-                                                    {[1,2,3,4,5].map(n => <option key={n} value={n}>{n} Lines</option>)}
+                                                    {[1,2,3,4,5].map(n => <option key={n} value={n}>{n}줄</option>)}
                                                 </select>
                                             </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Align</label>
-                                                <select className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20" value={projectSettings.align}
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">정렬</label>
+                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.align}
                                                     onChange={e => setProjectSettings({ ...projectSettings, align: e.target.value })}>
-                                                    <option value="left">Left</option>
-                                                    <option value="center">Center</option>
-                                                    <option value="right">Right</option>
+                                                    <option value="left">왼쪽</option>
+                                                    <option value="center">가운데</option>
+                                                    <option value="right">오른쪽</option>
                                                 </select>
                                             </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Bottom Offset</label>
-                                                <input type="number" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">하단 여백 (px)</label>
+                                                <input type="number" className="w-full bg-gray-700 p-2 rounded text-sm"
                                                     value={projectSettings.bottomOffset}
                                                     onChange={e => setProjectSettings({ ...projectSettings, bottomOffset: Number(e.target.value) })} />
                                             </div>
@@ -987,57 +999,54 @@ const AdminDashboard: React.FC = () => {
                                     </div>
 
                                     {/* Font */}
-                                    <div className="space-y-3">
-                                        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Typography</h3>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Size (px)</label>
-                                                <input type="number" min="12" max="120" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                    <div>
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Font</h3>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">크기 (px)</label>
+                                                <input type="number" min="12" max="120" className="w-full bg-gray-700 p-2 rounded text-sm"
                                                     value={projectSettings.fontSize}
                                                     onChange={e => setProjectSettings({ ...projectSettings, fontSize: Number(e.target.value) })} />
                                             </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Weight</label>
-                                                <select className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20" value={projectSettings.fontWeight}
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">굵기</label>
+                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.fontWeight}
                                                     onChange={e => setProjectSettings({ ...projectSettings, fontWeight: e.target.value })}>
                                                     <option value="normal">Normal</option>
                                                     <option value="bold">Bold</option>
                                                     <option value="800">Extra Bold</option>
                                                 </select>
                                             </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Letter Spacing</label>
-                                                <input type="number" min="-5" max="20" step="0.5" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">자간 (px)</label>
+                                                <input type="number" min="-5" max="20" step="0.5" className="w-full bg-gray-700 p-2 rounded text-sm"
                                                     value={projectSettings.letterSpacing}
                                                     onChange={e => setProjectSettings({ ...projectSettings, letterSpacing: Number(e.target.value) })} />
                                             </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Line Height</label>
-                                                <input type="number" min="1" max="3" step="0.1" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">행간</label>
+                                                <input type="number" min="1" max="3" step="0.1" className="w-full bg-gray-700 p-2 rounded text-sm"
                                                     value={projectSettings.lineHeight}
                                                     onChange={e => setProjectSettings({ ...projectSettings, lineHeight: Number(e.target.value) })} />
                                             </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Text Color</label>
-                                                <div className="flex items-center gap-2">
-                                                    <input type="color" className="h-9 w-12 bg-transparent cursor-pointer rounded"
-                                                        value={projectSettings.fontColor}
-                                                        onChange={e => setProjectSettings({ ...projectSettings, fontColor: e.target.value })} />
-                                                    <span className="text-xs font-mono text-gray-500">{projectSettings.fontColor}</span>
-                                                </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">글자 색</label>
+                                                <input type="color" className="w-full h-9 bg-gray-700 rounded cursor-pointer"
+                                                    value={projectSettings.fontColor}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, fontColor: e.target.value })} />
                                             </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Text Effect</label>
-                                                <select className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20" value={projectSettings.textEffect}
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">텍스트 효과</label>
+                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.textEffect}
                                                     onChange={e => setProjectSettings({ ...projectSettings, textEffect: e.target.value })}>
-                                                    <option value="shadow">Drop Shadow</option>
-                                                    <option value="stroke">Outline</option>
-                                                    <option value="none">None</option>
+                                                    <option value="shadow">드롭 쉐도우</option>
+                                                    <option value="stroke">아웃라인</option>
+                                                    <option value="none">없음</option>
                                                 </select>
                                             </div>
-                                            <div className="col-span-2 space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Font Family</label>
-                                                <input type="text" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                            <div className="col-span-2">
+                                                <label className="text-xs text-gray-400 block mb-1">폰트 패밀리 (CSS)</label>
+                                                <input type="text" className="w-full bg-gray-700 p-2 rounded text-sm"
                                                     placeholder="sans-serif, Arial, 'Noto Sans KR', ..."
                                                     value={projectSettings.fontFamily}
                                                     onChange={e => setProjectSettings({ ...projectSettings, fontFamily: e.target.value })} />
@@ -1046,117 +1055,37 @@ const AdminDashboard: React.FC = () => {
                                     </div>
 
                                     {/* Background */}
-                                    <div className="space-y-3">
-                                        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Background</h3>
-                                        <div className="grid grid-cols-3 gap-4">
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Color</label>
-                                                <div className="flex items-center gap-2">
-                                                    <input type="color" className="h-9 w-10 bg-transparent cursor-pointer rounded"
-                                                        value={projectSettings.bgColor}
-                                                        onChange={e => setProjectSettings({ ...projectSettings, bgColor: e.target.value })} />
-                                                </div>
+                                    <div>
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Background</h3>
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">배경색</label>
+                                                <input type="color" className="w-full h-9 bg-gray-700 rounded cursor-pointer"
+                                                    value={projectSettings.bgColor}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, bgColor: e.target.value })} />
                                             </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Opacity</label>
-                                                <input type="number" step="0.05" min="0" max="1" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">투명도 (0~1)</label>
+                                                <input type="number" step="0.05" min="0" max="1" className="w-full bg-gray-700 p-2 rounded text-sm"
                                                     value={projectSettings.bgOpacity}
                                                     onChange={e => setProjectSettings({ ...projectSettings, bgOpacity: Number(e.target.value) })} />
                                             </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-[10px] text-gray-400 uppercase tracking-wider block">Padding (px)</label>
-                                                <input type="number" className="w-full bg-[#1a1a1a] border border-white/5 p-2 rounded-md text-sm text-gray-200 outline-none focus:border-white/20 font-mono"
+                                            <div>
+                                                <label className="text-xs text-gray-400 block mb-1">좌우 패딩 (px)</label>
+                                                <input type="number" className="w-full bg-gray-700 p-2 rounded text-sm"
                                                     value={projectSettings.padding}
                                                     onChange={e => setProjectSettings({ ...projectSettings, padding: Number(e.target.value) })} />
                                             </div>
                                         </div>
                                     </div>
 
-                                    <div className="text-[10px] text-gray-600 flex items-center gap-2 bg-white/5 p-2 rounded">
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-                                        Changes apply to overlay in real-time upon saving.
-                                    </div>
-                                </div>}
-
-                                {/* Section 2: Buffer Tuning */}
-                                {settingsTab === 'ai' && <div className="space-y-4">
-                                    <div className="space-y-1">
-                                        <h3 className="text-sm font-medium text-gray-200">Buffer Tuning</h3>
-                                        <p className="text-xs text-gray-500">Adjust translation timing based on speech pace.</p>
-                                    </div>
-
-                                    <div className="space-y-5 bg-[#1a1a1a] p-5 rounded-lg border border-white/5">
-                                        <div className="space-y-2">
-                                            <label className="text-xs text-gray-400 flex justify-between items-end">
-                                                <span>Interval <span className="text-[10px] text-gray-600 ml-1">(Chunk mode)</span></span>
-                                                <span className="text-gray-200 font-mono">{projectSettings.chunkInterval} ms</span>
-                                            </label>
-                                            <input type="range" min="2000" max="8000" step="500" className="w-full accent-white"
-                                                value={projectSettings.chunkInterval}
-                                                onChange={e => setProjectSettings({ ...projectSettings, chunkInterval: Number(e.target.value) })} />
-                                            <p className="text-[10px] text-gray-600">Audio chunk size. Longer = better context (Recommended: 3000~5000ms).</p>
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <label className="text-xs text-gray-400 flex justify-between items-end">
-                                                <span>Min Characters to Translate</span>
-                                                <span className="text-gray-200 font-mono">{projectSettings.minLength} chars</span>
-                                            </label>
-                                            <input type="range" min="10" max="200" step="5" className="w-full accent-white"
-                                                value={projectSettings.minLength}
-                                                onChange={e => setProjectSettings({ ...projectSettings, minLength: Number(e.target.value) })} />
-                                            <p className="text-[10px] text-gray-600">Lower = faster but less context (Recommended: 20~60).</p>
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <label className="text-xs text-gray-400 flex justify-between items-end">
-                                                <span>Force Translate Timeout</span>
-                                                <span className="text-gray-200 font-mono">{projectSettings.timeoutMs} ms</span>
-                                            </label>
-                                            <input type="range" min="1000" max="8000" step="500" className="w-full accent-white"
-                                                value={projectSettings.timeoutMs}
-                                                onChange={e => setProjectSettings({ ...projectSettings, timeoutMs: Number(e.target.value) })} />
-                                            <p className="text-[10px] text-gray-600">Translates if waiting too long (Recommended: 2000~4000ms).</p>
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <label className="text-xs text-gray-400 flex justify-between items-end">
-                                                <span>Max Silence Wait</span>
-                                                <span className="text-gray-200 font-mono">{projectSettings.vadMaxCutMs} ms</span>
-                                            </label>
-                                            <input type="range" min="3000" max="20000" step="1000" className="w-full accent-white"
-                                                value={projectSettings.vadMaxCutMs}
-                                                onChange={e => setProjectSettings({ ...projectSettings, vadMaxCutMs: Number(e.target.value) })} />
-                                            <p className="text-[10px] text-gray-600">Forces cut if no silence detected in VAD mode (Recommended: 8000~15000ms).</p>
-                                        </div>
-
-                                        <div className="flex items-center gap-3 pt-3 border-t border-white/5">
-                                            <input type="checkbox" id="chkSentence"
-                                                checked={projectSettings.sentenceEnd}
-                                                onChange={e => setProjectSettings({ ...projectSettings, sentenceEnd: e.target.checked })}
-                                                className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-white" />
-                                            <label htmlFor="chkSentence" className="text-sm text-gray-300 cursor-pointer">Translate immediately on punctuation (. ! ?)</label>
-                                        </div>
-
-                                        <div className="flex items-start gap-3 pt-3 border-t border-white/5">
-                                            <input type="checkbox" id="chkHideRaw"
-                                                checked={projectSettings.hideRaw}
-                                                onChange={e => setProjectSettings({ ...projectSettings, hideRaw: e.target.checked })}
-                                                className="mt-1 w-4 h-4 rounded border-gray-600 bg-gray-800 accent-white" />
-                                            <div>
-                                                <label htmlFor="chkHideRaw" className="text-sm text-gray-300 cursor-pointer font-medium">
-                                                    Hide Raw STT Text
-                                                </label>
-                                                <p className="text-[10px] text-gray-500 mt-1 leading-relaxed">Only show text after it has been refined by gpt-4o-mini. Prevents raw misrecognitions from appearing on screen.</p>
-                                            </div>
-                                        </div>
-                                    </div>
+                                    <div className="text-[10px] text-gray-500">※ 저장 즉시 오버레이에 실시간 반영됩니다.</div>
                                 </div>}
                             </div>
 
-                            <div className="flex justify-end gap-3 pt-4 border-t border-white/5">
-                                <button onClick={() => setShowProjectSettings(false)} className="px-5 py-2 text-xs font-medium text-gray-400 hover:text-white transition-colors">Cancel</button>
-                                <button onClick={saveProjectSettings} className="px-5 py-2 bg-white text-black rounded-md text-xs font-medium hover:bg-gray-200 transition-colors">Save Changes</button>
+                            <div className="flex justify-end gap-2 mt-4">
+                                <button onClick={() => setShowProjectSettings(false)} className="px-4 py-2 text-gray-400">Cancel</button>
+                                <button onClick={saveProjectSettings} className="px-4 py-2 bg-blue-600 rounded font-bold">Save Apply</button>
                             </div>
                         </div>
                     </div>

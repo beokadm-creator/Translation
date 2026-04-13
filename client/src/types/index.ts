@@ -1,7 +1,6 @@
 export interface Conference {
   id: string;
   title: string;
-  accessCode: string;
   dates: string; // e.g. "2024-10-10 ~ 2024-10-12"
 }
 
@@ -11,11 +10,14 @@ export interface ProjectSettings {
   slug: string;
   logoUrl?: string;
   date: string;
-  accessCode: string; // (Legacy? Or specific to hall?)
   targetLanguages: string[]; // e.g., ["en", "ko"]
   parkingMessage?: string;
   recordMode?: 'chunk' | 'vad';
   hideRaw?: boolean;
+  primarySTT?: 'openai' | 'deepgram';
+  fallbackSTT?: 'openai' | 'deepgram';
+  primaryTrans?: 'openai' | 'claude';
+  fallbackTrans?: 'openai' | 'claude';
   // Overlay Settings
   overlay?: {
       fontSize: number;
@@ -53,6 +55,8 @@ export interface Session {
   abstract: string; // Core for RAG
   keywords: string; // comma-separated string (e.g. "implant, sinus, bone graft")
   startTime: string; // HH:MM
+  orderIndex?: number;
+  sourceLanguage?: 'ko' | 'en' | 'ja';
 }
 
 export interface StreamSegment {
