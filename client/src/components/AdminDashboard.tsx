@@ -449,9 +449,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             const speakerTerms = [activeSession?.speaker, activeSession?.affiliation, activeSession?.topic].filter(Boolean).join(', ');
             const customKeywords = [activeSession?.keywords, speakerTerms].filter(Boolean).join(', ');
 
-            // GPT 번역용 배경지식에는 초록의 앞부분만 잘라서 전달합니다 (번역 품질 향상용)
-            const abstractSnippet = activeSession?.abstract ? activeSession.abstract.slice(0, 100) : '';
-            const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}, Abstract: ${abstractSnippet}`;
+            // GPT 번역용 배경지식 (번역 모델에서도 환각 가능성을 원천 차단하기 위해 초록은 제외)
+            const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}`;
 
             // 3. 청크 설정값 (Auto-Pilot 기본값 강제 적용)
             const chunkMinLength = "35";
