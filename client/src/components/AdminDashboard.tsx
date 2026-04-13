@@ -453,8 +453,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}`;
 
             // 3. 청크 설정값 (Auto-Pilot 기본값 강제 적용)
-            const chunkMinLength = "40"; // 40자로 증가 (문맥 확보)
-            const chunkTimeoutMs = "10000"; // 10초 대기 (말 끊김 방지)
+            const chunkMinLength = "35";
+            const chunkTimeoutMs = "6000";
             const chunkSentenceEnd = "true";
 
             const url = `${CF_BASE}/processAudio?projectId=${encodeURIComponent(activeProjectId)}&sourceLabel=admin&sourceLang=${currentLang}`;
@@ -538,19 +538,10 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             setIsRecording(true);
             setStatus("recording");
 
-            const maxChunkMs = 10000;
-            const minChunkMs = 3500;
-            const silenceDb = -55;
-            const silenceHoldMs = 650;
-            let lastCutAt = Date.now();
-            let silenceStartAt: number | null = null;
-
             const scheduleNextCut = (ms: number) => {
                 if (segmentTimerRef.current) window.clearTimeout(segmentTimerRef.current);
                 segmentTimerRef.current = window.setTimeout(() => {
                     console.log("Forced Timeout -> Cutting");
-                    lastCutAt = Date.now();
-                    silenceStartAt = null;
                     switchRecorders();
                 }, ms);
             };
@@ -567,13 +558,14 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 setTimeout(() => {
                     if (currentMR && currentMR.state === 'recording') currentMR.stop();
                     activeIndexRef.current = nextIndex;
-                    lastCutAt = Date.now();
-                    scheduleNextCut(maxChunkMs);
+
+                    const interval = 2500;
+                    scheduleNextCut(interval);
                 }, 100);
             };
 
-            console.log("Starting Chunk Mode (10000ms)");
-            scheduleNextCut(maxChunkMs);
+            console.log("Starting Chunk Mode (2500ms)");
+            scheduleNextCut(2500);
 
             const buf = new Float32Array(analyser.fftSize);
             const loop = () => {
@@ -583,18 +575,6 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 const rms = Math.sqrt(sum / buf.length);
                 const db = 20 * Math.log10(Math.max(rms, 1e-8));
                 setCurrentDb(db);
-                const nowTs = Date.now();
-                if (db < silenceDb) {
-                    if (silenceStartAt === null) silenceStartAt = nowTs;
-                    if ((nowTs - silenceStartAt) >= silenceHoldMs && (nowTs - lastCutAt) >= minChunkMs) {
-                        console.log("VAD Silence -> Cutting");
-                        lastCutAt = nowTs;
-                        silenceStartAt = null;
-                        switchRecorders();
-                    }
-                } else {
-                    silenceStartAt = null;
-                }
                 rafIdRef.current = window.requestAnimationFrame(loop);
             };
             rafIdRef.current = window.requestAnimationFrame(loop);
