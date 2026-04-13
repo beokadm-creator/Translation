@@ -700,21 +700,6 @@ const AudienceView: React.FC = () => {
 
                             if (!text || text.trim() === "") return null
 
-                            if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) {
-                                return (
-                                    <TextItem
-                                        key={id}
-                                        id={id}
-                                        text=""
-                                        isRaw={true}
-                                        targetLang={activeLang}
-                                        fontSize={`${fontSize}px`}
-                                        color={isDarkMode ? "#6b7280" : "#9ca3af"}
-                                        opacity={0.6}
-                                    />
-                                )
-                            }
-
                             const isFinal = seg.status === 'final'
                             const isTimeOut = viewMode === 'live' ? ((now - (seg.timestamp || 0)) > 5000) : true
                             const showAsRaw = viewMode === 'live' ? (!isFinal && !isTimeOut && !isFallback) : false
