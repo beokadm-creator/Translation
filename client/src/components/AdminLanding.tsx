@@ -8,7 +8,7 @@ const AdminLanding: React.FC = () => {
   const navigate = useNavigate();
   
   // --- State ---
-  const [view] = useState<'conferences' | 'cleanup'>('conferences');
+  const [view, setView] = useState<'conferences' | 'cleanup'>('conferences');
   const [conferences, setConferences] = useState<Conference[]>([]);
   const [selectedConfId, setSelectedConfId] = useState<string | null>(null);
   const [showQR, setShowQR] = useState<string | null>(null); // Conf ID for QR modal
@@ -24,14 +24,13 @@ const AdminLanding: React.FC = () => {
   const [isCreatingProj, setIsCreatingProj] = useState(false);
   
   const [confForm, setConfForm] = useState({
-      id: "", title: "", accessCode: "", startDate: "", endDate: ""
+      id: "", title: "", startDate: "", endDate: ""
   });
   
   const [projForm, setProjForm] = useState<ProjectSettings>({
     name: "",
     slug: "",
     date: new Date().toISOString().split('T')[0],
-    accessCode: "",
     targetLanguages: ["en"],
     parkingMessage: "The session will start shortly.",
     conferenceId: ""
@@ -114,14 +113,13 @@ const AdminLanding: React.FC = () => {
           await set(ref(rtdb, `conferences/${id}`), { 
               id, 
               title: confForm.title, 
-              accessCode: confForm.accessCode, 
               dates,
               startDate: confForm.startDate,
               endDate: confForm.endDate
           });
           
           setIsCreatingConf(false);
-          setConfForm({ id: "", title: "", accessCode: "", startDate: "", endDate: "" });
+          setConfForm({ id: "", title: "", startDate: "", endDate: "" });
           alert("Conference Created Successfully!");
 } catch (error: unknown) {
           console.error("Create Failed:", error);
@@ -175,12 +173,25 @@ const AdminLanding: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
-      <div className="flex justify-between items-center mb-8 border-b border-gray-700 pb-4">
+      <div className="min-h-screen bg-gray-900 text-white p-8">
+      <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
               HONG COMM. Conference Admin Platform
           </h1>
-          {/* Clean UI: Ghost Cleanup Removed */}
+          <div className="flex gap-4">
+              <button 
+                  onClick={() => setView('conferences')} 
+                  className={`px-4 py-2 rounded text-sm font-bold transition-all ${view === 'conferences' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700'}`}
+              >
+                  Conferences
+              </button>
+              <button 
+                  onClick={() => setView('cleanup')} 
+                  className={`px-4 py-2 rounded text-sm font-bold transition-all flex items-center gap-2 ${view === 'cleanup' ? 'bg-red-600 text-white shadow-lg' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700'}`}
+              >
+                  <span>👻</span> Cleanup
+              </button>
+          </div>
       </div>
 
       {/* --- View: Conferences --- */}
@@ -201,7 +212,6 @@ const AdminLanding: React.FC = () => {
                           >
                               <div className="font-bold text-lg">{c.title}</div>
                               <div className="text-sm text-gray-400 flex justify-between mt-2">
-                                  <span>Code: {c.accessCode}</span>
                                   <span>{c.dates}</span>
                               </div>
                               <div className="mt-2 flex gap-2">
@@ -300,7 +310,6 @@ const AdminLanding: React.FC = () => {
               <div className="bg-gray-800 p-6 rounded-lg w-full max-w-md space-y-4 border border-gray-600">
                   <h2 className="text-xl font-bold">Create Conference</h2>
                   <input className="w-full bg-gray-700 p-2 rounded" placeholder="Conference Title" value={confForm.title} onChange={e => setConfForm({...confForm, title: e.target.value})} />
-                  <input className="w-full bg-gray-700 p-2 rounded" placeholder="Access Code (선택사항 - 없으면 누구나 접근 가능)" value={confForm.accessCode} onChange={e => setConfForm({...confForm, accessCode: e.target.value})} />
                   <div className="flex gap-2">
                       <div className="flex-1">
                           <label className="text-xs text-gray-400 block mb-1">Start Date</label>

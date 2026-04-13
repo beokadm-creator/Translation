@@ -6,7 +6,6 @@ import AudioVisualizer from './AudioVisualizer';
 import TextItem from './TextItem';
 import { useProjectStream } from '../hooks/useProjectStream';
 import HealthDashboard from './HealthDashboard';
-import { VADRecorder } from '../utils/vad';
 import type { StreamSegment } from '../types';
 
 
@@ -56,23 +55,22 @@ const AdminDashboard: React.FC = () => {
         fontFamily: string;
         typingSpeed: number;
         bottomOffset: number;
-        minLength: number;
-        timeoutMs: number;
-        sentenceEnd: boolean;
-        vadMaxCutMs: number;
-        recordMode: 'chunk' | 'vad';
         hideRaw: boolean;
-        chunkInterval: number;
-    }
+        primarySTT: 'openai' | 'deepgram';
+        fallbackSTT: 'openai' | 'deepgram';
+        primaryTrans: 'openai' | 'claude';
+        fallbackTrans: 'openai' | 'claude';
+}
 
-    const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
-        fontSize: 48, fontColor: '#ffffff', fontWeight: 'bold', bgColor: '#000000', bgOpacity: 0.6,
-        padding: 40, textEffect: 'shadow', align: 'center',
-        displayStyle: 'youtube', letterSpacing: 0, maxLines: 2, lineHeight: 1.5,
-        fontFamily: 'sans-serif', typingSpeed: 35, bottomOffset: 60,
-        minLength: 20, timeoutMs: 3000, sentenceEnd: true, vadMaxCutMs: 15000, chunkInterval: 4000,
-        recordMode: 'chunk', hideRaw: true,
-    });
+const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
+    fontSize: 48, fontColor: '#ffffff', fontWeight: 'bold', bgColor: '#000000', bgOpacity: 0.6,
+    padding: 40, textEffect: 'shadow', align: 'center',
+    displayStyle: 'youtube', letterSpacing: 0, maxLines: 2, lineHeight: 1.5,
+    fontFamily: 'sans-serif', typingSpeed: 35, bottomOffset: 60,
+    hideRaw: true,
+    primarySTT: 'openai', fallbackSTT: 'deepgram',
+    primaryTrans: 'openai', fallbackTrans: 'claude'
+});
 
     // Load Project Settings
     useEffect(() => {
@@ -81,17 +79,15 @@ const AdminDashboard: React.FC = () => {
         get(ref(database, `projects/${activeProjectId}/settings`)).then(snap => {
             if (snap.exists()) {
                 const val = snap.val();
-                // Merge overlay and chunk settings flatly for easier state management, or keep structure
-                // Let's keep it flat in state for simplicity, but save structurally
                 setProjectSettings((prev) => ({
-                    ...prev,
-                    ...(val.overlay || {}),
-                    ...(val.chunk || {}),
-                    vadMaxCutMs: val.chunk?.vadMaxCutMs || 15000,
-                    chunkInterval: val.chunk?.chunkInterval || 4000,
-                    recordMode: val.recordMode || 'chunk',
-                    hideRaw: val.hideRaw !== undefined ? val.hideRaw : true,
-                }));
+                ...prev,
+                ...(val.overlay || {}),
+                hideRaw: val.hideRaw !== undefined ? val.hideRaw : true,
+                primarySTT: val.ai?.primarySTT || 'openai',
+                fallbackSTT: val.ai?.fallbackSTT || 'deepgram',
+                primaryTrans: val.ai?.primaryTrans || 'openai',
+                fallbackTrans: val.ai?.fallbackTrans || 'claude',
+            }));
             }
         });
     }, [activeProjectId]);
@@ -116,14 +112,12 @@ const AdminDashboard: React.FC = () => {
                 typingSpeed: projectSettings.typingSpeed,
                 bottomOffset: projectSettings.bottomOffset,
             };
-            updates[`projects/${activeProjectId}/settings/chunk`] = {
-                minLength: Number(projectSettings.minLength),
-                timeoutMs: Number(projectSettings.timeoutMs),
-                sentenceEnd: Boolean(projectSettings.sentenceEnd),
-                vadMaxCutMs: Number(projectSettings.vadMaxCutMs),
-                chunkInterval: Number(projectSettings.chunkInterval)
+            updates[`projects/${activeProjectId}/settings/ai`] = {
+                primarySTT: projectSettings.primarySTT,
+                fallbackSTT: projectSettings.fallbackSTT,
+                primaryTrans: projectSettings.primaryTrans,
+                fallbackTrans: projectSettings.fallbackTrans,
             };
-            updates[`projects/${activeProjectId}/settings/recordMode`] = projectSettings.recordMode;
             updates[`projects/${activeProjectId}/settings/hideRaw`] = Boolean(projectSettings.hideRaw);
 
             await update(ref(database), updates);
@@ -182,21 +176,6 @@ const AdminDashboard: React.FC = () => {
     const analyserRef = useRef<AnalyserNode | null>(null);
     const rafIdRef = useRef<number | null>(null);
     const [sourceType, setSourceType] = useState<'mic' | 'system'>('mic');
-    const vadRef = useRef<VADRecorder | null>(null);
-
-    // Ref로 최신 설정값 추적 (startRecording 클로저 stale 방지)
-    const recordModeRef = useRef(projectSettings.recordMode);
-    const chunkIntervalRef = useRef(projectSettings.chunkInterval);
-    const vadMaxCutMsRef = useRef(projectSettings.vadMaxCutMs);
-    useEffect(() => {
-        recordModeRef.current = projectSettings.recordMode;
-    }, [projectSettings.recordMode]);
-    useEffect(() => {
-        chunkIntervalRef.current = projectSettings.chunkInterval;
-    }, [projectSettings.chunkInterval]);
-    useEffect(() => {
-        vadMaxCutMsRef.current = projectSettings.vadMaxCutMs;
-    }, [projectSettings.vadMaxCutMs]);
 
     // --- Isolation View State ---
     const [viewMode, setViewMode] = useState<'live' | 'archive'>('live');
@@ -320,8 +299,16 @@ const AdminDashboard: React.FC = () => {
 
     const handleSaveSession = async () => {
         if (!selectedSessionId) return;
-        await update(ref(database, `projects/${activeProjectId}/sessions/${selectedSessionId}`), formData);
-        alert("Saved!");
+        try {
+            const updates: Record<string, any> = {};
+            updates[`projects/${activeProjectId}/sessions/${selectedSessionId}`] = formData;
+            
+            await update(ref(database), updates);
+            alert("Saved!");
+        } catch (error) {
+            console.error("Failed to save session:", error);
+            alert("세션 저장에 실패했습니다. 네트워크를 확인해주세요.");
+        }
     };
 
     const handleMove = async (index: number, direction: -1 | 1) => {
@@ -465,10 +452,10 @@ const AdminDashboard: React.FC = () => {
             // 2. GPT 번역용 배경지식 (환각 방지를 위해 초록 제외, 주제/키워드/연자 순으로 똑똑하게 배치)
             const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}`;
 
-            // 3. 청크 설정값
-            const chunkMinLength = (projectSettings as any).chunk?.minLength?.toString() || "35";
-            const chunkTimeoutMs = (projectSettings as any).chunk?.timeoutMs?.toString() || "5000";
-            const chunkSentenceEnd = (projectSettings as any).chunk?.sentenceEnd ? "true" : "false";
+            // 3. 청크 설정값 (Auto-Pilot 기본값 강제 적용)
+            const chunkMinLength = "35";
+            const chunkTimeoutMs = "6000";
+            const chunkSentenceEnd = "true";
 
             const url = `${CF_BASE}/processAudio?projectId=${encodeURIComponent(activeProjectId)}&sourceLabel=admin&sourceLang=${currentLang}`;
             console.log(`[Upload] Sending ${blob.size}B → CF (project=${activeProjectId}, lang=${currentLang})`);
@@ -484,7 +471,11 @@ const AdminDashboard: React.FC = () => {
                     'X-Session-Context': encodeURIComponent(sessionContext),
                     'X-Chunk-Min-Length': chunkMinLength,
                     'X-Chunk-Timeout-Ms': chunkTimeoutMs,
-                    'X-Chunk-Sentence-End': chunkSentenceEnd
+                    'X-Chunk-Sentence-End': chunkSentenceEnd,
+                    'X-STT-Primary': projectSettings.primarySTT,
+                    'X-STT-Fallback': projectSettings.fallbackSTT,
+                    'X-Trans-Primary': projectSettings.primaryTrans,
+                    'X-Trans-Fallback': projectSettings.fallbackTrans
                 },
                 body: buf
             }).then(async r => {
@@ -568,30 +559,13 @@ const AdminDashboard: React.FC = () => {
                     if (currentMR && currentMR.state === 'recording') currentMR.stop();
                     activeIndexRef.current = nextIndex;
 
-                    const currentMode = recordModeRef.current || 'chunk';
-                    const interval = chunkIntervalRef.current || 2000;
-                    scheduleNextCut(currentMode === 'vad' ? vadMaxCutMsRef.current : interval);
+                    const interval = 2500;
+                    scheduleNextCut(interval);
                 }, 100);
             };
 
-            const currentMode = recordModeRef.current || 'chunk';
-            console.log("Start Recording with Mode:", currentMode);
-
-            if (currentMode === 'vad') {
-                // VAD Mode: Switch on silence
-                console.log("Starting VAD Mode");
-                vadRef.current = new VADRecorder(mic, () => {
-                    console.log("VAD: Silence Detected -> Cutting");
-                    switchRecorders();
-                });
-                // Safety: Force cut every configured ms if no silence
-                scheduleNextCut(vadMaxCutMsRef.current);
-            } else {
-                // Chunk Mode: Switch every N ms
-                const interval = chunkIntervalRef.current || 2000;
-                console.log(`Starting Chunk Mode (${interval}ms)`);
-                scheduleNextCut(interval);
-            }
+            console.log("Starting Chunk Mode (2500ms)");
+            scheduleNextCut(2500);
 
             const buf = new Float32Array(analyser.fftSize);
             const loop = () => {
@@ -609,10 +583,6 @@ const AdminDashboard: React.FC = () => {
 
     const stopRecording = useCallback(() => {
         if (segmentTimerRef.current) window.clearTimeout(segmentTimerRef.current);
-        if (vadRef.current) {
-            vadRef.current.destroy();
-            vadRef.current = null;
-        }
         if (mr1Ref.current?.state === 'recording') mr1Ref.current.stop();
         if (mr2Ref.current?.state === 'recording') mr2Ref.current.stop();
         stream?.getTracks().forEach(t => t.stop());
@@ -622,17 +592,6 @@ const AdminDashboard: React.FC = () => {
         setStatus("idle");
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [stream]);
-
-    // Effect: Restart recording if mode changes while recording
-    useEffect(() => {
-        if (isRecording) {
-            console.log("Record Mode Changed, Restarting...");
-            stopRecording();
-            const t = setTimeout(() => startRecording(), 500);
-            return () => clearTimeout(t);
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [projectSettings.recordMode, projectSettings.chunkInterval]);
 
     return (
         <div className="flex h-screen bg-gray-900 text-white overflow-hidden">
@@ -899,44 +858,85 @@ const AdminDashboard: React.FC = () => {
                                 {/* Section 0: Model Info + Audio Engine */}
                                 {settingsTab === 'ai' && <>
                                     <div className="bg-gray-900 border border-gray-600 p-3 rounded-lg">
-                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">현재 AI 모델</h3>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <div className="bg-gray-800 rounded p-2">
-                                                <div className="text-[10px] text-gray-500 mb-0.5">STT (음성인식)</div>
-                                                <div className="text-xs font-bold text-green-400">gpt-4o-transcribe</div>
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 flex justify-between">
+                                            <span>AI 모델 설정</span>
+                                        </h3>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            {/* STT 엔진 설정 */}
+                                            <div className="space-y-3">
+                                                <h4 className="text-sm font-bold text-gray-300">🎙️ STT (음성인식)</h4>
+                                                <div>
+                                                    <label className="text-[10px] text-gray-500 mb-1 block">메인 엔진 (Primary)</label>
+                                                    <select 
+                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-green-400"
+                                                        value={projectSettings.primarySTT}
+                                                        onChange={e => setProjectSettings({...projectSettings, primarySTT: e.target.value as 'openai' | 'deepgram'})}
+                                                    >
+                                                        <option value="openai">OpenAI (gpt-4o-transcribe)</option>
+                                                        <option value="deepgram">Deepgram (Nova-3)</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] text-gray-500 mb-1 block">보조 엔진 (Fallback)</label>
+                                                    <select 
+                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-gray-400"
+                                                        value={projectSettings.fallbackSTT}
+                                                        onChange={e => setProjectSettings({...projectSettings, fallbackSTT: e.target.value as 'openai' | 'deepgram'})}
+                                                    >
+                                                        <option value="deepgram">Deepgram (Nova-3)</option>
+                                                        <option value="openai">OpenAI (gpt-4o-transcribe)</option>
+                                                    </select>
+                                                </div>
                                             </div>
-                                            <div className="bg-gray-800 rounded p-2">
-                                                <div className="text-[10px] text-gray-500 mb-0.5">Translation (번역)</div>
-                                                <div className="text-xs font-bold text-blue-400">gpt-4o-mini</div>
+
+                                            {/* 번역 엔진 설정 */}
+                                            <div className="space-y-3 border-l border-gray-700 pl-4">
+                                                <h4 className="text-sm font-bold text-gray-300">🌐 Translation (번역)</h4>
+                                                <div>
+                                                    <label className="text-[10px] text-gray-500 mb-1 block">메인 엔진 (Primary)</label>
+                                                    <select 
+                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-blue-400"
+                                                        value={projectSettings.primaryTrans}
+                                                        onChange={e => setProjectSettings({...projectSettings, primaryTrans: e.target.value as 'openai' | 'claude'})}
+                                                    >
+                                                        <option value="openai">OpenAI (gpt-4o-mini)</option>
+                                                        <option value="claude">Anthropic (Claude 3 Haiku)</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] text-gray-500 mb-1 block">보조 엔진 (Fallback)</label>
+                                                    <select 
+                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-gray-400"
+                                                        value={projectSettings.fallbackTrans}
+                                                        onChange={e => setProjectSettings({...projectSettings, fallbackTrans: e.target.value as 'openai' | 'claude'})}
+                                                    >
+                                                        <option value="claude">Anthropic (Claude 3 Haiku)</option>
+                                                        <option value="openai">OpenAI (gpt-4o-mini)</option>
+                                                    </select>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="bg-gray-700 p-4 rounded-lg">
-                                        <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-                                            🎙️ Audio Capture Mode <span className="text-xs font-normal text-gray-400">(녹화 중 변경 가능)</span>
+                                    <div className="bg-blue-900/20 border border-blue-700/50 p-4 rounded-lg">
+                                        <h3 className="text-sm font-bold text-blue-400 mb-2 flex items-center gap-2">
+                                            🤖 Auto-Pilot 활성화됨
                                         </h3>
-                                        <div className="flex gap-4">
-                                            <label className={`flex-1 p-3 rounded border cursor-pointer transition-all ${projectSettings.recordMode === 'chunk' ? 'bg-blue-600 border-blue-400' : 'bg-gray-800 border-gray-600 hover:bg-gray-600'}`}>
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <input type="radio" name="recordMode" value="chunk" checked={projectSettings.recordMode === 'chunk'} onChange={() => setProjectSettings({ ...projectSettings, recordMode: 'chunk' })} className="hidden" />
-                                                    <span className="font-bold text-white">🔵 Interval (Chunk)</span>
-                                                </div>
-                                                <p className="text-[10px] text-gray-300 leading-tight">
-                                                    고정 간격으로 오디오 전송. Q&A·다화자 환경 권장.<br/>
-                                                    <span className="text-yellow-300">※ 간격이 짧을수록 Whisper 컨텍스트가 줄어 정확도 저하 가능.</span>
-                                                </p>
+                                        <p className="text-xs text-gray-300 leading-relaxed">
+                                            가장 안정적이고 빠른 <strong>"2.5초 간격 연속 전송(Chunk)"</strong> 모드가 기본으로 적용되어 있습니다.<br/>
+                                            오디오 유실이나 지연 없이 서버가 알아서 문맥을 재조립하여 최적의 번역을 수행합니다.
+                                        </p>
+                                    </div>
+                                    
+                                    <div className="flex items-start gap-2 pt-2 border-t border-gray-700">
+                                        <input type="checkbox" id="chkHideRaw"
+                                            checked={projectSettings.hideRaw}
+                                            onChange={e => setProjectSettings({ ...projectSettings, hideRaw: e.target.checked })}
+                                            className="mt-0.5" />
+                                        <div>
+                                            <label htmlFor="chkHideRaw" className="text-sm text-gray-300 cursor-pointer font-bold">
+                                                🔒 Raw STT 숨김 (번역 완료 전 원문 미표시)
                                             </label>
-
-                                            <label className={`flex-1 p-3 rounded border cursor-pointer transition-all ${projectSettings.recordMode === 'vad' ? 'bg-green-600 border-green-400' : 'bg-gray-800 border-gray-600 hover:bg-gray-600'}`}>
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <input type="radio" name="recordMode" value="vad" checked={projectSettings.recordMode === 'vad'} onChange={() => setProjectSettings({ ...projectSettings, recordMode: 'vad' })} className="hidden" />
-                                                    <span className="font-bold text-white">🟢 Silence (VAD)</span>
-                                                </div>
-                                                <p className="text-[10px] text-gray-300 leading-tight">
-                                                    발화 중단 후 자동 전송. 기조연설·단독 발표 권장.<br/>
-                                                    <span className="text-yellow-300">※ 말이 빠른 발화자·소음 환경에서 감도 조절 필요.</span>
-                                                </p>
-                                            </label>
+                                            <p className="text-[10px] text-gray-500 mt-0.5">체크 시 번역기가 정제한 텍스트만 청중 화면에 표시됩니다.</p>
                                         </div>
                                     </div>
                                 </>}
@@ -1080,78 +1080,6 @@ const AdminDashboard: React.FC = () => {
                                     </div>
 
                                     <div className="text-[10px] text-gray-500">※ 저장 즉시 오버레이에 실시간 반영됩니다.</div>
-                                </div>}
-
-                                {/* Section 2: Buffer Tuning */}
-                                {settingsTab === 'ai' && <div className="pt-2">
-                                    <h3 className="text-sm font-bold text-gray-300 mb-1">번역 버퍼 튜닝</h3>
-                                    <p className="text-xs text-gray-500 mb-4">STT 결과를 모아서 번역하는 타이밍을 조정합니다. 발화 속도에 맞게 설정하세요.</p>
-
-                                    <div className="grid grid-cols-1 gap-4">
-                                        <div>
-                                            <label className="text-xs text-gray-400 flex justify-between">
-                                                <span>Interval 간격 <span className="text-gray-500">(Interval 모드)</span></span>
-                                                <span className="text-white font-bold">{projectSettings.chunkInterval} ms</span>
-                                            </label>
-                                            <input type="range" min="2000" max="8000" step="500" className="w-full mt-1"
-                                                value={projectSettings.chunkInterval}
-                                                onChange={e => setProjectSettings({ ...projectSettings, chunkInterval: Number(e.target.value) })} />
-                                            <p className="text-[10px] text-gray-500">오디오를 N ms마다 잘라서 전송. 길수록 Whisper 인식 정확도 향상 (권장: 3000~5000ms).</p>
-                                        </div>
-
-                                        <div>
-                                            <label className="text-xs text-gray-400 flex justify-between">
-                                                <span>번역 시작 최소 글자 수</span>
-                                                <span className="text-white font-bold">{projectSettings.minLength} 자</span>
-                                            </label>
-                                            <input type="range" min="10" max="200" step="5" className="w-full mt-1"
-                                                value={projectSettings.minLength}
-                                                onChange={e => setProjectSettings({ ...projectSettings, minLength: Number(e.target.value) })} />
-                                            <p className="text-[10px] text-gray-500">이 글자 수 이상 쌓여야 번역 시작. 낮을수록 빠르지만 문맥이 짧아짐 (권장: 20~60).</p>
-                                        </div>
-
-                                        <div>
-                                            <label className="text-xs text-gray-400 flex justify-between">
-                                                <span>강제 번역 대기 시간</span>
-                                                <span className="text-white font-bold">{projectSettings.timeoutMs} ms</span>
-                                            </label>
-                                            <input type="range" min="1000" max="8000" step="500" className="w-full mt-1"
-                                                value={projectSettings.timeoutMs}
-                                                onChange={e => setProjectSettings({ ...projectSettings, timeoutMs: Number(e.target.value) })} />
-                                            <p className="text-[10px] text-gray-500">최소 글자 미달이어도 이 시간이 지나면 강제 번역 (권장: 2000~4000ms).</p>
-                                        </div>
-
-                                        <div>
-                                            <label className="text-xs text-gray-400 flex justify-between">
-                                                <span>VAD 최대 발화 허용 시간</span>
-                                                <span className="text-white font-bold">{projectSettings.vadMaxCutMs} ms</span>
-                                            </label>
-                                            <input type="range" min="3000" max="20000" step="1000" className="w-full mt-1"
-                                                value={projectSettings.vadMaxCutMs}
-                                                onChange={e => setProjectSettings({ ...projectSettings, vadMaxCutMs: Number(e.target.value) })} />
-                                            <p className="text-[10px] text-gray-500">Silence(VAD) 모드에서 침묵 감지 없이 이 시간이 지나면 강제 컷 (권장: 8000~15000ms).</p>
-                                        </div>
-
-                                        <div className="flex items-center gap-2 pt-1">
-                                            <input type="checkbox" id="chkSentence"
-                                                checked={projectSettings.sentenceEnd}
-                                                onChange={e => setProjectSettings({ ...projectSettings, sentenceEnd: e.target.checked })} />
-                                            <label htmlFor="chkSentence" className="text-sm text-gray-300">문장 끝(. ! ?)에서 즉시 번역</label>
-                                        </div>
-
-                                        <div className="flex items-start gap-2 pt-2 border-t border-gray-700">
-                                            <input type="checkbox" id="chkHideRaw"
-                                                checked={projectSettings.hideRaw}
-                                                onChange={e => setProjectSettings({ ...projectSettings, hideRaw: e.target.checked })}
-                                                className="mt-0.5" />
-                                            <div>
-                                                <label htmlFor="chkHideRaw" className="text-sm text-gray-300 cursor-pointer">
-                                                    🔒 Raw STT 숨김 (번역 완료 전 원문 미표시)
-                                                </label>
-                                                <p className="text-[10px] text-gray-500 mt-0.5">체크 시 gpt-4o-mini가 정제한 텍스트만 표시됩니다. 오인식 단어가 화면에 노출되지 않습니다.</p>
-                                            </div>
-                                        </div>
-                                    </div>
                                 </div>}
                             </div>
 

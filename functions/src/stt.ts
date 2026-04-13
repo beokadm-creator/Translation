@@ -97,6 +97,71 @@ const isGarbage = (text: string, _originalText?: string, promptText?: string): b
     return false
 }
 
+interface STTResult {
+    text: string;
+    ms: number;
+    provider: string;
+}
+
+interface STTProvider {
+    name: string;
+    transcribe(audioStream: Readable, sourceLang: string, prompt: string): Promise<STTResult>;
+}
+
+class OpenAISTTProvider implements STTProvider {
+    name = "openai";
+    async transcribe(audioStream: Readable, sourceLang: string, prompt: string): Promise<STTResult> {
+        const tStart = Date.now();
+        const stt = await getOpenAI().audio.transcriptions.create({
+            file: audioStream as any, model: "gpt-4o-transcribe", language: sourceLang,
+            prompt: prompt, temperature: 0,
+        });
+        return { text: (stt?.text || "").trim(), ms: Date.now() - tStart, provider: this.name };
+    }
+}
+
+class DeepgramSTTProvider implements STTProvider {
+    name = "deepgram";
+    async transcribe(_audioStream: Readable, _sourceLang: string, _prompt: string): Promise<STTResult> {
+        throw new Error("Deepgram not implemented yet");
+    }
+}
+
+class STTFactory {
+    static async executeWithFallback(
+        audioBuffer: Buffer, 
+        sourceLang: string, 
+        prompt: string,
+        primaryEngineName: string = 'openai',
+        fallbackEngineName: string = 'deepgram'
+    ): Promise<STTResult> {
+        
+        const getProvider = (name: string): STTProvider => {
+            if (name === 'deepgram') return new DeepgramSTTProvider();
+            return new OpenAISTTProvider();
+        };
+
+        const primary = getProvider(primaryEngineName);
+        const fallback = getProvider(fallbackEngineName);
+
+        try {
+            const stream = Readable.from(audioBuffer) as Readable & { path: string };
+            stream.path = "audio.webm";
+            return await primary.transcribe(stream, sourceLang, prompt);
+        } catch (e: any) {
+            functions.logger.error("[STT] Primary engine failed, attempting fallback", { error: e.message });
+            try {
+                const streamFallback = Readable.from(audioBuffer) as Readable & { path: string };
+                streamFallback.path = "audio.webm";
+                return await fallback.transcribe(streamFallback, sourceLang, prompt);
+            } catch (fallbackError: any) {
+                functions.logger.error("[STT] Fallback engine also failed", { error: fallbackError.message });
+                throw fallbackError;
+            }
+        }
+    }
+}
+
 // ── 번역 파이프라인 ───────────────────────────────────────────────────────────
 
 // 번역 결과 유효성 검사 (필수 target 필드가 모두 채워졌는지 확인)
@@ -123,13 +188,24 @@ const buildTranslationResult = (
     }
 }
 
-const translateWithOpenAI = async (
-    rawText: string,
-    sourceLang: string,
-    previousContext: string,
-    sessionContext: string
-) : Promise<{ refined: string; ko: string; en: string; isMedical: boolean } | null> => {
-    try {
+interface TranslationResult {
+    refined: string;
+    ko: string;
+    en: string;
+    isMedical: boolean;
+    provider: string;
+    ms: number;
+}
+
+interface TranslationProvider {
+    name: string;
+    translate(rawText: string, sourceLang: string, previousContext: string, sessionContext: string): Promise<TranslationResult | null>;
+}
+
+class OpenAITranslationProvider implements TranslationProvider {
+    name = "openai";
+    async translate(rawText: string, sourceLang: string, previousContext: string, sessionContext: string): Promise<TranslationResult | null> {
+        const tStart = Date.now();
         const openai = getOpenAI()
         const contextLine = sanitize(sessionContext).slice(0, 180)
         const previousLine = sanitize(previousContext.split(' / ').slice(-1)[0] || '').slice(0, 80)
@@ -167,35 +243,59 @@ const translateWithOpenAI = async (
         const data = JSON.parse(content) as Record<string, unknown>
         if (!validateTranslation(data, ['ko', 'en'])) return null
 
-        return buildTranslationResult(data, sourceLang, rawText)
-    } catch (e: any) {
-        functions.logger.warn("[Translate][OpenAI] Failed", {
-            err: String(e).slice(0, 180)
-        })
-        return null
+        const result = buildTranslationResult(data, sourceLang, rawText);
+        return { ...result, provider: this.name, ms: Date.now() - tStart };
     }
 }
 
-const translateWithFallback = async (
-    rawText: string,
-    sourceLang: string,
-    previousContext: string,
-    sessionContext: string
-): Promise<{ refined: string; ko: string; en: string; isMedical: boolean }> => {
-    const tStart = Date.now()
-    const result = await translateWithOpenAI(rawText, sourceLang, previousContext, sessionContext)
-
-    if (result) {
-        functions.logger.info("[Translate][OpenAI] OK", {
-            ms: Date.now() - tStart,
-            srcLen: rawText.length
-        })
-        return result
+class ClaudeTranslationProvider implements TranslationProvider {
+    name = "claude";
+    async translate(_rawText: string, _sourceLang: string, _previousContext: string, _sessionContext: string): Promise<TranslationResult | null> {
+        throw new Error("Claude not implemented yet");
     }
+}
 
-    functions.logger.error("[Translate][OpenAI] Failed, raw text fallback", { input: rawText.slice(0, 50) })
-    const fallback = sanitize(rawText)
-    return { refined: fallback, ko: fallback, en: fallback, isMedical: false }
+class TranslationFactory {
+    static async executeWithFallback(
+        rawText: string,
+        sourceLang: string,
+        previousContext: string,
+        sessionContext: string,
+        primaryEngineName: string = 'openai',
+        fallbackEngineName: string = 'claude'
+    ): Promise<{ refined: string; ko: string; en: string; isMedical: boolean }> {
+        
+        const getProvider = (name: string): TranslationProvider => {
+            if (name === 'claude') return new ClaudeTranslationProvider();
+            return new OpenAITranslationProvider();
+        };
+
+        const primary = getProvider(primaryEngineName);
+        const fallback = getProvider(fallbackEngineName);
+
+        try {
+            const result = await primary.translate(rawText, sourceLang, previousContext, sessionContext);
+            if (result) {
+                functions.logger.info(`[Translate][${result.provider}] OK`, { ms: result.ms, srcLen: rawText.length });
+                return result;
+            }
+        } catch (e: any) {
+            functions.logger.warn(`[Translate][${primary.name}] Failed, attempting fallback`, { err: String(e).slice(0, 180) });
+            try {
+                const fbResult = await fallback.translate(rawText, sourceLang, previousContext, sessionContext);
+                if (fbResult) {
+                    functions.logger.info(`[Translate][${fbResult.provider}] OK (Fallback)`, { ms: fbResult.ms, srcLen: rawText.length });
+                    return fbResult;
+                }
+            } catch (fallbackErr: any) {
+                functions.logger.warn(`[Translate][${fallback.name}] Fallback failed`, { err: String(fallbackErr).slice(0, 180) });
+            }
+        }
+
+        functions.logger.error("[Translate] All engines failed, raw text fallback", { input: rawText.slice(0, 50) });
+        const safeRaw = sanitize(rawText);
+        return { refined: safeRaw, ko: safeRaw, en: safeRaw, isMedical: false };
+    }
 }
 
 // ── OpenAI 클라이언트 ─────────────────────────────────────────────────────────
@@ -263,27 +363,22 @@ export const processAudio = functions
         const minLength = Number(req.headers['x-chunk-min-length'] || 35);
         const timeoutMs = Number(req.headers['x-chunk-timeout-ms'] || 5000);
         const sentenceEnd = (req.headers['x-chunk-sentence-end'] || "true") === "true";
+        const primarySTT = (req.headers['x-stt-primary'] || "openai").toString();
+        const fallbackSTT = (req.headers['x-stt-fallback'] || "deepgram").toString();
+        const primaryTrans = (req.headers['x-trans-primary'] || "openai").toString();
+        const fallbackTrans = (req.headers['x-trans-fallback'] || "claude").toString();
 
-        // ── STEP 1: OpenAI STT ────────────────────────────────────────────
-            let openai = getOpenAI()
-            const audioStream = Readable.from(buf) as Readable & { path: string }
-            audioStream.path = "audio.webm"
-
-            const tWhisper = Date.now()
+        // ── STEP 1: AI STT ────────────────────────────────────────────
             const basePrompt = sourceLang === 'ko' ? DENTAL_PROMPT_KO : DENTAL_PROMPT_EN;
             const whisperPrompt = customKeywords ? `${basePrompt}, ${customKeywords}` : basePrompt;
 
-            const stt = await openai.audio.transcriptions.create({
-                file: audioStream, model: "gpt-4o-transcribe", language: sourceLang,
-                prompt: whisperPrompt, temperature: 0,
-            })
-            const whisperMs = Date.now() - tWhisper
-            functions.logger.info("[Whisper]", { ms: whisperMs })
+            const sttResult = await STTFactory.executeWithFallback(buf, sourceLang, whisperPrompt, primarySTT, fallbackSTT);
+            functions.logger.info(`[STT][${sttResult.provider}]`, { ms: sttResult.ms });
 
             // HealthDashboard WHISPER 상태 표시용 타임스탬프 기록 (비차단)
-            projectRef.child('status/services/openai').update({ ts: Date.now() }).catch(() => {})
+            projectRef.child(`status/services/${sttResult.provider}`).update({ ts: Date.now() }).catch(() => {})
 
-            const sttText = (stt?.text || "").trim()
+            const sttText = sttResult.text;
             const rawText = sanitize(sttText)
 
             if (rawText.length < 2 || isGarbage(rawText, sttText, whisperPrompt)) {
@@ -356,8 +451,8 @@ export const processAudio = functions
             if (flushData) {
                 const { targetId, idsToDelete, bufferText: flushText, previousContext } = flushData as { targetId: string; idsToDelete: string[]; bufferText: string; previousContext: string }
                 try {
-                    const { refined, ko, en, isMedical } = await translateWithFallback(
-                        flushText, sourceLang, previousContext, sessionContext
+                    const { refined, ko, en, isMedical } = await TranslationFactory.executeWithFallback(
+                        flushText, sourceLang, previousContext, sessionContext, primaryTrans, fallbackTrans
                     )
                     const updates: Record<string, unknown> = {}
                     const base = `projects/${projectId}/stream/${targetId}`

@@ -86,7 +86,7 @@ exports.archiveSession = functions.https.onRequest(async (req, res) => {
         await projectRef.child("state").set({
             bufferText: "",
             bufferIds: [],
-            lastGeminiTime: Date.now()
+            lastFlushTime: Date.now()
         });
         // 4. Reset Active Session if it matches
         const activeSnap = await projectRef.child("activeSessionId").get();
