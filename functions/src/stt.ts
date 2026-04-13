@@ -57,23 +57,28 @@ const isPromptLeakage = (text: string, promptText?: string): boolean => {
 
     if (!normalizedText || !normalizedPrompt) return false
 
+    // 1. 프롬프트 전체가 텍스트에 통째로 포함된 경우 (가장 흔한 케이스)
+    if (normalizedText.includes(normalizedPrompt) && normalizedPrompt.length >= 10) return true
     if (normalizedPrompt.includes(normalizedText) && normalizedText.length >= 40) return true
-    if (normalizedText.includes(normalizedPrompt) && normalizedPrompt.length >= 40) return true
 
+    // 2. 키워드가 문장 사이에 연속으로 박혀있는 경우 감지
+    // "임플란트, 상악동, 골이식, 픽스처, 어버트먼트, 크라운, 보철" 등
     const promptItems = promptText
         .split(',')
         .map(item => normalizeLoose(item))
-        .filter(item => item.length >= 6)
+        .filter(item => item.length >= 2) // 짧은 단어도 포함하도록 조건 완화
 
-    if (promptItems.length < 4) return false
+    if (promptItems.length < 3) return false
 
-    const matchedItems = new Set(
-        promptItems.filter(item => normalizedText.includes(item))
-    )
-
+    // 텍스트 내에 존재하는 프롬프트 아이템 개수 세기
+    const matchedItems = promptItems.filter(item => normalizedText.includes(item))
+    
+    // 키워드가 3개 이상 들어있으면서, 그 키워드들이 쉼표로 나열된 패턴이 보이면 환각으로 간주
+    // "단어1, 단어2, 단어3" 형태의 패턴이 텍스트에 존재하는지 검사
     const commaCount = (text.match(/,/g) || []).length
+    if (matchedItems.length >= 3 && commaCount >= 2) return true
 
-    return matchedItems.size >= 4 && commaCount >= 3
+    return false
 }
 
 const isGarbage = (text: string, _originalText?: string, promptText?: string): boolean => {
@@ -87,8 +92,8 @@ const isGarbage = (text: string, _originalText?: string, promptText?: string): b
 
     // 침묵 시 흔히 나오는 짧은 환각어 필터 (짧은 문구에서만 발동, 긴 정상 발화는 보존)
     // 주의: '좋아요' / '구독' 단독 사용 금지 - 정상 발화("좋아요, 다음으로...") 삭제됨
-    const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독과 좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사|^감사합니다\.?$|영상편집|자막 제공|광고를 포함|알 수 없는 소리|subtitles by|subtitle by|자막.*제작|번역.*제공|MBC 뉴스|SBS 뉴스|KBS 뉴스)/i
-    if (filterGarbage.test(text.trim()) && text.length < 80) return true
+    const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독과 좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사|^감사합니다\.?$|영상편집|자막 제공|광고를 포함|알 수 없는 소리|subtitles by|subtitle by|자막.*제작|번역.*제공|MBC 뉴스|SBS 뉴스|KBS 뉴스|임플란트.*상악동.*골이식|상악동.*골이식.*픽스처|픽스처.*어버트먼트)/i
+    if (filterGarbage.test(text.trim()) && text.length < 150) return true
 
     // 성음만으로 된 건 버림
     const alphanumeric = text.replace(/[^a-zA-Z0-9가-힣ㄱ-ㅎㅏ-ㅣ]/g, '')
