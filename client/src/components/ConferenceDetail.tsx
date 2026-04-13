@@ -63,7 +63,7 @@ const ConferenceDetail: React.FC = () => {
 
   if (status === 'loading') {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#f9fafb] dark:bg-[#111827] text-[#111827] dark:text-[#f9fafb] flex items-center justify-center">
         <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent"></div>
       </div>
     );
@@ -71,11 +71,11 @@ const ConferenceDetail: React.FC = () => {
 
   if (status === 'error' || !conference) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#f9fafb] dark:bg-[#111827] text-[#111827] dark:text-[#f9fafb] flex items-center justify-center">
         <div className="text-center">
           <div className="text-6xl mb-4">⚠️</div>
           <h2 className="text-2xl font-bold mb-2">Conference Not Found</h2>
-          <button onClick={handleBack} className="mt-4 text-blue-400 hover:text-blue-300 underline">
+          <button onClick={handleBack} className="mt-4 text-[#1e3a5f] dark:text-[#d4af37] hover:text-[#24456f] dark:text-[#b5952f] underline">
             Back to Home
           </button>
         </div>
@@ -84,13 +84,13 @@ const ConferenceDetail: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="min-h-screen bg-[#f9fafb] dark:bg-[#111827] text-[#111827] dark:text-[#f9fafb]">
       {/* Header */}
-      <div className="border-b border-gray-800">
+      <div className="border-b border-[#e5e7eb] dark:border-[#1f2937]">
         <div className="container mx-auto px-6 py-6">
           <button
             onClick={handleBack}
-            className="flex items-center text-gray-400 hover:text-white transition-colors mb-6"
+            className="flex items-center text-[#6b7280] dark:text-[#9ca3af] hover:text-[#111827] dark:text-[#f9fafb] transition-colors mb-6"
           >
             <svg className="w-5 h-5 mr-2" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
               <path d="M15 19l-7-7 7-7"></path>
@@ -99,16 +99,16 @@ const ConferenceDetail: React.FC = () => {
           </button>
 
           <div className="mb-4">
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 mb-4">
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-[#1e3a5f] dark:text-[#d4af37] border border-blue-500/30 mb-4">
               <span className="w-2 h-2 rounded-full bg-blue-400 mr-2 animate-pulse"></span>
               CONFERENCE
             </span>
           </div>
 
-          <h1 className="text-4xl md:text-5xl font-black mb-2 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
+          <h1 className="text-4xl md:text-5xl font-black mb-2  text-[#1e3a5f] dark:text-[#d4af37]">
             {conference.title}
           </h1>
-          <div className="flex items-center text-gray-400 mt-4">
+          <div className="flex items-center text-[#6b7280] dark:text-[#9ca3af] mt-4">
             <svg className="w-5 h-5 mr-2" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
               <path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
             </svg>
@@ -123,14 +123,14 @@ const ConferenceDetail: React.FC = () => {
         <div>
           <div className="text-center mb-12">
             <h2 className="text-3xl font-bold mb-4">Select a Hall</h2>
-            <p className="text-gray-400">Choose from available halls below</p>
+            <p className="text-[#6b7280] dark:text-[#9ca3af]">Choose from available halls below</p>
           </div>
 
           {projects.length === 0 ? (
             <div className="text-center py-20">
               <div className="text-6xl mb-4">🏛️</div>
-              <h3 className="text-2xl font-bold text-gray-400 mb-2">No Halls Available</h3>
-              <p className="text-gray-500">Check back later for hall assignments</p>
+              <h3 className="text-2xl font-bold text-[#6b7280] dark:text-[#9ca3af] mb-2">No Halls Available</h3>
+              <p className="text-[#6b7280] dark:text-[#9ca3af]">Check back later for hall assignments</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
@@ -138,14 +138,14 @@ const ConferenceDetail: React.FC = () => {
                 <div
                   key={project.slug}
                   onClick={() => handleProjectClick(project.slug)}
-                  className="group relative bg-gray-800/50 backdrop-blur-sm border border-gray-700 hover:border-blue-500 rounded-2xl p-8 cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-blue-500/20"
+                  className="group relative bg-[#ffffff] dark:bg-[#1f2937]/50 backdrop-blur-sm border border-[#e5e7eb] dark:border-[#374151] hover:border-[#1e3a5f] dark:hover:border-[#d4af37] rounded-2xl p-8 cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-blue-500/20"
                 >
                   {/* Hover Effect */}
                   <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
 
                   {/* Content */}
                   <div className="relative z-10">
-                    <h3 className="text-2xl font-bold text-white mb-3 group-hover:text-blue-400 transition-colors">
+                    <h3 className="text-2xl font-bold text-[#111827] dark:text-[#f9fafb] mb-3 group-hover:text-[#1e3a5f] dark:text-[#d4af37] transition-colors">
                       {project.name}
                     </h3>
 
@@ -153,7 +153,7 @@ const ConferenceDetail: React.FC = () => {
                       {project.targetLanguages.map((lang) => (
                         <span
                           key={lang}
-                          className="text-xs uppercase bg-gray-900 text-gray-300 px-3 py-1 rounded-full border border-gray-700"
+                          className="text-xs uppercase bg-[#f9fafb] dark:bg-[#111827] text-[#4b5563] dark:text-[#d1d5db] px-3 py-1 rounded-full border border-[#e5e7eb] dark:border-[#374151]"
                         >
                           {lang === 'ko' ? '🇰🇷 Korean' :
                             lang === 'en' ? '🇺🇸 English' : lang}
@@ -161,12 +161,12 @@ const ConferenceDetail: React.FC = () => {
                       ))}
                     </div>
 
-                    <div className="flex items-center justify-between pt-6 border-t border-gray-700">
-                      <span className="text-sm text-gray-400 group-hover:text-white transition-colors">
+                    <div className="flex items-center justify-between pt-6 border-t border-[#e5e7eb] dark:border-[#374151]">
+                      <span className="text-sm text-[#6b7280] dark:text-[#9ca3af] group-hover:text-[#111827] dark:text-[#f9fafb] transition-colors">
                         Enter Hall
                       </span>
-                      <div className="w-10 h-10 rounded-full bg-gray-900 group-hover:bg-gradient-to-r group-hover:from-blue-500 group-hover:to-purple-500 flex items-center justify-center transition-all duration-300">
-                        <svg className="w-5 h-5 text-gray-400 group-hover:text-white transform group-hover:translate-x-1 transition-transform" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                      <div className="w-10 h-10 rounded-full bg-[#f9fafb] dark:bg-[#111827] group-hover:bg-gradient-to-r group-hover:from-blue-500 group-hover:to-purple-500 flex items-center justify-center transition-all duration-300">
+                        <svg className="w-5 h-5 text-[#6b7280] dark:text-[#9ca3af] group-hover:text-[#111827] dark:text-[#f9fafb] transform group-hover:translate-x-1 transition-transform" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
                           <path d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
                         </svg>
                       </div>

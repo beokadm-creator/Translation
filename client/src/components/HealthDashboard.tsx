@@ -162,11 +162,11 @@ const HealthDashboard: React.FC<HealthProps> = ({ projectId }) => {
         return (
             <div className="flex flex-col items-center group relative cursor-help">
                 <div className={`w-3 h-3 rounded-full transition-all duration-500 ${colorMap[status]}`} />
-                <span className="text-[10px] text-gray-500 mt-1 leading-none">{label}</span>
+                <span className="text-[10px] text-[#6b7280] dark:text-[#9ca3af] mt-1 leading-none">{label}</span>
                 {/* Tooltip */}
-                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block bg-gray-900 text-white text-xs p-2 rounded border border-gray-700 whitespace-nowrap z-[9999] shadow-xl">
+                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block bg-[#f9fafb] dark:bg-[#111827] text-[#111827] dark:text-[#f9fafb] text-xs p-2 rounded-xl border border-[#e5e7eb] dark:border-[#374151] whitespace-nowrap z-[9999] shadow-xl">
                     {tooltip}
-                    <div className="mt-1 text-gray-400 text-[10px]">
+                    <div className="mt-1 text-[#6b7280] dark:text-[#9ca3af] text-[10px]">
                         {status === 'idle' && label !== 'SERVER' && label !== 'DB' && (
                             <span>녹음 시작 후 점등됩니다</span>
                         )}
@@ -183,7 +183,7 @@ const HealthDashboard: React.FC<HealthProps> = ({ projectId }) => {
     };
 
     return (
-        <div className="flex items-center gap-4 bg-gray-900/60 px-3 py-2 rounded-lg border border-gray-800 backdrop-blur-sm">
+        <div className="flex items-center gap-4 bg-[#f9fafb] dark:bg-[#111827]/60 px-3 py-2 rounded-xl border border-[#e5e7eb] dark:border-[#1f2937] backdrop-blur-sm">
             {renderLight('SERVER', serverStatus, serverStatus === 'ok' ? '🟢 Firebase 연결됨' : '🔴 연결 끊김')}
             {renderLight('WHISPER', whisperStatus, lastWhisperMs !== null
                 ? `🎙️ GPT Whisper: ${formatMs(lastWhisperMs)}`

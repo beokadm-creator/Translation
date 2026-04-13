@@ -370,8 +370,8 @@ const AudienceView: React.FC = () => {
 
     // --- Theme ---
     const bgClass = isDarkMode ? "bg-black text-white" : "bg-white text-black";
-    const headerClass = isDarkMode ? "bg-gray-900 border-gray-800" : "bg-gray-100 border-gray-200";
-    const textClass = isDarkMode ? "text-gray-200" : "text-gray-800";
+    const headerClass = isDarkMode ? "bg-gray-900 border-gray-800" : "bg-[#f9fafb] dark:bg-[#111827] border-[#e5e7eb] dark:border-[#374151]";
+    const textClass = isDarkMode ? "text-[#374151] dark:text-[#e5e7eb]" : "text-gray-800";
     const subTextClass = isDarkMode ? "text-gray-400" : "text-gray-500";
     const tabActiveClass = isDarkMode ? "bg-gray-700 text-white" : "bg-white text-black shadow";
     const tabInactiveClass = isDarkMode ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-black";
@@ -413,13 +413,13 @@ const AudienceView: React.FC = () => {
             `}</style>
 
             {/* Sidebar Drawer */}
-            <div className={`fixed inset-y-0 left-0 w-64 z-50 transform transition-transform duration-300 shadow-2xl border-r ${drawerClass} ${isDarkMode ? 'border-gray-800' : 'border-gray-200'} ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+            <div className={`fixed inset-y-0 left-0 w-64 z-50 transform transition-transform duration-300 shadow-2xl border-r ${drawerClass} ${isDarkMode ? 'border-gray-800' : 'border-[#e5e7eb] dark:border-[#374151]'} ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center">
                     <h2 className="font-bold text-lg">Sessions</h2>
                     <button onClick={() => setIsSidebarOpen(false)} className="text-gray-500 hover:text-white">✕</button>
                 </div>
                 <div className="overflow-y-auto h-full pb-20">
-                    <div onClick={() => navigate('/')} className={`p-4 border-b cursor-pointer transition-colors ${isDarkMode ? 'border-gray-800 hover:bg-gray-800' : 'border-gray-200 hover:bg-gray-100'}`}>
+                    <div onClick={() => navigate('/')} className={`p-4 border-b cursor-pointer transition-colors ${isDarkMode ? 'border-gray-800 hover:bg-gray-800' : 'border-[#e5e7eb] dark:border-[#374151] hover:bg-[#f9fafb] dark:bg-[#111827]'}`}>
                         <div className="font-bold text-sm text-blue-500">⬅ Switch Hall</div>
                     </div>
                     {sessions.map(s => {
@@ -427,7 +427,7 @@ const AudienceView: React.FC = () => {
                         const isSelected = (viewMode === 'live' && isActive) || (viewMode === 'archive' && archiveSessionId === s.id);
                         return (
                             <div key={s.id} onClick={() => handleSelectSession(s.id)}
-                                className={`p-4 border-b cursor-pointer transition-colors ${isDarkMode ? 'border-gray-800 hover:bg-gray-800' : 'border-gray-200 hover:bg-gray-100'} ${isSelected ? (isDarkMode ? 'bg-gray-800' : 'bg-gray-200') : ''}`}>
+                                className={`p-4 border-b cursor-pointer transition-colors ${isDarkMode ? 'border-gray-800 hover:bg-gray-800' : 'border-[#e5e7eb] dark:border-[#374151] hover:bg-[#f9fafb] dark:bg-[#111827]'} ${isSelected ? (isDarkMode ? 'bg-gray-800' : 'bg-[#e5e7eb] dark:bg-[#1f2937]') : ''}`}>
                                 <div className="flex items-center gap-2 mb-1">
                                     {isActive && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
                                     <span className="text-xs text-gray-500">{s.startTime}</span>
@@ -482,7 +482,7 @@ const AudienceView: React.FC = () => {
                 {/* Right Controls */}
                 <div className="flex items-center gap-3 flex-wrap justify-end">
 
-                    <div className={`flex items-center gap-2 px-3 py-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>
+                    <div className={`flex items-center gap-2 px-3 py-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-[#e5e7eb] dark:bg-[#1f2937]'}`}>
                         <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-1 hover:opacity-80 text-lg">
                             {isDarkMode ? '🌙' : '☀️'}
                         </button>
@@ -499,7 +499,7 @@ const AudienceView: React.FC = () => {
 
                     {/* TTS Controls */}
                     <div className="relative flex items-center gap-1">
-                        <div className={`flex items-center gap-1 px-2 py-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>
+                        <div className={`flex items-center gap-1 px-2 py-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-[#e5e7eb] dark:bg-[#1f2937]'}`}>
                             {/* TTS on/off toggle */}
                             <button
                                 onClick={() => setIsTtsEnabled(v => !v)}
@@ -534,7 +534,7 @@ const AudienceView: React.FC = () => {
                                             title="Female voice"
                                             className={`px-2 py-0.5 transition-colors ${ttsGender === 'female'
                                                 ? 'bg-pink-600 text-white'
-                                                : isDarkMode ? 'bg-gray-700 text-gray-400 hover:text-white' : 'bg-gray-200 text-gray-500 hover:text-black'}`}
+                                                : isDarkMode ? 'bg-gray-700 text-gray-400 hover:text-white' : 'bg-[#e5e7eb] dark:bg-[#1f2937] text-gray-500 hover:text-black'}`}
                                         >
                                             Female
                                         </button>
@@ -543,7 +543,7 @@ const AudienceView: React.FC = () => {
                                             title="Male voice"
                                             className={`px-2 py-0.5 transition-colors ${ttsGender === 'male'
                                                 ? 'bg-blue-600 text-white'
-                                                : isDarkMode ? 'bg-gray-700 text-gray-400 hover:text-white' : 'bg-gray-200 text-gray-500 hover:text-black'}`}
+                                                : isDarkMode ? 'bg-gray-700 text-gray-400 hover:text-white' : 'bg-[#e5e7eb] dark:bg-[#1f2937] text-gray-500 hover:text-black'}`}
                                         >
                                             Male
                                         </button>
@@ -587,7 +587,7 @@ const AudienceView: React.FC = () => {
                         )}
                     </div>
 
-                    <div className={`flex rounded p-1 ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>
+                    <div className={`flex rounded p-1 ${isDarkMode ? 'bg-gray-800' : 'bg-[#e5e7eb] dark:bg-[#1f2937]'}`}>
                         <button
                             onClick={() => setActiveLang('original')}
                             className={`px-3 py-1 text-sm rounded transition-all ${activeLang === 'original' ? tabActiveClass : tabInactiveClass}`}

@@ -594,31 +594,31 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     }, [stream]);
 
     return (
-        <div className="flex h-screen bg-gray-900 text-white overflow-hidden">
+        <div className="flex h-screen bg-[#f9fafb] dark:bg-[#111827] text-[#111827] dark:text-[#f9fafb] overflow-hidden">
             {/* Sidebar: Agenda */}
-            <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
-                <div className="p-4 border-b border-gray-700 font-bold text-lg flex justify-between items-center">
+            <div className="w-64 bg-[#ffffff] dark:bg-[#1f2937] border-r border-[#e5e7eb] dark:border-[#374151] flex flex-col">
+                <div className="p-4 border-b border-[#e5e7eb] dark:border-[#374151] font-bold text-lg flex justify-between items-center">
                     <span>Agenda</span>
-                    <button onClick={() => setShowProjectSettings(true)} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded" title="Overlay & AI Settings">⚙️</button>
-                    <button onClick={handleCreateSession} className="text-blue-400 hover:text-blue-300 text-sm font-bold">+ New</button>
+                    <button onClick={() => setShowProjectSettings(true)} className="text-xs bg-[#f3f4f6] dark:bg-[#374151] hover:bg-[#e5e7eb] dark:bg-[#4b5563] px-2 py-1 rounded-xl" title="Overlay & AI Settings">⚙️</button>
+                    <button onClick={handleCreateSession} className="text-[#1e3a5f] dark:text-[#d4af37] hover:text-[#24456f] dark:text-[#b5952f] text-sm font-bold">+ New</button>
                 </div>
                 <div className="flex-1 overflow-y-auto">
                     {sessions.map((s, idx) => (
                         <div
                             key={s.id}
                             onClick={() => handleSelectSession(s)}
-                            className={`p-3 border-b border-gray-700 cursor-pointer hover:bg-gray-700 flex gap-2 ${activeSessionId === s.id ? 'bg-red-900/30 border-l-4 border-red-500' : ''} ${selectedSessionId === s.id ? 'bg-gray-700' : ''}`}
+                            className={`p-3 border-b border-[#e5e7eb] dark:border-[#374151] cursor-pointer hover:bg-[#f3f4f6] dark:bg-[#374151] flex gap-2 ${activeSessionId === s.id ? 'bg-red-900/30 border-l-4 border-red-500' : ''} ${selectedSessionId === s.id ? 'bg-[#f3f4f6] dark:bg-[#374151]' : ''}`}
                         >
                             <div className="flex flex-col gap-1 justify-center">
-                                <button onClick={(e) => { e.stopPropagation(); handleMove(idx, -1); }} className="text-gray-500 hover:text-white text-[10px]">▲</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleMove(idx, 1); }} className="text-gray-500 hover:text-white text-[10px]">▼</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleMove(idx, -1); }} className="text-[#6b7280] dark:text-[#9ca3af] hover:text-[#111827] dark:text-[#f9fafb] text-[10px]">▲</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleMove(idx, 1); }} className="text-[#6b7280] dark:text-[#9ca3af] hover:text-[#111827] dark:text-[#f9fafb] text-[10px]">▼</button>
                             </div>
                             <div className="flex-1 min-w-0">
-                                <div className="text-sm text-gray-400">{s.startTime}</div>
+                                <div className="text-sm text-[#6b7280] dark:text-[#9ca3af]">{s.startTime}</div>
                                 <div className="font-semibold truncate">
                                     {LANG_FLAGS[s.sourceLanguage || 'ko']} {s.speaker}
                                 </div>
-                                <div className="text-xs text-gray-500 truncate">{s.topic}</div>
+                                <div className="text-xs text-[#6b7280] dark:text-[#9ca3af] truncate">{s.topic}</div>
                                 {activeSessionId === s.id && <span className="text-xs text-red-400 font-bold animate-pulse">● LIVE</span>}
                             </div>
                             <div className="flex flex-col gap-1">
@@ -629,7 +629,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                         window.open(`/overlay/${activeProjectId}/${tgtLang}`, '_blank');
                                     }}
                                     title="오버레이 열기 (번역 언어)"
-                                    className="text-gray-500 hover:text-blue-400 text-sm p-1 leading-none"
+                                    className="text-[#6b7280] dark:text-[#9ca3af] hover:text-[#1e3a5f] dark:text-[#d4af37] text-sm p-1 leading-none"
                                 >🖥️</button>
                                 <button onClick={(e) => { e.stopPropagation(); handleDeleteSession(s); }} className="text-gray-600 hover:text-red-500 p-1 text-sm leading-none">🗑️</button>
                             </div>
@@ -641,15 +641,15 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             {/* Main: Workspace */}
             <div className="flex-1 flex flex-col min-w-0">
                 {/* Top: Metadata Editor */}
-                <div className="h-1/2 p-6 border-b border-gray-700 bg-gray-900 overflow-y-auto">
+                <div className="h-1/2 p-6 border-b border-[#e5e7eb] dark:border-[#374151] bg-[#f9fafb] dark:bg-[#111827] overflow-y-auto">
                     {selectedSessionId ? (
                         <div className="max-w-3xl mx-auto space-y-4">
                             <div className="flex justify-between items-center mb-3">
                                 <h2 className="text-xl font-bold">Edit Session</h2>
                                 <div className="flex gap-2">
-                                    <button onClick={() => { if (window.confirm("Archive this session?")) triggerArchive(selectedSessionId); }} className="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600 text-sm">Force Archive</button>
-                                    <button onClick={handleSaveSession} className="px-4 py-2 bg-gray-600 rounded hover:bg-gray-500">Save</button>
-                                    <button onClick={handleGoLive} className={`px-4 py-2 rounded font-bold ${activeSessionId === selectedSessionId ? 'bg-red-600 cursor-default' : 'bg-green-600 hover:bg-green-500'}`}>
+                                    <button onClick={() => { if (window.confirm("Archive this session?")) triggerArchive(selectedSessionId); }} className="px-4 py-2 bg-[#f3f4f6] dark:bg-[#374151] rounded-xl hover:bg-[#e5e7eb] dark:bg-[#4b5563] text-sm">Force Archive</button>
+                                    <button onClick={handleSaveSession} className="px-4 py-2 bg-[#e5e7eb] dark:bg-[#4b5563] rounded-xl hover:bg-gray-500">Save</button>
+                                    <button onClick={handleGoLive} className={`px-4 py-2 rounded-xl font-bold ${activeSessionId === selectedSessionId ? 'bg-red-600 cursor-default' : 'bg-green-600 hover:bg-green-500'}`}>
                                         {activeSessionId === selectedSessionId ? 'Current Live' : 'Go Live'}
                                     </button>
                                 </div>
@@ -665,46 +665,46 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                     { lang: 'refined', label: srcLang === 'ko' ? '🇰🇷 Korean (Raw)' : '🇺🇸 English (Raw)', primary: false },
                                 ];
                                 return (
-                                    <div className="flex gap-2 mb-4 p-3 bg-gray-800/60 rounded-lg border border-gray-700 flex-wrap">
-                                        <span className="text-xs text-gray-500 self-center mr-1 font-bold">🖥️ Overlay</span>
+                                    <div className="flex gap-2 mb-4 p-3 bg-[#ffffff] dark:bg-[#1f2937]/60 rounded-xl border border-[#e5e7eb] dark:border-[#374151] flex-wrap">
+                                        <span className="text-xs text-[#6b7280] dark:text-[#9ca3af] self-center mr-1 font-bold">🖥️ Overlay</span>
                                         {links.map(({ lang, label, primary }) => {
                                             const url = `${origin}/overlay/${activeProjectId}/${lang}`;
                                             return (
                                                 <div key={lang} className="flex items-center gap-1">
                                                     <button
                                                         onClick={() => window.open(url, '_blank')}
-                                                        className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${primary ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+                                                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${primary ? 'bg-[#1e3a5f] text-[#ffffff] hover:bg-[#24456f] text-[#111827] dark:text-[#f9fafb]' : 'bg-[#f3f4f6] dark:bg-[#374151] hover:bg-[#e5e7eb] dark:bg-[#4b5563] text-[#4b5563] dark:text-[#d1d5db]'}`}
                                                     >
                                                         {label}
                                                     </button>
                                                     <button
                                                         onClick={() => { navigator.clipboard.writeText(url); }}
                                                         title="URL 복사"
-                                                        className="text-gray-500 hover:text-gray-300 text-xs px-1"
+                                                        className="text-[#6b7280] dark:text-[#9ca3af] hover:text-[#4b5563] dark:text-[#d1d5db] text-xs px-1"
                                                     >📋</button>
                                                 </div>
                                             );
                                         })}
                                         <button
                                             onClick={() => window.open(`${origin}/overlay/${activeProjectId}/${tgtLang}?debug=true`, '_blank')}
-                                            className="px-2 py-1.5 rounded text-xs bg-gray-800 hover:bg-gray-700 text-gray-500 border border-gray-700 ml-auto"
+                                            className="px-2 py-1.5 rounded-xl text-xs bg-[#ffffff] dark:bg-[#1f2937] hover:bg-[#f3f4f6] dark:bg-[#374151] text-[#6b7280] dark:text-[#9ca3af] border border-[#e5e7eb] dark:border-[#374151] ml-auto"
                                         >Debug</button>
                                     </div>
                                 );
                             })()}
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs text-gray-400">Speaker Name</label>
-                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.speaker || ''} onChange={e => setFormData({ ...formData, speaker: e.target.value })} />
+                                    <label className="block text-xs text-[#6b7280] dark:text-[#9ca3af]">Speaker Name</label>
+                                    <input className="w-full bg-[#ffffff] dark:bg-[#1f2937] border border-[#d1d5db] dark:border-[#4b5563] rounded-xl p-2" value={formData.speaker || ''} onChange={e => setFormData({ ...formData, speaker: e.target.value })} />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-gray-400">Time</label>
-                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.startTime || ''} onChange={e => setFormData({ ...formData, startTime: e.target.value })} />
+                                    <label className="block text-xs text-[#6b7280] dark:text-[#9ca3af]">Time</label>
+                                    <input className="w-full bg-[#ffffff] dark:bg-[#1f2937] border border-[#d1d5db] dark:border-[#4b5563] rounded-xl p-2" value={formData.startTime || ''} onChange={e => setFormData({ ...formData, startTime: e.target.value })} />
                                 </div>
                                 <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">Source Language (Speaker's Language)</label>
+                                    <label className="block text-xs text-[#6b7280] dark:text-[#9ca3af]">Source Language (Speaker's Language)</label>
                                     <select
-                                        className="w-full bg-gray-800 border border-gray-600 rounded p-2"
+                                        className="w-full bg-[#ffffff] dark:bg-[#1f2937] border border-[#d1d5db] dark:border-[#4b5563] rounded-xl p-2"
                                         value={formData.sourceLanguage || 'ko'}
                                         onChange={e => {
                                             const src = e.target.value as 'ko' | 'en';
@@ -717,8 +717,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                     </select>
                                 </div>
                                 <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">Target Languages (Automatically mapped)</label>
-                                    <div className="flex gap-4 p-2 bg-gray-800 rounded border border-gray-600 opacity-70">
+                                    <label className="block text-xs text-[#6b7280] dark:text-[#9ca3af]">Target Languages (Automatically mapped)</label>
+                                    <div className="flex gap-4 p-2 bg-[#ffffff] dark:bg-[#1f2937] rounded-xl border border-[#d1d5db] dark:border-[#4b5563] opacity-70">
                                         {['ko', 'en'].map(l => (
                                             <label key={l} className="flex items-center gap-2 cursor-not-allowed">
                                                 <input
@@ -731,31 +731,31 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                             </label>
                                         ))}
                                     </div>
-                                    <p className="text-[10px] text-gray-500 mt-1">※ Target language is automatically set based on the source language.</p>
+                                    <p className="text-[10px] text-[#6b7280] dark:text-[#9ca3af] mt-1">※ Target language is automatically set based on the source language.</p>
                                 </div>
                                 <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">Affiliation</label>
-                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.affiliation || ''} onChange={e => setFormData({ ...formData, affiliation: e.target.value })} />
+                                    <label className="block text-xs text-[#6b7280] dark:text-[#9ca3af]">Affiliation</label>
+                                    <input className="w-full bg-[#ffffff] dark:bg-[#1f2937] border border-[#d1d5db] dark:border-[#4b5563] rounded-xl p-2" value={formData.affiliation || ''} onChange={e => setFormData({ ...formData, affiliation: e.target.value })} />
                                 </div>
                                 <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">Topic</label>
-                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.topic || ''} onChange={e => setFormData({ ...formData, topic: e.target.value })} />
+                                    <label className="block text-xs text-[#6b7280] dark:text-[#9ca3af]">Topic</label>
+                                    <input className="w-full bg-[#ffffff] dark:bg-[#1f2937] border border-[#d1d5db] dark:border-[#4b5563] rounded-xl p-2" value={formData.topic || ''} onChange={e => setFormData({ ...formData, topic: e.target.value })} />
                                 </div>
                                 <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">
+                                    <label className="block text-xs text-[#6b7280] dark:text-[#9ca3af]">
                                         Abstract (Context for AI)
-                                        <span className="ml-2 text-[10px] text-blue-400 font-normal">STT 인식 + 번역 품질 모두 향상</span>
+                                        <span className="ml-2 text-[10px] text-[#1e3a5f] dark:text-[#d4af37] font-normal">STT 인식 + 번역 품질 모두 향상</span>
                                     </label>
-                                    <textarea className="w-full bg-gray-800 border border-gray-600 rounded p-2 h-32" placeholder="강연 초록 또는 발표 내용을 입력하세요. 앞부분 60자는 Whisper STT에도 직접 전달되어 도메인 용어 인식 정확도가 높아집니다." value={formData.abstract || ''} onChange={e => setFormData({ ...formData, abstract: e.target.value })} />
+                                    <textarea className="w-full bg-[#ffffff] dark:bg-[#1f2937] border border-[#d1d5db] dark:border-[#4b5563] rounded-xl p-2 h-32" placeholder="강연 초록 또는 발표 내용을 입력하세요. 앞부분 60자는 Whisper STT에도 직접 전달되어 도메인 용어 인식 정확도가 높아집니다." value={formData.abstract || ''} onChange={e => setFormData({ ...formData, abstract: e.target.value })} />
                                 </div>
                                 <div className="col-span-2">
-                                    <label className="block text-xs text-gray-400">Keywords (Comma separated)</label>
-                                    <input className="w-full bg-gray-800 border border-gray-600 rounded p-2" value={formData.keywords || ''} onChange={e => setFormData({ ...formData, keywords: e.target.value })} />
+                                    <label className="block text-xs text-[#6b7280] dark:text-[#9ca3af]">Keywords (Comma separated)</label>
+                                    <input className="w-full bg-[#ffffff] dark:bg-[#1f2937] border border-[#d1d5db] dark:border-[#4b5563] rounded-xl p-2" value={formData.keywords || ''} onChange={e => setFormData({ ...formData, keywords: e.target.value })} />
                                 </div>
                             </div>
                         </div>
                     ) : (
-                        <div className="flex items-center justify-center h-full text-gray-500">Select a session to edit</div>
+                        <div className="flex items-center justify-center h-full text-[#6b7280] dark:text-[#9ca3af]">Select a session to edit</div>
                     )}
                 </div>
 
@@ -763,32 +763,32 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 <div className="h-1/2 bg-black flex flex-col p-4">
                     <div className="flex justify-between items-center mb-2">
                         <div className="flex items-center gap-3">
-                            <div className="flex bg-gray-800 rounded p-1">
-                                <button onClick={() => setSourceType('mic')} className={`px-3 py-1 text-sm rounded ${sourceType === 'mic' ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>Mic</button>
-                                <button onClick={() => setSourceType('system')} className={`px-3 py-1 text-sm rounded ${sourceType === 'system' ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>System</button>
+                            <div className="flex bg-[#ffffff] dark:bg-[#1f2937] rounded-xl p-1">
+                                <button onClick={() => setSourceType('mic')} className={`px-3 py-1 text-sm rounded-xl ${sourceType === 'mic' ? 'bg-[#e5e7eb] dark:bg-[#4b5563] text-[#111827] dark:text-[#f9fafb]' : 'text-[#6b7280] dark:text-[#9ca3af]'}`}>Mic</button>
+                                <button onClick={() => setSourceType('system')} className={`px-3 py-1 text-sm rounded-xl ${sourceType === 'system' ? 'bg-[#e5e7eb] dark:bg-[#4b5563] text-[#111827] dark:text-[#f9fafb]' : 'text-[#6b7280] dark:text-[#9ca3af]'}`}>System</button>
                             </div>
-                            <button onClick={isRecording ? stopRecording : startRecording} className={`px-4 py-1 rounded font-bold ${isRecording ? "bg-red-600" : "bg-green-600"}`}>
+                            <button onClick={isRecording ? stopRecording : startRecording} className={`px-4 py-1 rounded-xl font-bold ${isRecording ? "bg-red-600" : "bg-green-600"}`}>
                                 {isRecording ? "ON AIR (Stop)" : "START BROADCAST"}
                             </button>
 
                             {/* Remaster Button for Admin */}
                             {/* REMOVED from here as per user request */}
 
-                            <div className="w-32 h-2 bg-gray-700 rounded ml-2 relative">
-                                <div className="h-2 bg-green-500 rounded" style={{ width: `${Math.min(100, Math.max(0, ((currentDb + 90) / 60) * 100))}%` }} />
+                            <div className="w-32 h-2 bg-[#f3f4f6] dark:bg-[#374151] rounded-xl ml-2 relative">
+                                <div className="h-2 bg-green-500 rounded-xl" style={{ width: `${Math.min(100, Math.max(0, ((currentDb + 90) / 60) * 100))}%` }} />
                             </div>
                             {/* Health Dashboard */}
                             <HealthDashboard projectId={activeProjectId} />
                         </div>
-                        <div className="text-xs text-gray-400">Status: {status}</div>
+                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af]">Status: {status}</div>
                     </div>
 
                     <AudioVisualizer stream={stream} width={800} height={40} />
 
                     {/* Log Window with Header */}
-                    <div className="flex-1 flex flex-col mt-2 border border-gray-800 rounded overflow-hidden">
-                        <div className="bg-gray-800 p-2 flex justify-between items-center">
-                            <span className="text-xs font-bold text-gray-300">
+                    <div className="flex-1 flex flex-col mt-2 border border-[#e5e7eb] dark:border-[#1f2937] rounded-xl overflow-hidden">
+                        <div className="bg-[#ffffff] dark:bg-[#1f2937] p-2 flex justify-between items-center">
+                            <span className="text-xs font-bold text-[#4b5563] dark:text-[#d1d5db]">
                                 {selectedSessionId ? `Session: ${formData.speaker} (${viewMode === 'live' ? 'LIVE STREAM' : 'ARCHIVED RECORD'})` : "No Session Selected"}
                             </span>
 
@@ -798,7 +798,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                     <div className="flex gap-1">
                                         <button
                                             onClick={triggerPurge}
-                                            className="px-2 py-1 text-xs rounded bg-red-900/50 hover:bg-red-800 border border-red-700 text-red-100 flex items-center gap-1"
+                                            className="px-2 py-1 text-xs rounded-xl bg-red-900/50 hover:bg-red-800 border border-red-700 text-red-100 flex items-center gap-1"
                                             title="완전 삭제 (클랜징)"
                                         >
                                             🧹 Purge
@@ -809,17 +809,17 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
 
                                 {viewMode === 'archive' && (
                                     <>
-                                        <button onClick={handleExport} className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-xs rounded text-white flex items-center gap-1">
+                                        <button onClick={handleExport} className="px-2 py-1 bg-[#1e3a5f] text-[#ffffff] hover:bg-[#24456f] text-xs rounded-xl text-[#111827] dark:text-[#f9fafb] flex items-center gap-1">
                                             📥 Export Script
                                         </button>
-                                        <button onClick={handleClearTranscript} className="px-2 py-1 bg-red-900/50 hover:bg-red-900 text-xs rounded text-red-200 border border-red-800 flex items-center gap-1">
+                                        <button onClick={handleClearTranscript} className="px-2 py-1 bg-red-900/50 hover:bg-red-900 text-xs rounded-xl text-red-200 border border-red-800 flex items-center gap-1">
                                             🧹 Clear
                                         </button>
                                     </>
                                 )}
                             </div>
                         </div>
-                        <div className="flex-1 overflow-y-auto bg-gray-900 p-4">
+                        <div className="flex-1 overflow-y-auto bg-[#f9fafb] dark:bg-[#111827] p-4">
                             <div className="text-lg break-words leading-relaxed">
                                 {segmentsOrder.map((id) => {
                                     const seg = segmentsMap[id];
@@ -839,36 +839,36 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             {
                 showProjectSettings && (
                     <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-                        <div className="bg-gray-800 p-6 rounded-lg w-full max-w-xl space-y-4 border border-gray-600">
+                        <div className="bg-[#ffffff] dark:bg-[#1f2937] p-6 rounded-xl w-full max-w-xl space-y-4 border border-[#d1d5db] dark:border-[#4b5563]">
                             <div className="flex justify-between items-start">
                                 <h2 className="text-xl font-bold">Project Settings</h2>
                                 <div className="flex gap-1.5 text-[10px]">
                                     <span className="bg-green-900/50 text-green-400 border border-green-700 px-2 py-0.5 rounded-full font-mono">STT: gpt-4o-transcribe</span>
-                                    <span className="bg-blue-900/50 text-blue-400 border border-blue-700 px-2 py-0.5 rounded-full font-mono">Trans: gpt-4o-mini</span>
+                                    <span className="bg-blue-900/50 text-[#1e3a5f] dark:text-[#d4af37] border border-blue-700 px-2 py-0.5 rounded-full font-mono">Trans: gpt-4o-mini</span>
                                 </div>
                             </div>
 
                             {/* Tabs */}
-                            <div className="flex border-b border-gray-600 mb-4">
-                                <button onClick={() => setSettingsTab('overlay')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'overlay' ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}>Overlay Design</button>
-                                <button onClick={() => setSettingsTab('ai')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'ai' ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}>Audio & AI</button>
+                            <div className="flex border-b border-[#d1d5db] dark:border-[#4b5563] mb-4">
+                                <button onClick={() => setSettingsTab('overlay')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'overlay' ? 'border-b-2 border-blue-500 text-[#1e3a5f] dark:text-[#d4af37]' : 'text-[#6b7280] dark:text-[#9ca3af] hover:text-[#111827] dark:text-[#f9fafb]'}`}>Overlay Design</button>
+                                <button onClick={() => setSettingsTab('ai')} className={`px-4 py-2 text-sm font-bold ${settingsTab === 'ai' ? 'border-b-2 border-blue-500 text-[#1e3a5f] dark:text-[#d4af37]' : 'text-[#6b7280] dark:text-[#9ca3af] hover:text-[#111827] dark:text-[#f9fafb]'}`}>Audio & AI</button>
                             </div>
 
                             <div className="space-y-6 overflow-y-auto max-h-[60vh]">
                                 {/* Section 0: Model Info + Audio Engine */}
                                 {settingsTab === 'ai' && <>
-                                    <div className="bg-gray-900 border border-gray-600 p-3 rounded-lg">
-                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 flex justify-between">
+                                    <div className="bg-[#f9fafb] dark:bg-[#111827] border border-[#d1d5db] dark:border-[#4b5563] p-3 rounded-xl">
+                                        <h3 className="text-xs font-bold text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider mb-2 flex justify-between">
                                             <span>AI 모델 설정</span>
                                         </h3>
                                         <div className="grid grid-cols-2 gap-4">
                                             {/* STT 엔진 설정 */}
                                             <div className="space-y-3">
-                                                <h4 className="text-sm font-bold text-gray-300">🎙️ STT (음성인식)</h4>
+                                                <h4 className="text-sm font-bold text-[#4b5563] dark:text-[#d1d5db]">🎙️ STT (음성인식)</h4>
                                                 <div>
-                                                    <label className="text-[10px] text-gray-500 mb-1 block">메인 엔진 (Primary)</label>
+                                                    <label className="text-[10px] text-[#6b7280] dark:text-[#9ca3af] mb-1 block">메인 엔진 (Primary)</label>
                                                     <select 
-                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-green-400"
+                                                        className="w-full bg-[#ffffff] dark:bg-[#1f2937] border border-[#e5e7eb] dark:border-[#374151] rounded-xl p-2 text-xs font-bold text-green-400"
                                                         value={projectSettings.primarySTT}
                                                         onChange={e => setProjectSettings({...projectSettings, primarySTT: e.target.value as 'openai' | 'deepgram'})}
                                                     >
@@ -877,9 +877,9 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                     </select>
                                                 </div>
                                                 <div>
-                                                    <label className="text-[10px] text-gray-500 mb-1 block">보조 엔진 (Fallback)</label>
+                                                    <label className="text-[10px] text-[#6b7280] dark:text-[#9ca3af] mb-1 block">보조 엔진 (Fallback)</label>
                                                     <select 
-                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-gray-400"
+                                                        className="w-full bg-[#ffffff] dark:bg-[#1f2937] border border-[#e5e7eb] dark:border-[#374151] rounded-xl p-2 text-xs font-bold text-[#6b7280] dark:text-[#9ca3af]"
                                                         value={projectSettings.fallbackSTT}
                                                         onChange={e => setProjectSettings({...projectSettings, fallbackSTT: e.target.value as 'openai' | 'deepgram'})}
                                                     >
@@ -890,12 +890,12 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                             </div>
 
                                             {/* 번역 엔진 설정 */}
-                                            <div className="space-y-3 border-l border-gray-700 pl-4">
-                                                <h4 className="text-sm font-bold text-gray-300">🌐 Translation (번역)</h4>
+                                            <div className="space-y-3 border-l border-[#e5e7eb] dark:border-[#374151] pl-4">
+                                                <h4 className="text-sm font-bold text-[#4b5563] dark:text-[#d1d5db]">🌐 Translation (번역)</h4>
                                                 <div>
-                                                    <label className="text-[10px] text-gray-500 mb-1 block">메인 엔진 (Primary)</label>
+                                                    <label className="text-[10px] text-[#6b7280] dark:text-[#9ca3af] mb-1 block">메인 엔진 (Primary)</label>
                                                     <select 
-                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-blue-400"
+                                                        className="w-full bg-[#ffffff] dark:bg-[#1f2937] border border-[#e5e7eb] dark:border-[#374151] rounded-xl p-2 text-xs font-bold text-[#1e3a5f] dark:text-[#d4af37]"
                                                         value={projectSettings.primaryTrans}
                                                         onChange={e => setProjectSettings({...projectSettings, primaryTrans: e.target.value as 'openai' | 'claude'})}
                                                     >
@@ -904,9 +904,9 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                     </select>
                                                 </div>
                                                 <div>
-                                                    <label className="text-[10px] text-gray-500 mb-1 block">보조 엔진 (Fallback)</label>
+                                                    <label className="text-[10px] text-[#6b7280] dark:text-[#9ca3af] mb-1 block">보조 엔진 (Fallback)</label>
                                                     <select 
-                                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-bold text-gray-400"
+                                                        className="w-full bg-[#ffffff] dark:bg-[#1f2937] border border-[#e5e7eb] dark:border-[#374151] rounded-xl p-2 text-xs font-bold text-[#6b7280] dark:text-[#9ca3af]"
                                                         value={projectSettings.fallbackTrans}
                                                         onChange={e => setProjectSettings({...projectSettings, fallbackTrans: e.target.value as 'openai' | 'claude'})}
                                                     >
@@ -917,26 +917,26 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="bg-blue-900/20 border border-blue-700/50 p-4 rounded-lg">
-                                        <h3 className="text-sm font-bold text-blue-400 mb-2 flex items-center gap-2">
+                                    <div className="bg-blue-900/20 border border-blue-700/50 p-4 rounded-xl">
+                                        <h3 className="text-sm font-bold text-[#1e3a5f] dark:text-[#d4af37] mb-2 flex items-center gap-2">
                                             🤖 Auto-Pilot 활성화됨
                                         </h3>
-                                        <p className="text-xs text-gray-300 leading-relaxed">
+                                        <p className="text-xs text-[#4b5563] dark:text-[#d1d5db] leading-relaxed">
                                             가장 안정적이고 빠른 <strong>"2.5초 간격 연속 전송(Chunk)"</strong> 모드가 기본으로 적용되어 있습니다.<br/>
                                             오디오 유실이나 지연 없이 서버가 알아서 문맥을 재조립하여 최적의 번역을 수행합니다.
                                         </p>
                                     </div>
                                     
-                                    <div className="flex items-start gap-2 pt-2 border-t border-gray-700">
+                                    <div className="flex items-start gap-2 pt-2 border-t border-[#e5e7eb] dark:border-[#374151]">
                                         <input type="checkbox" id="chkHideRaw"
                                             checked={projectSettings.hideRaw}
                                             onChange={e => setProjectSettings({ ...projectSettings, hideRaw: e.target.checked })}
                                             className="mt-0.5" />
                                         <div>
-                                            <label htmlFor="chkHideRaw" className="text-sm text-gray-300 cursor-pointer font-bold">
+                                            <label htmlFor="chkHideRaw" className="text-sm text-[#4b5563] dark:text-[#d1d5db] cursor-pointer font-bold">
                                                 🔒 Raw STT 숨김 (번역 완료 전 원문 미표시)
                                             </label>
-                                            <p className="text-[10px] text-gray-500 mt-0.5">체크 시 번역기가 정제한 텍스트만 청중 화면에 표시됩니다.</p>
+                                            <p className="text-[10px] text-[#6b7280] dark:text-[#9ca3af] mt-0.5">체크 시 번역기가 정제한 텍스트만 청중 화면에 표시됩니다.</p>
                                         </div>
                                     </div>
                                 </>}
@@ -946,21 +946,21 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
 
                                     {/* Display Style */}
                                     <div>
-                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Display Style</h3>
+                                        <h3 className="text-xs font-bold text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider mb-2">Display Style</h3>
                                         <div className="grid grid-cols-2 gap-2">
                                             {(['youtube', 'typing'] as const).map(style => (
                                                 <button key={style}
                                                     onClick={() => setProjectSettings({ ...projectSettings, displayStyle: style })}
-                                                    className={`py-3 rounded-lg border text-sm font-bold transition-all ${projectSettings.displayStyle === style ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-400 hover:border-gray-400'}`}>
+                                                    className={`py-3 rounded-xl border text-sm font-bold transition-all ${projectSettings.displayStyle === style ? 'bg-[#1e3a5f] text-[#ffffff] border-blue-500 text-[#111827] dark:text-[#f9fafb]' : 'bg-[#ffffff] dark:bg-[#1f2937] border-[#d1d5db] dark:border-[#4b5563] text-[#6b7280] dark:text-[#9ca3af] hover:border-gray-400'}`}>
                                                     {style === 'youtube' ? '🎬 YouTube 스타일' : '⌨️ 타이핑 스타일'}
                                                 </button>
                                             ))}
                                         </div>
                                         {projectSettings.displayStyle === 'typing' && (
                                             <div className="mt-3">
-                                                <label className="text-xs text-gray-400 block flex justify-between">
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block flex justify-between">
                                                     <span>타이핑 속도 (글자/초)</span>
-                                                    <span className="text-white font-bold">{projectSettings.typingSpeed} chars/s</span>
+                                                    <span className="text-[#111827] dark:text-[#f9fafb] font-bold">{projectSettings.typingSpeed} chars/s</span>
                                                 </label>
                                                 <input type="range" min="10" max="100" step="5" className="w-full mt-1"
                                                     value={projectSettings.typingSpeed}
@@ -971,18 +971,18 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
 
                                     {/* Layout */}
                                     <div>
-                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Layout</h3>
+                                        <h3 className="text-xs font-bold text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider mb-2">Layout</h3>
                                         <div className="grid grid-cols-3 gap-3">
                                             <div>
-                                                <label className="text-xs text-gray-400 block mb-1">표시 줄 수</label>
-                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.maxLines}
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">표시 줄 수</label>
+                                                <select className="w-full bg-[#f3f4f6] dark:bg-[#374151] p-2 rounded-xl text-sm" value={projectSettings.maxLines}
                                                     onChange={e => setProjectSettings({ ...projectSettings, maxLines: Number(e.target.value) })}>
                                                     {[1,2,3,4,5].map(n => <option key={n} value={n}>{n}줄</option>)}
                                                 </select>
                                             </div>
                                             <div>
-                                                <label className="text-xs text-gray-400 block mb-1">정렬</label>
-                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.align}
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">정렬</label>
+                                                <select className="w-full bg-[#f3f4f6] dark:bg-[#374151] p-2 rounded-xl text-sm" value={projectSettings.align}
                                                     onChange={e => setProjectSettings({ ...projectSettings, align: e.target.value })}>
                                                     <option value="left">왼쪽</option>
                                                     <option value="center">가운데</option>
@@ -990,8 +990,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                 </select>
                                             </div>
                                             <div>
-                                                <label className="text-xs text-gray-400 block mb-1">하단 여백 (px)</label>
-                                                <input type="number" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">하단 여백 (px)</label>
+                                                <input type="number" className="w-full bg-[#f3f4f6] dark:bg-[#374151] p-2 rounded-xl text-sm"
                                                     value={projectSettings.bottomOffset}
                                                     onChange={e => setProjectSettings({ ...projectSettings, bottomOffset: Number(e.target.value) })} />
                                             </div>
@@ -1000,17 +1000,17 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
 
                                     {/* Font */}
                                     <div>
-                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Font</h3>
+                                        <h3 className="text-xs font-bold text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider mb-2">Font</h3>
                                         <div className="grid grid-cols-2 gap-3">
                                             <div>
-                                                <label className="text-xs text-gray-400 block mb-1">크기 (px)</label>
-                                                <input type="number" min="12" max="120" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">크기 (px)</label>
+                                                <input type="number" min="12" max="120" className="w-full bg-[#f3f4f6] dark:bg-[#374151] p-2 rounded-xl text-sm"
                                                     value={projectSettings.fontSize}
                                                     onChange={e => setProjectSettings({ ...projectSettings, fontSize: Number(e.target.value) })} />
                                             </div>
                                             <div>
-                                                <label className="text-xs text-gray-400 block mb-1">굵기</label>
-                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.fontWeight}
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">굵기</label>
+                                                <select className="w-full bg-[#f3f4f6] dark:bg-[#374151] p-2 rounded-xl text-sm" value={projectSettings.fontWeight}
                                                     onChange={e => setProjectSettings({ ...projectSettings, fontWeight: e.target.value })}>
                                                     <option value="normal">Normal</option>
                                                     <option value="bold">Bold</option>
@@ -1018,26 +1018,26 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                 </select>
                                             </div>
                                             <div>
-                                                <label className="text-xs text-gray-400 block mb-1">자간 (px)</label>
-                                                <input type="number" min="-5" max="20" step="0.5" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">자간 (px)</label>
+                                                <input type="number" min="-5" max="20" step="0.5" className="w-full bg-[#f3f4f6] dark:bg-[#374151] p-2 rounded-xl text-sm"
                                                     value={projectSettings.letterSpacing}
                                                     onChange={e => setProjectSettings({ ...projectSettings, letterSpacing: Number(e.target.value) })} />
                                             </div>
                                             <div>
-                                                <label className="text-xs text-gray-400 block mb-1">행간</label>
-                                                <input type="number" min="1" max="3" step="0.1" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">행간</label>
+                                                <input type="number" min="1" max="3" step="0.1" className="w-full bg-[#f3f4f6] dark:bg-[#374151] p-2 rounded-xl text-sm"
                                                     value={projectSettings.lineHeight}
                                                     onChange={e => setProjectSettings({ ...projectSettings, lineHeight: Number(e.target.value) })} />
                                             </div>
                                             <div>
-                                                <label className="text-xs text-gray-400 block mb-1">글자 색</label>
-                                                <input type="color" className="w-full h-9 bg-gray-700 rounded cursor-pointer"
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">글자 색</label>
+                                                <input type="color" className="w-full h-9 bg-[#f3f4f6] dark:bg-[#374151] rounded-xl cursor-pointer"
                                                     value={projectSettings.fontColor}
                                                     onChange={e => setProjectSettings({ ...projectSettings, fontColor: e.target.value })} />
                                             </div>
                                             <div>
-                                                <label className="text-xs text-gray-400 block mb-1">텍스트 효과</label>
-                                                <select className="w-full bg-gray-700 p-2 rounded text-sm" value={projectSettings.textEffect}
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">텍스트 효과</label>
+                                                <select className="w-full bg-[#f3f4f6] dark:bg-[#374151] p-2 rounded-xl text-sm" value={projectSettings.textEffect}
                                                     onChange={e => setProjectSettings({ ...projectSettings, textEffect: e.target.value })}>
                                                     <option value="shadow">드롭 쉐도우</option>
                                                     <option value="stroke">아웃라인</option>
@@ -1045,8 +1045,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                 </select>
                                             </div>
                                             <div className="col-span-2">
-                                                <label className="text-xs text-gray-400 block mb-1">폰트 패밀리 (CSS)</label>
-                                                <input type="text" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">폰트 패밀리 (CSS)</label>
+                                                <input type="text" className="w-full bg-[#f3f4f6] dark:bg-[#374151] p-2 rounded-xl text-sm"
                                                     placeholder="sans-serif, Arial, 'Noto Sans KR', ..."
                                                     value={projectSettings.fontFamily}
                                                     onChange={e => setProjectSettings({ ...projectSettings, fontFamily: e.target.value })} />
@@ -1056,36 +1056,36 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
 
                                     {/* Background */}
                                     <div>
-                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Background</h3>
+                                        <h3 className="text-xs font-bold text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider mb-2">Background</h3>
                                         <div className="grid grid-cols-3 gap-3">
                                             <div>
-                                                <label className="text-xs text-gray-400 block mb-1">배경색</label>
-                                                <input type="color" className="w-full h-9 bg-gray-700 rounded cursor-pointer"
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">배경색</label>
+                                                <input type="color" className="w-full h-9 bg-[#f3f4f6] dark:bg-[#374151] rounded-xl cursor-pointer"
                                                     value={projectSettings.bgColor}
                                                     onChange={e => setProjectSettings({ ...projectSettings, bgColor: e.target.value })} />
                                             </div>
                                             <div>
-                                                <label className="text-xs text-gray-400 block mb-1">투명도 (0~1)</label>
-                                                <input type="number" step="0.05" min="0" max="1" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">투명도 (0~1)</label>
+                                                <input type="number" step="0.05" min="0" max="1" className="w-full bg-[#f3f4f6] dark:bg-[#374151] p-2 rounded-xl text-sm"
                                                     value={projectSettings.bgOpacity}
                                                     onChange={e => setProjectSettings({ ...projectSettings, bgOpacity: Number(e.target.value) })} />
                                             </div>
                                             <div>
-                                                <label className="text-xs text-gray-400 block mb-1">좌우 패딩 (px)</label>
-                                                <input type="number" className="w-full bg-gray-700 p-2 rounded text-sm"
+                                                <label className="text-xs text-[#6b7280] dark:text-[#9ca3af] block mb-1">좌우 패딩 (px)</label>
+                                                <input type="number" className="w-full bg-[#f3f4f6] dark:bg-[#374151] p-2 rounded-xl text-sm"
                                                     value={projectSettings.padding}
                                                     onChange={e => setProjectSettings({ ...projectSettings, padding: Number(e.target.value) })} />
                                             </div>
                                         </div>
                                     </div>
 
-                                    <div className="text-[10px] text-gray-500">※ 저장 즉시 오버레이에 실시간 반영됩니다.</div>
+                                    <div className="text-[10px] text-[#6b7280] dark:text-[#9ca3af]">※ 저장 즉시 오버레이에 실시간 반영됩니다.</div>
                                 </div>}
                             </div>
 
                             <div className="flex justify-end gap-2 mt-4">
-                                <button onClick={() => setShowProjectSettings(false)} className="px-4 py-2 text-gray-400">Cancel</button>
-                                <button onClick={saveProjectSettings} className="px-4 py-2 bg-blue-600 rounded font-bold">Save Apply</button>
+                                <button onClick={() => setShowProjectSettings(false)} className="px-4 py-2 text-[#6b7280] dark:text-[#9ca3af]">Cancel</button>
+                                <button onClick={saveProjectSettings} className="px-4 py-2 bg-[#1e3a5f] text-[#ffffff] rounded-xl font-bold">Save Apply</button>
                             </div>
                         </div>
                     </div>

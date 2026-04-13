@@ -1,27 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { rtdb } from '../firebase';
-import { ref, set, get, child, remove } from 'firebase/database';
-import type { ProjectSettings, Conference } from '../types';
+import { ref, get, set, remove } from 'firebase/database';
+import type { Conference, ProjectSettings } from '../types';
+
+interface ProjectListItem extends ProjectSettings {
+  id: string;
+  confId?: string;
+}
 
 const AdminLanding: React.FC = () => {
   const navigate = useNavigate();
-  
-  // --- State ---
   const [view, setView] = useState<'conferences' | 'cleanup'>('conferences');
+  
+  // --- Conferences View State ---
   const [conferences, setConferences] = useState<Conference[]>([]);
   const [selectedConfId, setSelectedConfId] = useState<string | null>(null);
-  const [showQR, setShowQR] = useState<string | null>(null); // Conf ID for QR modal
-  
-  // Projects for the selected conference
   const [confProjects, setConfProjects] = useState<ProjectSettings[]>([]);
-  
-  // All Projects (for Cleanup)
-  const [allProjects, setAllProjects] = useState<{id: string, name: string, confId?: string}[]>([]);
-
-  // Forms
   const [isCreatingConf, setIsCreatingConf] = useState(false);
   const [isCreatingProj, setIsCreatingProj] = useState(false);
+  const [showQR, setShowQR] = useState<string | null>(null);
   
   const [confForm, setConfForm] = useState({
       id: "", title: "", startDate: "", endDate: ""
@@ -36,77 +34,51 @@ const AdminLanding: React.FC = () => {
     conferenceId: ""
   });
 
-  // --- Effects ---
+  // --- Cleanup View State ---
+  const [allProjects, setAllProjects] = useState<ProjectListItem[]>([]);
 
-  // 1. Load Conferences
   useEffect(() => {
-      const loadConfs = async () => {
-          const snap = await get(ref(rtdb, 'conferences'));
-          if (snap.exists()) {
-              const data = snap.val();
-              const list = Object.keys(data).map(k => ({ id: k, ...data[k] }));
-              setConferences(list);
-          } else {
-              setConferences([]);
-          }
-      };
-      loadConfs();
-  }, [isCreatingConf]); // Reload after create
+      loadConferences();
+      loadAllProjects();
+  }, []);
 
-  // 2. Load Projects when Conference Selected
   useEffect(() => {
-      if (!selectedConfId) {
-          // Return early without calling setState
-          return;
+      if (selectedConfId) {
+          const filtered = allProjects.filter(p => p.confId === selectedConfId);
+          setConfProjects(filtered);
+      } else {
+          setConfProjects([]);
       }
+  }, [selectedConfId, allProjects]);
 
-      const loadProjects = async () => {
-          // In a real app, use query orderByChild('settings/conferenceId').equalTo(selectedConfId)
-          // For now, we fetch all and filter client side (simpler for this scale)
-          const snap = await get(ref(rtdb, 'projects'));
-          if (snap.exists()) {
-              const data = snap.val();
-              const list = Object.keys(data).map(k => {
-                  const s = data[k].settings || {};
-                  return { ...s, slug: k } as ProjectSettings & { slug: string };
-              }).filter(p => p.conferenceId === selectedConfId);
-              setConfProjects(list);
-          } else {
-              setConfProjects([]);
-          }
-      };
-      loadProjects();
-  }, [selectedConfId, isCreatingProj]);
-
-  // 3. Load ALL Projects for Cleanup
-  useEffect(() => {
-      if (view === 'cleanup') {
-          const loadAll = async () => {
-              // Fetch keys only first using REST if possible, but SDK `get` is fine for now
-              const snap = await get(ref(rtdb, 'projects'));
-              if (snap.exists()) {
-                  const data = snap.val();
-                  const list = Object.keys(data).map(k => ({
-                      id: k,
-                      name: data[k].settings?.name || "Unknown Project",
-                      confId: data[k].settings?.conferenceId
-                  }));
-                  setAllProjects(list);
-              }
-          };
-          loadAll();
+  const loadConferences = async () => {
+      const snap = await get(ref(rtdb, 'conferences'));
+      if (snap.exists()) {
+          const data = snap.val();
+          const list = Object.keys(data).map(k => data[k] as Conference);
+          setConferences(list);
+      } else {
+          setConferences([]);
       }
-  }, [view]);
+  };
 
-  // --- Handlers ---
+  const loadAllProjects = async () => {
+      const snap = await get(ref(rtdb, 'projects'));
+      if (snap.exists()) {
+          const data = snap.val();
+          const list = Object.keys(data).map(k => {
+              const s = data[k].settings || {};
+              return { ...s, id: k, confId: s.conferenceId } as ProjectListItem;
+          });
+          setAllProjects(list);
+      } else {
+          setAllProjects([]);
+      }
+  };
 
   const handleCreateConf = async () => {
-      console.log("Create Conference Clicked", confForm);
-      if (!confForm.title || !confForm.startDate || !confForm.endDate) {
-          return alert("Title and Dates are required.");
-      }
-      
-      const id = `conf_${Date.now()}`;
+      if (!confForm.title || !confForm.startDate || !confForm.endDate) return alert("Fill all fields");
+      const id = "conf_" + Date.now();
       const dates = `${confForm.startDate} ~ ${confForm.endDate}`;
       
       try {
@@ -121,244 +93,282 @@ const AdminLanding: React.FC = () => {
           setIsCreatingConf(false);
           setConfForm({ id: "", title: "", startDate: "", endDate: "" });
           alert("Conference Created Successfully!");
-} catch (error: unknown) {
-          console.error("Create Failed:", error);
-          const message = error instanceof Error ? error.message : 'Unknown error';
-          alert("Create Failed: " + message);
+          loadConferences();
+      } catch (e) {
+          console.error(e);
+          alert("Failed to create conference");
+      }
+  };
+
+  const handleDeleteConference = async (id: string) => {
+      if (!window.confirm("Are you sure you want to delete this conference AND all its projects?")) return;
+      try {
+          const projsToDelete = allProjects.filter(p => p.confId === id);
+          for (const p of projsToDelete) {
+              await remove(ref(rtdb, `projects/${p.id}`));
+          }
+          await remove(ref(rtdb, `conferences/${id}`));
+          if (selectedConfId === id) setSelectedConfId(null);
+          loadConferences();
+          loadAllProjects();
+      } catch (e) {
+          console.error(e);
+          alert("Delete failed");
       }
   };
 
   const handleCreateProject = async () => {
-      if (!projForm.slug || !projForm.name) return alert("Slug and Name required");
-      if (!selectedConfId) return alert("No Conference Selected");
-
+      if (!projForm.name || !projForm.slug || !selectedConfId) return alert("Fill required fields");
+      
       const projectId = projForm.slug.replace(/[^a-z0-9-_]/gi, '').toLowerCase();
       const projectRef = ref(rtdb, `projects/${projectId}`);
       
-      const snap = await get(projectRef);
-      if (snap.exists()) return alert("Project ID exists!");
-
-      await set(child(projectRef, 'settings'), {
-          ...projForm,
-          slug: projectId,
-          conferenceId: selectedConfId
-      });
-
-      // Init State
-      await set(child(projectRef, 'state'), {
-          bufferText: "",
-          bufferIds: []
-      });
-
-      setIsCreatingProj(false);
-      alert("Project Created!");
+      try {
+          const snap = await get(projectRef);
+          if (snap.exists()) {
+              return alert("Slug already exists! Choose another.");
+          }
+          
+          await set(ref(rtdb, `projects/${projectId}/settings`), {
+              ...projForm,
+              slug: projectId,
+              conferenceId: selectedConfId
+          });
+          await set(ref(rtdb, `projects/${projectId}/state`), {
+              bufferText: "",
+              bufferIds: []
+          });
+          
+          setIsCreatingProj(false);
+          setProjForm(prev => ({...prev, name: "", slug: ""}));
+          alert("Project created successfully!");
+          loadAllProjects();
+      } catch (e) {
+          console.error(e);
+          alert("Failed to create project");
+      }
   };
 
-  const handleDeleteProject = async (projectId: string) => {
-      if (!window.confirm(`PERMANENTLY DELETE project "${projectId}"? All data will be lost.`)) return;
-      await remove(ref(rtdb, `projects/${projectId}`));
-      
-      // Refresh list
-      setAllProjects(prev => prev.filter(p => p.id !== projectId));
-      setConfProjects(prev => prev.filter(p => p.slug !== projectId));
-  };
-
-  const handleDeleteConference = async (confId: string) => {
-      if (!window.confirm(`PERMANENTLY DELETE conference? All related projects will also be affected.`)) return;
-      await remove(ref(rtdb, `conferences/${confId}`));
-      
-      // Refresh list
-      setConferences(prev => prev.filter(c => c.id !== confId));
-      if (selectedConfId === confId) setSelectedConfId(null);
+  const handleDeleteProject = async (id: string) => {
+      if (!window.confirm("Are you sure you want to delete this project?")) return;
+      try {
+          await remove(ref(rtdb, `projects/${id}`));
+          loadAllProjects();
+      } catch (e) {
+          console.error(e);
+          alert("Delete failed");
+      }
   };
 
   return (
-      <div className="min-h-screen bg-gray-900 text-white p-8">
-      <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
-              HONG COMM. Conference Admin Platform
-          </h1>
-          <div className="flex gap-4">
-              <button 
-                  onClick={() => setView('conferences')} 
-                  className={`px-4 py-2 rounded text-sm font-bold transition-all ${view === 'conferences' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700'}`}
-              >
-                  Conferences
-              </button>
-              <button 
-                  onClick={() => setView('cleanup')} 
-                  className={`px-4 py-2 rounded text-sm font-bold transition-all flex items-center gap-2 ${view === 'cleanup' ? 'bg-red-600 text-white shadow-lg' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700'}`}
-              >
-                  <span>👻</span> Cleanup
-              </button>
-          </div>
-      </div>
-
-      {/* --- View: Conferences --- */}
-      {view === 'conferences' && (
-          <div className="flex gap-8 h-[calc(100vh-200px)]">
-              {/* Left: Conference List */}
-              <div className="w-1/3 bg-gray-800 rounded-lg p-4 flex flex-col border border-gray-700">
-                  <div className="flex justify-between items-center mb-4">
-                      <h2 className="text-xl font-bold">Conferences</h2>
-                      <button onClick={() => setIsCreatingConf(true)} className="text-sm bg-blue-600 px-3 py-1 rounded hover:bg-blue-500">+ New</button>
-                  </div>
-                  <div className="flex-1 overflow-y-auto space-y-2">
-                      {conferences.map(c => (
-                          <div 
-                              key={c.id} 
-                              onClick={() => setSelectedConfId(c.id)}
-                              className={`p-4 rounded cursor-pointer transition-all ${selectedConfId === c.id ? 'bg-blue-900/50 border border-blue-500' : 'bg-gray-700 hover:bg-gray-600'}`}
-                          >
-                              <div className="font-bold text-lg">{c.title}</div>
-                              <div className="text-sm text-gray-400 flex justify-between mt-2">
-                                  <span>{c.dates}</span>
-                              </div>
-                              <div className="mt-2 flex gap-2">
-                                  <button 
-                                      onClick={(e) => { e.stopPropagation(); setShowQR(c.id); }} 
-                                      className="text-xs bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded flex items-center gap-1"
-                                  >
-                                      📱 QR Code
-                                  </button>
-                                  {/* Edit button placeholder - logic can be added later */}
-                                  <button className="text-xs bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded">✏️ Edit</button>
-                                  <button 
-                                      onClick={(e) => { e.stopPropagation(); handleDeleteConference(c.id); }}
-                                      className="text-xs bg-red-600 hover:bg-red-500 px-2 py-1 rounded"
-                                  >
-                                      🗑️ Delete
-                                  </button>
-                              </div>
-                          </div>
-                      ))}
-                  </div>
+      <div className="min-h-screen bg-[#f9fafb] dark:bg-[#111827] text-[#111827] dark:text-[#f9fafb] font-sans flex flex-col">
+          {/* Header */}
+          <header className="border-b border-[#e5e7eb] dark:border-[#374151] bg-[#ffffff] dark:bg-[#1f2937] px-6 py-4 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-[#1e3a5f] text-[#f9fafb] flex items-center justify-center font-bold text-sm shadow-sm">HC</div>
+                  <h1 className="font-semibold tracking-wide text-sm uppercase text-[#6b7280] dark:text-[#9ca3af]">Admin Terminal</h1>
               </div>
+              <div className="flex gap-2">
+                  <button 
+                      onClick={() => setView('conferences')} 
+                      className={`px-4 py-1.5 rounded-xl text-xs font-semibold transition-colors border ${view === 'conferences' ? 'bg-[#1e3a5f] text-[#f9fafb] border-[#1e3a5f]' : 'bg-transparent text-[#6b7280] dark:text-[#9ca3af] border-[#e5e7eb] dark:border-[#374151] hover:bg-[#e5e7eb] dark:hover:bg-[#374151]'}`}
+                  >
+                      Conferences
+                  </button>
+                  <button 
+                      onClick={() => setView('cleanup')} 
+                      className={`px-4 py-1.5 rounded-xl text-xs font-semibold transition-colors border ${view === 'cleanup' ? 'bg-red-600 text-white border-red-600' : 'bg-transparent text-[#6b7280] dark:text-[#9ca3af] border-[#e5e7eb] dark:border-[#374151] hover:bg-[#e5e7eb] dark:hover:bg-[#374151]'}`}
+                  >
+                      Cleanup
+                  </button>
+              </div>
+          </header>
 
-              {/* Right: Project List (Filtered) */}
-              <div className="flex-1 bg-gray-800 rounded-lg p-6 border border-gray-700 flex flex-col">
-                  {selectedConfId ? (
-                      <>
-                          <div className="flex justify-between items-center mb-6">
-                              <h2 className="text-2xl font-bold">Projects (Halls)</h2>
-                              <button onClick={() => setIsCreatingProj(true)} className="bg-purple-600 px-4 py-2 rounded font-bold hover:bg-purple-500">+ Add Hall</button>
+          {/* Main Content */}
+          <main className="flex-1 flex overflow-hidden">
+              {view === 'conferences' && (
+                  <div className="flex w-full">
+                      {/* Left Sidebar: Conferences */}
+                      <div className="w-1/3 max-w-sm border-r border-[#e5e7eb] dark:border-[#374151] bg-[#ffffff] dark:bg-[#1f2937] flex flex-col">
+                          <div className="p-4 border-b border-[#e5e7eb] dark:border-[#374151] flex justify-between items-center">
+                              <h2 className="text-sm font-semibold uppercase tracking-wider text-[#6b7280]">Conferences</h2>
+                              <button onClick={() => setIsCreatingConf(true)} className="text-xs bg-[#1e3a5f] hover:bg-[#24456f] text-[#f9fafb] px-3 py-1 rounded-xl transition-colors font-medium">
+                                  + New
+                              </button>
                           </div>
-                          
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto">
-                              {confProjects.map(p => (
-                                  <div key={p.slug} className="bg-gray-700 p-4 rounded border border-gray-600 hover:border-purple-500 transition-all relative group">
-                                      <div onClick={() => navigate(`/p/${p.slug}/admin`)} className="cursor-pointer">
-                                          <h3 className="text-lg font-bold">{p.name}</h3>
-                                          <div className="text-xs text-gray-400 mt-1">ID: {p.slug}</div>
-                                          <div className="mt-2 flex gap-1">
-                                              {p.targetLanguages.map(l => <span key={l} className="px-1.5 py-0.5 bg-gray-600 rounded text-[10px] uppercase">{l}</span>)}
-                                          </div>
+                          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                              {conferences.map(c => (
+                                  <div 
+                                      key={c.id} 
+                                      onClick={() => setSelectedConfId(c.id)}
+                                      className={`p-4 rounded-2xl cursor-pointer border transition-colors ${selectedConfId === c.id ? 'bg-[#1e3a5f]/10 border-[#1e3a5f]' : 'bg-[#f9fafb] dark:bg-[#111827] border-[#e5e7eb] dark:border-[#374151] hover:border-[#9ca3af] dark:hover:border-[#6b7280]'}`}
+                                  >
+                                      <div className="font-semibold text-sm mb-1">{c.title}</div>
+                                      <div className="text-xs text-[#6b7280]">{c.dates}</div>
+                                      <div className="mt-3 flex gap-2">
+                                          <button 
+                                              onClick={(e) => { e.stopPropagation(); setShowQR(c.id); }} 
+                                              className="text-[10px] uppercase font-bold text-[#1e3a5f] dark:text-[#d4af37] border border-[#1e3a5f]/20 dark:border-[#d4af37]/30 px-2 py-1 rounded-xl hover:bg-[#1e3a5f]/10 dark:hover:bg-[#d4af37]/10 transition-colors"
+                                          >
+                                              QR Code
+                                          </button>
+                                          <button 
+                                              onClick={(e) => { e.stopPropagation(); handleDeleteConference(c.id); }}
+                                              className="text-[10px] uppercase font-bold text-red-600 dark:text-red-400 border border-red-600/20 dark:border-red-400/30 px-2 py-1 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors ml-auto"
+                                          >
+                                              Delete
+                                          </button>
                                       </div>
-                                      <button 
-                                          onClick={() => handleDeleteProject(p.slug)}
-                                          className="absolute top-2 right-2 text-gray-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
-                                      >
-                                          🗑️
-                                      </button>
                                   </div>
                               ))}
-                              {confProjects.length === 0 && <div className="text-gray-500 italic">No projects in this conference.</div>}
-                          </div>
-                      </>
-                  ) : (
-                      <div className="flex items-center justify-center h-full text-gray-500 text-lg">
-                          Select a Conference to manage Projects
-                      </div>
-                  )}
-              </div>
-          </div>
-      )}
-
-      {/* --- View: Cleanup --- */}
-      {view === 'cleanup' && (
-          <div className="bg-gray-800 rounded-lg p-6 border border-red-900/30">
-              <h2 className="text-2xl font-bold mb-4 text-red-400">👻 Ghost Data Cleanup</h2>
-              <p className="text-gray-400 mb-6">These are ALL projects found in the database. You can permanently delete unused or "ghost" projects here.</p>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {allProjects.map(p => (
-                      <div key={p.id} className="bg-gray-900 p-4 rounded border border-gray-700 relative group">
-                          <h3 className="font-bold text-gray-200">{p.name}</h3>
-                          <div className="text-xs text-gray-500 font-mono mt-1">{p.id}</div>
-                          <div className="mt-2">
-                              {p.confId ? (
-                                  <span className="text-xs bg-green-900 text-green-300 px-2 py-1 rounded">Linked</span>
-                              ) : (
-                                  <span className="text-xs bg-red-900 text-red-300 px-2 py-1 rounded">Orphan (Ghost?)</span>
+                              {conferences.length === 0 && (
+                                  <div className="text-xs text-[#6b7280] p-4 text-center">No conferences found.</div>
                               )}
                           </div>
-                          <button 
-                              onClick={() => handleDeleteProject(p.id)}
-                              className="absolute top-2 right-2 bg-red-600 hover:bg-red-500 text-white p-1 rounded text-xs shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                              Delete
-                          </button>
                       </div>
-                  ))}
-              </div>
-          </div>
-      )}
 
-      {/* --- Modals --- */}
-      {isCreatingConf && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-gray-800 p-6 rounded-lg w-full max-w-md space-y-4 border border-gray-600">
-                  <h2 className="text-xl font-bold">Create Conference</h2>
-                  <input className="w-full bg-gray-700 p-2 rounded" placeholder="Conference Title" value={confForm.title} onChange={e => setConfForm({...confForm, title: e.target.value})} />
-                  <div className="flex gap-2">
-                      <div className="flex-1">
-                          <label className="text-xs text-gray-400 block mb-1">Start Date</label>
-                          <input type="date" className="w-full bg-gray-700 p-2 rounded" value={confForm.startDate} onChange={e => setConfForm({...confForm, startDate: e.target.value})} />
-                      </div>
-                      <div className="flex-1">
-                          <label className="text-xs text-gray-400 block mb-1">End Date</label>
-                          <input type="date" className="w-full bg-gray-700 p-2 rounded" value={confForm.endDate} onChange={e => setConfForm({...confForm, endDate: e.target.value})} />
+                      {/* Right Panel: Projects */}
+                      <div className="flex-1 bg-[#f9fafb] dark:bg-[#111827] flex flex-col">
+                          {selectedConfId ? (
+                              <>
+                                  <div className="p-6 border-b border-[#e5e7eb] dark:border-[#374151] flex justify-between items-center bg-[#ffffff] dark:bg-[#1f2937]">
+                                      <h2 className="text-lg font-semibold">Associated Halls</h2>
+                                      <button onClick={() => setIsCreatingProj(true)} className="bg-[#d4af37] text-[#111827] px-4 py-1.5 rounded-xl text-sm font-bold hover:bg-[#b5952f] transition-colors">
+                                          + Add Hall
+                                      </button>
+                                  </div>
+                                  <div className="p-6 flex-1 overflow-y-auto">
+                                      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                                          {confProjects.map(p => (
+                                              <div key={p.slug} className="bg-[#ffffff] dark:bg-[#1f2937] p-5 rounded-2xl border border-[#e5e7eb] dark:border-[#374151] hover:border-[#1e3a5f] dark:hover:border-[#d4af37] transition-colors group relative flex flex-col justify-between">
+                                                  <div onClick={() => navigate(`/p/${p.slug}/admin`)} className="cursor-pointer">
+                                                      <h3 className="font-bold text-base mb-1 group-hover:text-[#1e3a5f] dark:group-hover:text-[#d4af37] transition-colors">{p.name}</h3>
+                                                      <div className="text-xs text-[#6b7280] font-mono mb-3">{p.slug}</div>
+                                                      <div className="flex gap-1 flex-wrap">
+                                                          {p.targetLanguages.map(l => <span key={l} className="px-2 py-0.5 bg-[#f3f4f6] dark:bg-[#374151] text-[#6b7280] dark:text-[#d1d5db] rounded-xl text-[10px] font-bold uppercase">{l}</span>)}
+                                                      </div>
+                                                  </div>
+                                                  <div className="mt-4 pt-4 border-t border-[#e5e7eb] dark:border-[#374151] flex justify-between items-center">
+                                                      <span className="text-xs font-semibold text-[#1e3a5f] dark:text-[#d4af37] opacity-0 group-hover:opacity-100 transition-opacity">Open Dashboard →</span>
+                                                      <button 
+                                                          onClick={() => handleDeleteProject(p.slug)}
+                                                          className="text-[#6b7280] hover:text-red-600 dark:hover:text-red-400 p-1"
+                                                      >
+                                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                      </button>
+                                                  </div>
+                                              </div>
+                                          ))}
+                                          {confProjects.length === 0 && <div className="text-[#6b7280] text-sm">No halls created yet.</div>}
+                                      </div>
+                                  </div>
+                              </>
+                          ) : (
+                              <div className="flex-1 flex items-center justify-center text-[#6b7280] text-sm">
+                                  Select a conference from the left panel to manage its halls.
+                              </div>
+                          )}
                       </div>
                   </div>
-                  <div className="flex justify-end gap-2 mt-4">
-                      <button onClick={() => setIsCreatingConf(false)} className="px-4 py-2 text-gray-400">Cancel</button>
-                      <button onClick={handleCreateConf} className="px-4 py-2 bg-blue-600 rounded font-bold">Create</button>
+              )}
+
+              {view === 'cleanup' && (
+                  <div className="p-8 w-full overflow-y-auto">
+                      <div className="max-w-6xl mx-auto">
+                          <h2 className="text-2xl font-bold mb-2">Ghost Data Cleanup</h2>
+                          <p className="text-sm text-[#6b7280] mb-8">Review all database projects and remove unlinked or obsolete halls.</p>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                              {allProjects.map(p => (
+                                  <div key={p.id} className="bg-[#ffffff] dark:bg-[#1f2937] p-4 rounded-2xl border border-[#e5e7eb] dark:border-[#374151] relative group flex flex-col">
+                                      <h3 className="font-semibold text-sm mb-1">{p.name}</h3>
+                                      <div className="text-[10px] text-[#6b7280] font-mono mb-3">{p.id}</div>
+                                      <div className="mt-auto flex justify-between items-center">
+                                          {p.confId ? (
+                                              <span className="text-[10px] uppercase font-bold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-xl">Linked</span>
+                                          ) : (
+                                              <span className="text-[10px] uppercase font-bold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-2 py-0.5 rounded-xl">Orphan</span>
+                                          )}
+                                          <button 
+                                              onClick={() => handleDeleteProject(p.id)}
+                                              className="text-[10px] uppercase font-bold text-red-600 dark:text-red-400 hover:underline opacity-0 group-hover:opacity-100 transition-opacity"
+                                          >
+                                              Delete
+                                          </button>
+                                      </div>
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+                  </div>
+              )}
+          </main>
+
+          {/* --- Modals --- */}
+          {isCreatingConf && (
+              <div className="fixed inset-0 bg-[#111827]/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                  <div className="bg-[#ffffff] dark:bg-[#1f2937] p-6 rounded-2xl w-full max-w-sm border border-[#e5e7eb] dark:border-[#374151] shadow-2xl">
+                      <h2 className="text-lg font-bold mb-4">Create Conference</h2>
+                      <div className="space-y-4">
+                          <div>
+                              <label className="text-xs font-semibold text-[#6b7280] uppercase tracking-wider mb-1 block">Title</label>
+                              <input className="w-full bg-[#f9fafb] dark:bg-[#111827] border border-[#e5e7eb] dark:border-[#374151] focus:border-[#1e3a5f] dark:focus:border-[#d4af37] outline-none p-2.5 rounded-xl text-sm transition-colors" placeholder="e.g. 2025 Global Summit" value={confForm.title} onChange={e => setConfForm({...confForm, title: e.target.value})} />
+                          </div>
+                          <div className="flex gap-4">
+                              <div className="flex-1">
+                                  <label className="text-xs font-semibold text-[#6b7280] uppercase tracking-wider mb-1 block">Start Date</label>
+                                  <input type="date" className="w-full bg-[#f9fafb] dark:bg-[#111827] border border-[#e5e7eb] dark:border-[#374151] outline-none p-2.5 rounded-xl text-sm" value={confForm.startDate} onChange={e => setConfForm({...confForm, startDate: e.target.value})} />
+                              </div>
+                              <div className="flex-1">
+                                  <label className="text-xs font-semibold text-[#6b7280] uppercase tracking-wider mb-1 block">End Date</label>
+                                  <input type="date" className="w-full bg-[#f9fafb] dark:bg-[#111827] border border-[#e5e7eb] dark:border-[#374151] outline-none p-2.5 rounded-xl text-sm" value={confForm.endDate} onChange={e => setConfForm({...confForm, endDate: e.target.value})} />
+                              </div>
+                          </div>
+                      </div>
+                      <div className="flex justify-end gap-2 mt-6">
+                          <button onClick={() => setIsCreatingConf(false)} className="px-4 py-2 text-sm font-semibold text-[#6b7280] hover:text-[#111827] dark:hover:text-[#f9fafb]">Cancel</button>
+                          <button onClick={handleCreateConf} className="px-4 py-2 bg-[#1e3a5f] hover:bg-[#24456f] text-[#ffffff] rounded-xl text-sm font-bold">Create</button>
+                      </div>
                   </div>
               </div>
-          </div>
-      )}
+          )}
 
-      {isCreatingProj && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-gray-800 p-6 rounded-lg w-full max-w-md space-y-4 border border-gray-600">
-                  <h2 className="text-xl font-bold">Add Project (Hall)</h2>
-                  <input className="w-full bg-gray-700 p-2 rounded" placeholder="Hall Name (e.g. Hanwha Hall)" value={projForm.name} onChange={e => setProjForm({...projForm, name: e.target.value})} />
-                  <input className="w-full bg-gray-700 p-2 rounded" placeholder="Unique Slug (ID)" value={projForm.slug} onChange={e => setProjForm({...projForm, slug: e.target.value})} />
-                  <div className="flex justify-end gap-2 mt-4">
-                      <button onClick={() => setIsCreatingProj(false)} className="px-4 py-2 text-gray-400">Cancel</button>
-                      <button onClick={handleCreateProject} className="px-4 py-2 bg-purple-600 rounded font-bold">Create</button>
+          {isCreatingProj && (
+              <div className="fixed inset-0 bg-[#111827]/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                  <div className="bg-[#ffffff] dark:bg-[#1f2937] p-6 rounded-2xl w-full max-w-sm border border-[#e5e7eb] dark:border-[#374151] shadow-2xl">
+                      <h2 className="text-lg font-bold mb-4">Add Hall</h2>
+                      <div className="space-y-4">
+                          <div>
+                              <label className="text-xs font-semibold text-[#6b7280] uppercase tracking-wider mb-1 block">Hall Name</label>
+                              <input className="w-full bg-[#f9fafb] dark:bg-[#111827] border border-[#e5e7eb] dark:border-[#374151] focus:border-[#1e3a5f] dark:focus:border-[#d4af37] outline-none p-2.5 rounded-xl text-sm" placeholder="e.g. Main Hall A" value={projForm.name} onChange={e => setProjForm({...projForm, name: e.target.value})} />
+                          </div>
+                          <div>
+                              <label className="text-xs font-semibold text-[#6b7280] uppercase tracking-wider mb-1 block">Unique Slug</label>
+                              <input className="w-full bg-[#f9fafb] dark:bg-[#111827] border border-[#e5e7eb] dark:border-[#374151] focus:border-[#1e3a5f] dark:focus:border-[#d4af37] outline-none p-2.5 rounded-xl text-sm font-mono" placeholder="e.g. main-hall-a" value={projForm.slug} onChange={e => setProjForm({...projForm, slug: e.target.value})} />
+                          </div>
+                      </div>
+                      <div className="flex justify-end gap-2 mt-6">
+                          <button onClick={() => setIsCreatingProj(false)} className="px-4 py-2 text-sm font-semibold text-[#6b7280] hover:text-[#111827] dark:hover:text-[#f9fafb]">Cancel</button>
+                          <button onClick={handleCreateProject} className="px-4 py-2 bg-[#d4af37] hover:bg-[#b5952f] text-[#111827] rounded-xl text-sm font-bold">Create</button>
+                      </div>
                   </div>
               </div>
-          </div>
-      )}
+          )}
 
-      {/* --- QR Modal --- */}
-      {showQR && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" onClick={() => setShowQR(null)}>
-              <div className="bg-white p-8 rounded-lg flex flex-col items-center gap-4" onClick={e => e.stopPropagation()}>
-                  <h2 className="text-black text-xl font-bold">Conference Access QR</h2>
-                  <div className="text-black text-center">
-                      <div className="text-sm text-gray-500">Scan to join directly</div>
-                      <div className="font-mono text-xs mt-2 bg-gray-100 p-2 rounded">
+          {/* --- QR Modal --- */}
+          {showQR && (
+              <div className="fixed inset-0 bg-[#111827]/50 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setShowQR(null)}>
+                  <div className="bg-[#ffffff] dark:bg-[#1f2937] p-8 rounded-2xl flex flex-col items-center shadow-2xl border border-[#e5e7eb] dark:border-[#374151]" onClick={e => e.stopPropagation()}>
+                      <h2 className="text-lg font-bold mb-2">QR Code URL</h2>
+                      <div className="text-sm text-[#6b7280] mb-4">Scan or copy to join directly</div>
+                      <div className="font-mono text-xs bg-[#f3f4f6] dark:bg-[#111827] p-3 rounded-xl border border-[#e5e7eb] dark:border-[#374151] select-all">
                           {`${window.location.origin}/?conf=${showQR}`}
                       </div>
+                      <button onClick={() => setShowQR(null)} className="mt-6 text-sm font-semibold text-[#1e3a5f] dark:text-[#d4af37]">Close</button>
                   </div>
-                  <button onClick={() => setShowQR(null)} className="text-gray-500 hover:text-black">Close</button>
               </div>
-          </div>
-      )}
-
-    </div>
+          )}
+      </div>
   );
 };
 

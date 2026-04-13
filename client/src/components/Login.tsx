@@ -20,23 +20,23 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
-      <form onSubmit={handleLogin} className="bg-gray-800 p-8 rounded-lg w-96 space-y-4">
+    <div className="min-h-screen flex items-center justify-center bg-[#f9fafb] dark:bg-[#111827] text-[#111827] dark:text-[#f9fafb]">
+      <form onSubmit={handleLogin} className="bg-[#ffffff] dark:bg-[#1f2937] p-8 rounded-xl w-96 space-y-4">
         <h2 className="text-2xl font-bold mb-4">Admin Login</h2>
         <input 
-          className="w-full p-2 bg-gray-700 rounded"
+          className="w-full p-2 bg-[#f3f4f6] dark:bg-[#374151] rounded-xl"
           placeholder="Email" 
           value={email} 
           onChange={e => setEmail(e.target.value)} 
         />
         <input 
-          className="w-full p-2 bg-gray-700 rounded"
+          className="w-full p-2 bg-[#f3f4f6] dark:bg-[#374151] rounded-xl"
           type="password" 
           placeholder="Password" 
           value={password} 
           onChange={e => setPassword(e.target.value)} 
         />
-        <button className="w-full bg-blue-600 p-2 rounded font-bold">Sign In</button>
+        <button className="w-full bg-[#1e3a5f] text-[#ffffff] p-2 rounded-xl font-bold">Sign In</button>
       </form>
     </div>
   );
