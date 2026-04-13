@@ -54,3 +54,58 @@ The platform operates in a medical context where accuracy is non-negotiable. Eve
 4. **Live-awareness** — The platform is always "on" during use. Design must communicate real-time state (recording, processing, finalized) immediately and unmistakably, without being alarming.
 
 5. **Linear/Vercel quality bar** — Every component should feel crafted, not assembled. Sharp edges where appropriate, consistent spacing scales, transitions that feel intentional. No accidental UI.
+
+---
+
+### Status Color Semantics
+
+Colors carry meaning — never use them decoratively.
+
+| Color | Semantic | Examples |
+|---|---|---|
+| `red` | LIVE / Recording / Error / Destructive | `bg-red-600` recording button, `text-red-400 animate-pulse` LIVE dot, `border-l-4 border-red-500` live session row |
+| `green` | Go Live / Finalized / Success / STT active | `bg-green-600` Go Live button, `text-green-400` STT badge, audio level bar |
+| `blue` | Active / Selected / Primary action / Translation | `bg-blue-600` primary buttons, `text-blue-400` translation badge, `border-b-2 border-blue-500` active tab |
+| `yellow` | Processing / Warning | `bg-yellow-500 animate-pulse` processing indicator dot |
+| `gray` | Inactive / Default / Neutral | `bg-gray-700/800` inactive elements, `text-gray-400/500` secondary labels |
+| `purple` | Accent gradient / Brand highlight | Used in gradients alongside blue — not for status |
+
+---
+
+### Motion & Animation Rules
+
+- **`animate-pulse`** — Live/active status dots only (`w-1.5 h-1.5 rounded-full bg-red-500`). Never use on text or layout elements.
+- **`animate-spin`** — Loading spinners only (`border-blue-500 border-t-transparent rounded-full`).
+- **`transition-colors`** — All interactive elements (buttons, links, tabs). No duration needed — use Tailwind default (150ms).
+- **`transition-transform duration-300`** — Panel slides and drawers (sidebar open/close).
+- **`transition-all`** — Use sparingly; only when multiple properties change simultaneously (e.g., hover card lift).
+- **No entry/exit animations in Audience view** — Text is the product. Motion must not compete with readability.
+- **Framer Motion** — Available but reserved for deliberate, functional transitions (not decorative flourishes).
+
+---
+
+### Admin vs Audience Design Modes
+
+These are fundamentally different UX contexts — design each independently.
+
+**Admin View** (`AdminDashboard`, `AdminLanding`)
+- Dense, information-rich layout
+- Dark only: `bg-gray-900` base, panels at `bg-gray-800`
+- Status indicators are prominent and immediate
+- Tabbed panels, sidebar navigation, split-pane layouts
+- Full admin control: every state visible at a glance
+- Typography: small (`text-xs`/`text-sm`), high-contrast labels, `uppercase tracking-widest` for section headers
+
+**Audience View** (`AudienceView`)
+- Text-first: translated subtitles fill the viewport
+- Supports both dark and light mode (user toggle)
+- UI chrome recedes — only visible on hover or sidebar open
+- User-controlled font size (16–48px), letter spacing, line height
+- TTS optional layer — non-intrusive
+- Typography: large, readable, generous line-height (default 1.8)
+- No status indicators beyond a minimal live dot
+
+**Broadcast / Overlay View**
+- Pure text, zero UI chrome
+- Full typographic control for AV operators
+- Embed-ready — no headers, no chrome, no interaction needed
