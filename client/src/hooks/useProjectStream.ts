@@ -75,7 +75,15 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
 
           streamListener = (snapshot) => {
             if (!mounted) return;
-            const data = snapshot.val() || {};
+            const raw = snapshot.val();
+            if (!raw || Object.keys(raw).length === 0) {
+              oldestTimestampRef.current = null;
+              setHasMore(false);
+              setStreamData({});
+              setLoading(false);
+              return;
+            }
+            const data = raw as Record<string, any>;
             
             // 초기 로딩 시 가장 오래된 메시지 타임스탬프 기록
             if (!oldestTimestampRef.current && Object.keys(data).length > 0) {
