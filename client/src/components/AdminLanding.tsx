@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { rtdb } from '../firebase';
 import { ref, set, get, child, remove } from 'firebase/database';
 import type { ProjectSettings, Conference } from '../types';
+import { QRCodeSVG } from 'qrcode.react';
 
 const AdminLanding: React.FC = () => {
   const navigate = useNavigate();
@@ -12,6 +13,7 @@ const AdminLanding: React.FC = () => {
   const [conferences, setConferences] = useState<Conference[]>([]);
   const [selectedConfId, setSelectedConfId] = useState<string | null>(null);
   const [showQR, setShowQR] = useState<string | null>(null); // Conf ID for QR modal
+  const [showProjQR, setShowProjQR] = useState<string | null>(null); // Proj Slug for QR modal
   
   // Projects for the selected conference
   const [confProjects, setConfProjects] = useState<ProjectSettings[]>([]);
@@ -260,6 +262,13 @@ const AdminLanding: React.FC = () => {
                                       >
                                           🗑️
                                       </button>
+                                      <button 
+                                          onClick={(e) => { e.stopPropagation(); setShowProjQR(p.slug); }}
+                                          className="absolute top-2 right-8 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                                          title="Show QR Code"
+                                      >
+                                          📱
+                                      </button>
                                   </div>
                               ))}
                               {confProjects.length === 0 && <div className="text-gray-500 italic">No projects in this conference.</div>}
@@ -347,6 +356,12 @@ const AdminLanding: React.FC = () => {
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" onClick={() => setShowQR(null)}>
               <div className="bg-white p-8 rounded-lg flex flex-col items-center gap-4" onClick={e => e.stopPropagation()}>
                   <h2 className="text-black text-xl font-bold">Conference Access QR</h2>
+                  <QRCodeSVG 
+                      value={`${window.location.origin}/?conf=${showQR}`} 
+                      size={256}
+                      level={"H"}
+                      includeMargin={true}
+                  />
                   <div className="text-black text-center">
                       <div className="text-sm text-gray-500">Scan to join directly</div>
                       <div className="font-mono text-xs mt-2 bg-gray-100 p-2 rounded">
@@ -354,6 +369,27 @@ const AdminLanding: React.FC = () => {
                       </div>
                   </div>
                   <button onClick={() => setShowQR(null)} className="text-gray-500 hover:text-black">Close</button>
+              </div>
+          </div>
+      )}
+
+      {showProjQR && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" onClick={() => setShowProjQR(null)}>
+              <div className="bg-white p-8 rounded-lg flex flex-col items-center gap-4" onClick={e => e.stopPropagation()}>
+                  <h2 className="text-black text-xl font-bold">Hall Access QR</h2>
+                  <QRCodeSVG 
+                      value={`${window.location.origin}/p/${showProjQR}`} 
+                      size={256}
+                      level={"H"}
+                      includeMargin={true}
+                  />
+                  <div className="text-black text-center">
+                      <div className="text-sm text-gray-500">Scan to join this hall directly</div>
+                      <div className="font-mono text-xs mt-2 bg-gray-100 p-2 rounded">
+                          {`${window.location.origin}/p/${showProjQR}`}
+                      </div>
+                  </div>
+                  <button onClick={() => setShowProjQR(null)} className="text-gray-500 hover:text-black">Close</button>
               </div>
           </div>
       )}
