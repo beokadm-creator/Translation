@@ -340,7 +340,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     const triggerArchive = async (sessionIdToArchive: string) => {
         try {
             const token = await auth.currentUser?.getIdToken();
-            await fetch(`${CF_BASE}/archiveSession`, {
+            const response = await fetch(`${CF_BASE}/archiveSession`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -348,8 +348,15 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 },
                 body: JSON.stringify({ projectId: activeProjectId, sessionId: sessionIdToArchive })
             });
-        } catch (e) {
+            
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.message || `HTTP error! status: ${response.status}`);
+            }
+        } catch (e: any) {
             console.error("Archive Failed:", e);
+            alert(`세션 아카이브에 실패했습니다. 이전 데이터가 남아있을 수 있습니다.\n에러: ${e.message}`);
+            throw e; // 호출한 곳(handleGoLive)에서 후속 처리 중단할 수 있도록 throw
         }
     };
 
@@ -392,14 +399,24 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
 
         if (activeSessionId === selectedSessionId) {
             if (!window.confirm("Stop Live Broadcast? This will archive the current session.")) return;
-            await triggerArchive(activeSessionId);
+            try {
+                await triggerArchive(activeSessionId);
+            } catch (e) {
+                alert("아카이브에 실패하여 세션 종료를 중단합니다.");
+                return;
+            }
             await set(ref(database, `projects/${activeProjectId}/activeSessionId`), null);
             return;
         }
 
         if (activeSessionId && activeSessionId !== selectedSessionId) {
             if (!window.confirm(`Switch Live to new session? Current session (${activeSessionId}) will be archived.`)) return;
-            await triggerArchive(activeSessionId);
+            try {
+                await triggerArchive(activeSessionId);
+            } catch (e) {
+                alert("이전 세션 아카이브에 실패하여 세션 전환을 중단합니다.");
+                return;
+            }
         }
 
         await set(ref(database, `projects/${activeProjectId}/activeSessionId`), selectedSessionId);

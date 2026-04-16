@@ -398,6 +398,19 @@ export const processAudio = functions
             const seqResult = await projectRef.child('lastSequence').transaction((cur) => (cur || 0) + 1)
             const seq = seqResult.snapshot.val()
 
+            // ── STEP 1.5: 세션 전환 검증 (CRITICAL 방어) ─────────────────
+            // STT 처리(수 초 소요) 중에 관리자가 세션을 전환(아카이브)했다면, 
+            // 현재 데이터가 이전 세션의 고아(Orphan) 데이터로 남거나 새 세션에 섞이는 것을 방지
+            if (activeSessionId) {
+                const currentActiveSnap = await projectRef.child('activeSessionId').get();
+                const currentActiveId = currentActiveSnap.val();
+                if (currentActiveId !== activeSessionId) {
+                    functions.logger.warn(`[STT] Session changed during processing: ${activeSessionId} -> ${currentActiveId}. Dropping chunk.`);
+                    res.status(200).json({ success: true, info: "SessionChanged", text: rawText });
+                    return;
+                }
+            }
+
             // ── STEP 2: DB에 즉시 기록 (status: translating) ─────────────────
             // 이렇게 해야 유저 설정(hideRaw)과 상관없이 '번역 중'으로 원문이 즉시 보임
             await projectRef.child(`stream/${id}`).set({
@@ -474,6 +487,14 @@ export const processAudio = functions
 
             if (flushData) {
                 const { targetId, idsToDelete, bufferText: flushText, previousContext } = flushData as { targetId: string; idsToDelete: string[]; bufferText: string; previousContext: string }
+
+                // ── CRITICAL 2 방어: 타겟 세그먼트가 아카이브/삭제되었는지 검증 ──
+                const targetSnap = await projectRef.child(`stream/${targetId}`).get();
+                if (!targetSnap.exists()) {
+                    functions.logger.warn(`[Translation] Target segment ${targetId} was removed (likely archived). Dropping translation result.`);
+                    return;
+                }
+
                 try {
                     const { refined, ko, en, isMedical } = await TranslationFactory.executeWithFallback(
                         flushText, sourceLang, previousContext, sessionContext, primaryTrans, fallbackTrans
