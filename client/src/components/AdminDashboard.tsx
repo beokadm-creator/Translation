@@ -846,12 +846,15 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                     <div className="space-y-1.5">
                                         <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Target Language <span className="normal-case tracking-normal text-gray-600 ml-1">(Auto)</span></label>
                                         <div className="flex gap-3 px-3 py-1.5 bg-[#111111]/50 rounded-md border border-white/5 h-[34px] items-center">
-                                            {['ko', 'en'].map(l => (
-                                                <label key={l} className={`flex items-center gap-2 ${(formData.targetLanguages || []).includes(l) ? 'text-gray-200' : 'text-gray-600'} cursor-not-allowed`}>
-                                                    <input type="checkbox" checked={(formData.targetLanguages || []).includes(l)} disabled className="cursor-not-allowed" />
-                                                    <span className="uppercase text-xs font-medium">{l}</span>
-                                                </label>
-                                            ))}
+                                            {['ko', 'en'].map(l => {
+                                                const isTarget = (formData.sourceLanguage || 'ko') === 'ko' ? l === 'en' : l === 'ko';
+                                                return (
+                                                    <label key={l} className={`flex items-center gap-2 ${isTarget ? 'text-gray-200' : 'text-gray-600'} cursor-not-allowed`}>
+                                                        <input type="checkbox" checked={isTarget} disabled className="cursor-not-allowed" />
+                                                        <span className="uppercase text-xs font-medium">{l}</span>
+                                                    </label>
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 </div>
