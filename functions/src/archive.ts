@@ -80,14 +80,14 @@ export const archiveSession = functions.https.onRequest(async (req, res) => {
       lastFlushTime: Date.now()
     };
 
-    // 5. Multi-path update로 원자적 적용 (해당 세션 데이터 이동 + state 초기화)
-    await projectRef.update(updates);
-
-    // 6. Reset Active Session if it matches
+    // 5. Reset Active Session if it matches (원자적 처리)
     const activeSnap = await projectRef.child("activeSessionId").get();
     if (activeSnap.exists() && activeSnap.val() === sessionId) {
-      await projectRef.child("activeSessionId").remove();
+      updates["activeSessionId"] = null;
     }
+
+    // 6. Multi-path update로 원자적 적용 (해당 세션 데이터 이동 + state 초기화 + activeSessionId 초기화)
+    await projectRef.update(updates);
 
     functions.logger.info(`Archived session ${sessionId} for project ${projectId}`);
     res.status(200).send({ success: true, message: "Archived and cleared." });
