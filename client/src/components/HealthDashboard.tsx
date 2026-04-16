@@ -101,7 +101,7 @@ const HealthDashboard: React.FC<HealthProps> = ({ projectId }) => {
         measureLatency();
         const latencyInterval = setInterval(measureLatency, 30000);
 
-        // ── 5. Cloud Function 헬스 체크 (1분마다)
+        // ── 5. Cloud Function 헬스 체크 (폴링 제거, 초기 마운트 시 1회만 확인)
         const checkCF = async () => {
             setCfStatus('idle');
             try {
@@ -120,8 +120,8 @@ const HealthDashboard: React.FC<HealthProps> = ({ projectId }) => {
                 setCfMsg('CF: Unreachable');
             }
         };
+        // 초기 로딩 시에만 1회 호출
         checkCF();
-        const cfInterval = setInterval(checkCF, 60000);
 
         // ── 6. 경과 시간 실시간 업데이트 (1초마다)
         const liveTimer = setInterval(() => {
@@ -146,7 +146,6 @@ const HealthDashboard: React.FC<HealthProps> = ({ projectId }) => {
             unsubStatus();
             unsubRefined();
             clearInterval(latencyInterval);
-            clearInterval(cfInterval);
             clearInterval(liveTimer);
         };
     }, [projectId]);
