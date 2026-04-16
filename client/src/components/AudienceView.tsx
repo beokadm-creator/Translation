@@ -667,16 +667,10 @@ const AudienceView: React.FC = () => {
                             const sessionSourceLang = sessionInfo?.sourceLanguage || 'ko'
 
                             let text = ""
-                            let isFallback = false
-
                             if (viewMode === 'live' && isTranslating && activeLang === sessionSourceLang) {
                                 text = (seg.refined as string) || (seg.original as string) || ""
                             } else {
                                 text = seg[activeLang] as string || ""
-                                if (!text && viewMode === 'live' && isTranslating) {
-                                    text = (seg.refined as string) || (seg.original as string) || ""
-                                    isFallback = true
-                                }
                             }
 
                             if (!text || text.trim() === "") return null
@@ -685,24 +679,9 @@ const AudienceView: React.FC = () => {
                             const isTimeOut = viewMode === 'live' ? ((now - (seg.timestamp || 0)) > 5000) : true
                             const showAsRaw = viewMode === 'live' ? (!isFinal && !isTimeOut) : false
 
-                            // 영어 탭인데 원문이 한국어인 경우: 텍스트는 숨기고 "깜빡이는 커서"만 보여줌 (안정화 버전 동작)
-                            if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) {
-                                return (
-                                    <TextItem
-                                        key={id}
-                                        id={id}
-                                        text=""
-                                        isRaw={true}
-                                        targetLang={activeLang}
-                                        fontSize={`${fontSize}px`}
-                                        color={isDarkMode ? "white" : "black"}
-                                        opacity={0.5}
-                                    />
-                                )
-                            }
+                            if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) return null
 
-                            // translating 상태일 때는 hideRaw 무시하고 무조건 보여줌
-                            if (hideRaw && showAsRaw && activeLang !== sessionSourceLang && !isTranslating && !isFallback) return null;
+                            if (hideRaw && showAsRaw && activeLang !== sessionSourceLang) return null
 
                             return (
                                 <TextItem
