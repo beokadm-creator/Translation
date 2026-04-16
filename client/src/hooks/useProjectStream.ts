@@ -2,13 +2,25 @@ import { useState, useEffect, useRef } from 'react';
 import { rtdb } from '../firebase';
 import { ref, onValue, off, get, query, limitToLast, orderByChild, endBefore } from 'firebase/database';
 
-export const useProjectStream = (projectIdOrSlug: string | undefined, options: { subscribe?: boolean } = { subscribe: true }) => {
+export const useProjectStream = (projectIdOrSlug: string | undefined, options: { subscribe?: boolean; maxItems?: number } = { subscribe: true }) => {
   const [realProjectId, setRealProjectId] = useState<string | null>(null);
   const [streamData, setStreamData] = useState<Record<string, { original: string; refined?: string; ko?: string; en?: string; ja?: string; status: 'raw' | 'translating' | 'final' | 'merged'; timestamp: number; seq?: number; mergedIds?: string[] } | null> | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const oldestTimestampRef = useRef<number | null>(null);
+  const maxItems = Math.max(50, options.maxItems ?? 2000);
+
+  const trimStreamData = (data: Record<string, unknown>) => {
+    const entries = Object.entries(data).filter(([, v]) => {
+      if (!v || typeof v !== 'object') return false;
+      const ts = (v as { timestamp?: unknown }).timestamp;
+      return typeof ts === 'number';
+    }) as Array<[string, { timestamp: number }]>;
+    if (entries.length <= maxItems) return data;
+    entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+    return Object.fromEntries(entries.slice(-maxItems));
+  };
 
   // 과거 데이터(이전 50개)를 불러오는 페이징 함수
   const loadOlderMessages = async () => {
@@ -31,10 +43,13 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
           const newOldest = Math.min(...items.map(i => i.timestamp));
           oldestTimestampRef.current = newOldest;
           
-          setStreamData(prev => ({
-            ...data,
-            ...prev
-          }));
+          setStreamData(prev => {
+            const merged = { ...data, ...(prev || {}) };
+            const trimmed = trimStreamData(merged) as Record<string, any>;
+            const nextItems = Object.values(trimmed) as any[];
+            oldestTimestampRef.current = nextItems.length ? Math.min(...nextItems.map(i => i.timestamp)) : null;
+            return trimmed;
+          });
         }
         if (items.length < 50) {
           setHasMore(false); // 더 이상 불러올 과거 데이터가 없음
@@ -92,10 +107,13 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
             }
 
             // 새로운 데이터가 도착하면 기존 과거 데이터와 병합(Merge)하여 덮어쓰기 방지
-            setStreamData(prev => ({
-              ...prev,
-              ...data
-            }));
+            setStreamData(prev => {
+              const merged = { ...(prev || {}), ...data };
+              const trimmed = trimStreamData(merged) as Record<string, any>;
+              const nextItems = Object.values(trimmed) as any[];
+              oldestTimestampRef.current = nextItems.length ? Math.min(...nextItems.map(i => i.timestamp)) : null;
+              return trimmed;
+            });
             setLoading(false);
           };
           onValue(streamQuery, streamListener, (err) => {

@@ -32,8 +32,9 @@ const OverlayView: React.FC = () => {
     const activeLang = lang || 'refined';
     const activeProjectId = projectId || 'default';
 
-    const { streamData, loading, error } = useProjectStream(activeProjectId, { subscribe: true });
+    const { streamData, loading, error } = useProjectStream(activeProjectId, { subscribe: true, maxItems: 1000 });
     const [settings, setSettings] = useState<OverlaySettings>(DEFAULT_SETTINGS);
+    const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
     useEffect(() => {
         const settingsRef = ref(rtdb, `projects/${activeProjectId}/settings`);
@@ -48,21 +49,29 @@ const OverlayView: React.FC = () => {
         return () => unsub();
     }, [activeProjectId]);
 
+    useEffect(() => {
+        const activeRef = ref(rtdb, `projects/${activeProjectId}/activeSessionId`);
+        const unsub = onValue(activeRef, (snap) => {
+            setActiveSessionId(snap.val() || null);
+        });
+        return () => unsub();
+    }, [activeProjectId]);
+
     // ── Data Processing ───────────────────────────────────────────────────────
     // 오버레이는 항상 final 세그먼트만 표시 (원문/번역 중 텍스트 숨김)
     const [displayText, setDisplayText] = useState<string>('');
 
     useEffect(() => {
-        if (!streamData) { setDisplayText(''); return; }
+        if (!streamData || !activeSessionId) { setDisplayText(''); return; }
 
         type RawSeg = {
             id: string; original?: string; refined?: string;
-            ko?: string; en?: string; status?: string; timestamp: number;
+            ko?: string; en?: string; status?: string; timestamp: number; sessionId?: string;
         };
 
         const segments = Object.entries(streamData)
             .map(([key, val]: [string, unknown]) => ({ ...(val as RawSeg), id: key }))
-            .filter(s => s.status === 'final')
+            .filter(s => s.status === 'final' && s.sessionId === activeSessionId)
             .sort((a, b) => a.timestamp - b.timestamp)
             .slice(-15);
 
@@ -73,7 +82,7 @@ const OverlayView: React.FC = () => {
         }).filter(Boolean);
 
         setDisplayText(texts.join(' '));
-    }, [streamData, activeLang]);
+    }, [streamData, activeLang, activeSessionId]);
 
     // ── 타이핑 애니메이션 ─────────────────────────────────────────────────────
     const [visibleText, setVisibleText] = useState('');

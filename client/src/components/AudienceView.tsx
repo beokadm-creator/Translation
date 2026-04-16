@@ -262,7 +262,7 @@ const AudienceView: React.FC = () => {
         });
 
         const sessionsRef = ref(database, `projects/${activeProjectId}/sessions`);
-        onValue(sessionsRef, (snap) => {
+        const unsubSessions = onValue(sessionsRef, (snap) => {
             const data = snap.val();
             if (data) {
                 const list = Object.entries(data).map(([k, v]: [string, unknown]) => {
@@ -276,14 +276,11 @@ const AudienceView: React.FC = () => {
         });
 
         const activeRef = ref(database, `projects/${activeProjectId}/activeSessionId`);
-        onValue(activeRef, (snap) => {
+        const unsubActive = onValue(activeRef, (snap) => {
             const sid = snap.val();
             setActiveSessionId(sid);
         });
-        // Cleanup: onValue listeners should be unsubscribed
-        // Note: we return nothing here because onValue returns unsubscribe fn
-        // but we're calling it inline. This is acceptable for this use case.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        return () => { unsubSessions(); unsubActive(); };
     }, [activeProjectId]);
 
     useEffect(() => {
