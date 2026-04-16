@@ -168,6 +168,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     const [stream, setStream] = useState<MediaStream | null>(null);
     const mr1Ref = useRef<MediaRecorder | null>(null);
     const mr2Ref = useRef<MediaRecorder | null>(null);
+    const switchRecordersRef = useRef<(() => void) | null>(null);
+    const liveSourceLangOverrideRef = useRef<'ko' | 'en' | null>(null);
     const activeIndexRef = useRef<number>(0);
     const chunks1Ref = useRef<Blob[]>([]);
     const chunks2Ref = useRef<Blob[]>([]);
@@ -442,7 +444,9 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             }
             const buf = await blob.arrayBuffer();
             const activeSession = sessions.find(s => s.id === activeSessionId);
-            const liveLang = activeSessionId && selectedSessionId === activeSessionId ? formData.sourceLanguage : undefined;
+            const liveLang = activeSessionId && selectedSessionId === activeSessionId
+                ? (liveSourceLangOverrideRef.current || formData.sourceLanguage)
+                : undefined;
             const currentLang = liveLang || activeSession?.sourceLanguage || 'ko';
             
             // --- 2단계 최적화: 서버 DB 읽기 병목 제거를 위한 헤더 송장(Metadata) 생성 ---
@@ -585,6 +589,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                     scheduleNextCut(interval);
                 }, 100);
             };
+            switchRecordersRef.current = switchRecorders;
 
             console.log("Starting Chunk Mode (2500ms)");
             scheduleNextCut(2500);
@@ -608,6 +613,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
         if (segmentTimerRef.current) window.clearTimeout(segmentTimerRef.current);
         if (mr1Ref.current?.state === 'recording') mr1Ref.current.stop();
         if (mr2Ref.current?.state === 'recording') mr2Ref.current.stop();
+        switchRecordersRef.current = null;
+        liveSourceLangOverrideRef.current = null;
         stream?.getTracks().forEach(t => t.stop());
         audioContextRef.current?.close();
         if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
@@ -753,6 +760,9 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                             onChange={async e => {
                                                 const src = e.target.value as 'ko' | 'en';
                                                 const tgt = src === 'ko' ? ['en'] : ['ko'];
+                                                if (selectedSessionId && selectedSessionId === activeSessionId) {
+                                                    liveSourceLangOverrideRef.current = src;
+                                                }
                                                 setFormData({ ...formData, sourceLanguage: src, targetLanguages: tgt });
                                                 if (selectedSessionId && selectedSessionId === activeSessionId) {
                                                     try {
@@ -762,6 +772,9 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                         await update(ref(database), updates);
                                                     } catch (err) {
                                                         console.error("LIVE 언어 자동 반영 실패:", err);
+                                                    }
+                                                    if (isRecording) {
+                                                        switchRecordersRef.current?.();
                                                     }
                                                 }
                                             }}

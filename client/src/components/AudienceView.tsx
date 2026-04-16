@@ -651,9 +651,14 @@ const AudienceView: React.FC = () => {
                             const seg = segmentsMap[id]
                             if (!seg || seg.status === 'merged') return null
                             const isTranslating = seg.status === 'translating'
+                            const sessionSourceLang = sessionInfo?.sourceLanguage || 'ko'
 
                             let text = ""
-                            text = seg[activeLang] as string || ""
+                            if (viewMode === 'live' && isTranslating && activeLang === sessionSourceLang) {
+                                text = (seg.refined as string) || (seg.original as string) || ""
+                            } else {
+                                text = seg[activeLang] as string || ""
+                            }
 
                             if (!text || text.trim() === "") return null
 
@@ -663,7 +668,7 @@ const AudienceView: React.FC = () => {
 
                             if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) return null
 
-                            if (hideRaw && showAsRaw) return null
+                            if (hideRaw && showAsRaw && activeLang !== sessionSourceLang) return null
 
                             return (
                                 <TextItem

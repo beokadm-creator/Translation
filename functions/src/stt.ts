@@ -419,8 +419,11 @@ export const processAudio = functions
                 // 트랜잭션 재시도(Retry) 시 이전 시도의 flushData를 반드시 초기화하여 덮어쓰기 방지
                 flushData = null;
                 const st = (currentState || {}) as Record<string, unknown>
-                const currentBufferText = ((st.bufferText as string) || '').toString()
-                const currentBufferIds: string[] = Array.isArray(st.bufferIds) ? (st.bufferIds as string[]) : []
+                const lastSourceLang = ((st.sourceLang as string) || '').toString()
+                const langChanged = !!lastSourceLang && lastSourceLang !== sourceLang
+
+                const currentBufferText = langChanged ? '' : ((st.bufferText as string) || '').toString()
+                const currentBufferIds: string[] = langChanged ? [] : (Array.isArray(st.bufferIds) ? (st.bufferIds as string[]) : [])
 
                 // 버퍼가 비어있으면 지금부터 타이머 시작
                 const lastFlushTime = currentBufferIds.length === 0
@@ -430,7 +433,7 @@ export const processAudio = functions
                 // ── 2단계 최적화: previousContext 지연 읽기 (Lazy Read) ──
                 // 버퍼 상태에서 lastRefinedList를 추출하여 flushData에 함께 넘김
                 let previousContext = "";
-                const list: string[] = Array.isArray(st.lastRefinedList) ? st.lastRefinedList : [];
+                const list: string[] = langChanged ? [] : (Array.isArray(st.lastRefinedList) ? st.lastRefinedList : []);
                 previousContext = list.slice(-2).join(' / ');
 
                 const newBufferText = currentBufferText ? currentBufferText + ' ' + rawText : rawText
@@ -449,10 +452,23 @@ export const processAudio = functions
                         bufferText: newBufferText,
                         previousContext: previousContext
                     } as any
-                    return { bufferText: '', bufferIds: [], lastFlushTime: Date.now(), lastRefinedList: (st.lastRefinedList as string[]) || [] }
+                    return {
+                        bufferText: '',
+                        bufferIds: [],
+                        lastFlushTime: Date.now(),
+                        lastRefinedList: langChanged ? [] : ((st.lastRefinedList as string[]) || []),
+                        sourceLang
+                    }
                 } else {
                     // BUFFERING: 현재 세그먼트 추가
-                    return { ...st, bufferText: newBufferText, bufferIds: newBufferIds, lastFlushTime: lastFlushTime }
+                    return {
+                        ...st,
+                        bufferText: newBufferText,
+                        bufferIds: newBufferIds,
+                        lastFlushTime: lastFlushTime,
+                        ...(langChanged ? { lastRefinedList: [] } : {}),
+                        sourceLang
+                    }
                 }
             })
 
