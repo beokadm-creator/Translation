@@ -236,7 +236,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                     
                     // ── 누락된 로직: streamData에서 삭제된 항목(초기화/아카이브 등)을 next에서도 삭제 ──
                     Object.keys(next).forEach(k => {
-                        if (!streamData[k]) {
+                        // 현재 라이브 세션의 데이터만 남겨야 함 (streamData에 없거나, 세션ID가 다르면 지움)
+                        if (!streamData[k] || (streamData[k] as any).sessionId !== activeSessionId) {
                             delete next[k];
                             changed = true;
                         }
@@ -245,6 +246,10 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                     Object.entries(streamData).forEach(([k, v]: [string, unknown]) => {
                         if (!v) return;
                         const value = v as StreamSegment;
+                        
+                        // 현재 라이브 세션의 데이터만 처리
+                        if ((value as any).sessionId !== activeSessionId) return;
+
                         if (value.mergedIds && Array.isArray(value.mergedIds)) {
                             value.mergedIds.forEach((pid: string) => {
                                 if (next[pid]) { delete next[pid]; changed = true; }
@@ -402,15 +407,28 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                         }
                     });
                 }
+                // 기존 데이터가 삭제되었음을 확실히 기록하기 위해 lastSequence는 유지하되 버퍼만 비움
                 updates[`projects/${activeProjectId}/state`] = {
                     bufferText: "",
                     bufferIds: [],
                     lastRefinedList: [],
                     lastFlushTime: Date.now()
                 };
+            } else {
+                // 라이브 중이 아닌 세션을 지울 때도 혹시 stream에 남아있을 수 있는 쓰레기 데이터를 정리
+                const streamSnap = await get(ref(database, `projects/${activeProjectId}/stream`));
+                if (streamSnap.exists()) {
+                    Object.entries(streamSnap.val()).forEach(([k, v]: [string, any]) => {
+                        if (v && v.sessionId === selectedSessionId) {
+                            updates[`projects/${activeProjectId}/stream/${k}`] = null;
+                        }
+                    });
+                }
             }
 
             await update(ref(database), updates);
+            
+            // 즉시 로컬 상태 초기화하여 화면에서 삭제
             setSegmentsMap({});
             alert("자막 데이터가 완벽하게 초기화되었습니다.");
         } catch (e) {

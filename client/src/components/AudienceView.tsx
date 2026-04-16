@@ -302,7 +302,7 @@ const AudienceView: React.FC = () => {
                 
                 // ── 누락된 로직: streamData에서 삭제된 항목(초기화 등)을 next에서도 삭제 ──
                 Object.keys(next).forEach(k => {
-                    if (!streamData[k]) {
+                    if (!streamData[k] || (streamData[k] as any).sessionId !== activeSessionId) {
                         delete next[k];
                         changed = true;
                     }
