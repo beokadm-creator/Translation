@@ -496,6 +496,10 @@ exports.processAudio = functions
                 // ── 3단계 디테일 튜닝: 번역 실패 및 에러 복구 시 확실한 로깅 및 무한 로딩 방지 ──
                 functions.logger.error("[processAudio] Translation or update failed", { error: e.message || e });
                 const errorFixes = {};
+                const safeRaw = sanitize(flushText);
+                errorFixes[`projects/${projectId}/stream/${targetId}/refined`] = safeRaw;
+                errorFixes[`projects/${projectId}/stream/${targetId}/ko`] = safeRaw;
+                errorFixes[`projects/${projectId}/stream/${targetId}/en`] = safeRaw;
                 errorFixes[`projects/${projectId}/stream/${targetId}/status`] = "final";
                 for (const pid of idsToDelete) {
                     errorFixes[`projects/${projectId}/stream/${pid}/status`] = "final";
