@@ -178,6 +178,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     const analyserRef = useRef<AnalyserNode | null>(null);
     const rafIdRef = useRef<number | null>(null);
     const chunkMaxDbRef = useRef<number>(-100);
+    const forceFlushNextChunkRef = useRef<boolean>(false);
     const [sourceType, setSourceType] = useState<'mic' | 'system'>('mic');
 
     // --- Isolation View State ---
@@ -511,8 +512,11 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             const chunkTimeoutMs = "5000";
             const chunkSentenceEnd = "true";
 
+            const isForceFlush = forceFlushNextChunkRef.current;
+            if (isForceFlush) forceFlushNextChunkRef.current = false;
+
             const url = `${CF_BASE}/processAudio?projectId=${encodeURIComponent(activeProjectId)}&sourceLabel=admin&sourceLang=${currentLang}`;
-            console.log(`[Upload] Sending ${blob.size}B → CF (project=${activeProjectId}, lang=${currentLang})`);
+            console.log(`[Upload] Sending ${blob.size}B → CF (project=${activeProjectId}, lang=${currentLang}, flush=${isForceFlush})`);
             
             fetch(url, {
                 method: 'POST',
@@ -526,6 +530,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                     'X-Chunk-Min-Length': chunkMinLength,
                     'X-Chunk-Timeout-Ms': chunkTimeoutMs,
                     'X-Chunk-Sentence-End': chunkSentenceEnd,
+                    'X-Force-Flush': isForceFlush ? 'true' : 'false',
                     'X-STT-Primary': projectSettings.primarySTT,
                     'X-STT-Fallback': projectSettings.fallbackSTT,
                     'X-Trans-Primary': projectSettings.primaryTrans,
@@ -808,22 +813,29 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                             onChange={async e => {
                                                 const src = e.target.value as 'ko' | 'en';
                                                 const tgt = src === 'ko' ? ['en'] : ['ko'];
+                                                
                                                 if (selectedSessionId && selectedSessionId === activeSessionId) {
-                                                    liveSourceLangOverrideRef.current = src;
-                                                }
-                                                setFormData({ ...formData, sourceLanguage: src, targetLanguages: tgt });
-                                                if (selectedSessionId && selectedSessionId === activeSessionId) {
-                                                    try {
-                                                        const updates: Record<string, unknown> = {};
-                                                        updates[`projects/${activeProjectId}/sessions/${selectedSessionId}/sourceLanguage`] = src;
-                                                        updates[`projects/${activeProjectId}/sessions/${selectedSessionId}/targetLanguages`] = tgt;
-                                                        await update(ref(database), updates);
-                                                    } catch (err) {
-                                                        console.error("LIVE 언어 자동 반영 실패:", err);
-                                                    }
+                                                    // 1. 현재 녹음 중인 청크를 강제로 컷하고 서버 버퍼를 즉시 번역(flush)하도록 플래그 세팅
                                                     if (isRecording) {
+                                                        forceFlushNextChunkRef.current = true;
                                                         switchRecordersRef.current?.();
                                                     }
+                                                    
+                                                    // 2. 약간의 지연(200ms)을 주어, 방금 컷된 청크가 '이전 언어'로 업로드되게 보장한 후 새 언어 적용
+                                                    setTimeout(async () => {
+                                                        liveSourceLangOverrideRef.current = src;
+                                                        setFormData(prev => ({ ...prev, sourceLanguage: src, targetLanguages: tgt }));
+                                                        try {
+                                                            const updates: Record<string, unknown> = {};
+                                                            updates[`projects/${activeProjectId}/sessions/${selectedSessionId}/sourceLanguage`] = src;
+                                                            updates[`projects/${activeProjectId}/sessions/${selectedSessionId}/targetLanguages`] = tgt;
+                                                            await update(ref(database), updates);
+                                                        } catch (err) {
+                                                            console.error("LIVE 언어 자동 반영 실패:", err);
+                                                        }
+                                                    }, 200);
+                                                } else {
+                                                    setFormData({ ...formData, sourceLanguage: src, targetLanguages: tgt });
                                                 }
                                             }}
                                         >

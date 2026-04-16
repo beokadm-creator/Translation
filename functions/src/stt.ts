@@ -401,6 +401,8 @@ export const processAudio = functions
             // ── STEP 1.5: 세션 전환 검증 (CRITICAL 방어) ─────────────────
             // STT 처리(수 초 소요) 중에 관리자가 세션을 전환(아카이브)했다면, 
             // 현재 데이터가 이전 세션의 고아(Orphan) 데이터로 남거나 새 세션에 섞이는 것을 방지
+            const forceFlush = (req.headers['x-force-flush'] || "false") === "true";
+
             if (activeSessionId) {
                 const currentActiveSnap = await projectRef.child('activeSessionId').get();
                 const currentActiveId = currentActiveSnap.val();
@@ -457,7 +459,8 @@ export const processAudio = functions
                 const isLongEnough = newBufferText.length >= minLength
                 const isTimeOut = timeDiff >= timeoutMs
 
-                if (isSentenceEnd || isLongEnough || isTimeOut) {
+                // X-Force-Flush가 있으면 언어가 바뀌기 직전의 마지막 청크이므로 무조건 flush
+                if (isSentenceEnd || isLongEnough || isTimeOut || forceFlush) {
                     // FLUSH: 상태 초기화 + 플러시 데이터 캡처
                     flushData = {
                         targetId: newBufferIds[0],
