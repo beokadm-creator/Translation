@@ -475,9 +475,9 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             // GPT 번역용 배경지식 (번역 모델에서도 환각 가능성을 원천 차단하기 위해 초록은 제외)
             const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}`;
 
-            // 3. 청크 설정값 (빠른 번역 피드백을 위해 설정값 하향 조정)
-            const chunkMinLength = "25";
-            const chunkTimeoutMs = "3500";
+            // 3. 청크 설정값 (과거 안정화 버전 롤백: Timeout 5000ms, MinLength 35)
+            const chunkMinLength = "35";
+            const chunkTimeoutMs = "5000";
             const chunkSentenceEnd = "true";
 
             const url = `${CF_BASE}/processAudio?projectId=${encodeURIComponent(activeProjectId)}&sourceLabel=admin&sourceLang=${currentLang}`;
