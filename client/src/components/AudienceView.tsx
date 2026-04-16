@@ -286,6 +286,14 @@ const AudienceView: React.FC = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeProjectId]);
 
+    useEffect(() => {
+        if (viewMode !== 'live') return;
+        stopAudio();
+        spokenIdsRef.current.clear();
+        setSegmentsMap({});
+        setSegmentsOrder([]);
+    }, [activeSessionId, viewMode, stopAudio]);
+
     // 2. Data Handling
     useEffect(() => {
         if (viewMode === 'live') {
