@@ -300,6 +300,14 @@ const AudienceView: React.FC = () => {
                 const next = { ...prev };
                 let changed = false;
                 
+                // ── 누락된 로직: streamData에서 삭제된 항목(초기화 등)을 next에서도 삭제 ──
+                Object.keys(next).forEach(k => {
+                    if (!streamData[k]) {
+                        delete next[k];
+                        changed = true;
+                    }
+                });
+
                 Object.entries(streamData).forEach(([k, v]: [string, unknown]) => {
                     const segment = v as SegmentMap[string];
                     if (!activeSessionId || segment.sessionId !== activeSessionId) return;

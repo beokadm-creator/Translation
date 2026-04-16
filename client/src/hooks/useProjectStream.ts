@@ -108,7 +108,31 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
 
             // 새로운 데이터가 도착하면 기존 과거 데이터와 병합(Merge)하여 덮어쓰기 방지
             setStreamData(prev => {
-              const merged = { ...(prev || {}), ...data };
+              if (!prev) return trimStreamData(data) as Record<string, any>;
+              
+              const dataItems = Object.values(data) as any[];
+              const isFull = dataItems.length >= 50; // limitToLast 값과 일치
+              const minDataTs = dataItems.length > 0 ? Math.min(...dataItems.map(i => i.timestamp)) : 0;
+              
+              const next = { ...prev };
+              
+              // ── 핵심 버그 수정: DB에서 삭제된(초기화/아카이브) 항목을 prev에서 제거 ──
+              // data(최근 50개)에 포함되어야 할 시간대(minDataTs 이상)인데 data에 없다면 삭제된 것임
+              Object.keys(next).forEach(k => {
+                  const item = next[k];
+                  if (!item) return;
+                  if (isFull) {
+                      if (item.timestamp >= minDataTs && !data[k]) {
+                          delete next[k];
+                      }
+                  } else {
+                      if (!data[k]) {
+                          delete next[k];
+                      }
+                  }
+              });
+
+              const merged = { ...next, ...data };
               const trimmed = trimStreamData(merged) as Record<string, any>;
               const nextItems = Object.values(trimmed) as any[];
               oldestTimestampRef.current = nextItems.length ? Math.min(...nextItems.map(i => i.timestamp)) : null;

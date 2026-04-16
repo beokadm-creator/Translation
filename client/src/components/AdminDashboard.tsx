@@ -232,6 +232,15 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 Promise.resolve().then(() => setSegmentsMap(prev => {
                     const next = { ...prev };
                     let changed = false;
+                    
+                    // ── 누락된 로직: streamData에서 삭제된 항목(초기화/아카이브 등)을 next에서도 삭제 ──
+                    Object.keys(next).forEach(k => {
+                        if (!streamData[k]) {
+                            delete next[k];
+                            changed = true;
+                        }
+                    });
+
                     Object.entries(streamData).forEach(([k, v]: [string, unknown]) => {
                         if (!v) return;
                         const value = v as StreamSegment;
@@ -379,8 +388,30 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
         if (!selectedSessionId) return;
         if (!window.confirm("Clear all transcript data for this session?")) return;
         try {
-            await set(ref(database, `projects/${activeProjectId}/sessions/${selectedSessionId}/transcript`), null);
+            const updates: Record<string, any> = {};
+            updates[`projects/${activeProjectId}/sessions/${selectedSessionId}/transcript`] = null;
+            
+            // 만약 현재 라이브 중인 세션을 초기화한다면, stream과 state도 같이 비워야 고스트 데이터가 남지 않음
+            if (selectedSessionId === activeSessionId) {
+                const streamSnap = await get(ref(database, `projects/${activeProjectId}/stream`));
+                if (streamSnap.exists()) {
+                    Object.entries(streamSnap.val()).forEach(([k, v]: [string, any]) => {
+                        if (v && v.sessionId === selectedSessionId) {
+                            updates[`projects/${activeProjectId}/stream/${k}`] = null;
+                        }
+                    });
+                }
+                updates[`projects/${activeProjectId}/state`] = {
+                    bufferText: "",
+                    bufferIds: [],
+                    lastRefinedList: [],
+                    lastFlushTime: Date.now()
+                };
+            }
+
+            await update(ref(database), updates);
             setSegmentsMap({});
+            alert("자막 데이터가 완벽하게 초기화되었습니다.");
         } catch (e) {
             console.error("초기화 실패:", e);
             alert("자막 데이터 초기화에 실패했습니다.");
