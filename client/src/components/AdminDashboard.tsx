@@ -442,7 +442,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             }
             const buf = await blob.arrayBuffer();
             const activeSession = sessions.find(s => s.id === activeSessionId);
-            const currentLang = activeSession?.sourceLanguage || 'ko';
+            const liveLang = activeSessionId && selectedSessionId === activeSessionId ? formData.sourceLanguage : undefined;
+            const currentLang = liveLang || activeSession?.sourceLanguage || 'ko';
             
             // --- 2단계 최적화: 서버 DB 읽기 병목 제거를 위한 헤더 송장(Metadata) 생성 ---
             // 초록(Abstract)은 환각의 주범이므로 STT(Whisper) 힌트에서 완전히 제외합니다.
@@ -749,10 +750,20 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                         <select
                                             className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 transition-colors"
                                             value={formData.sourceLanguage || 'ko'}
-                                            onChange={e => {
+                                            onChange={async e => {
                                                 const src = e.target.value as 'ko' | 'en';
                                                 const tgt = src === 'ko' ? ['en'] : ['ko'];
                                                 setFormData({ ...formData, sourceLanguage: src, targetLanguages: tgt });
+                                                if (selectedSessionId && selectedSessionId === activeSessionId) {
+                                                    try {
+                                                        const updates: Record<string, unknown> = {};
+                                                        updates[`projects/${activeProjectId}/sessions/${selectedSessionId}/sourceLanguage`] = src;
+                                                        updates[`projects/${activeProjectId}/sessions/${selectedSessionId}/targetLanguages`] = tgt;
+                                                        await update(ref(database), updates);
+                                                    } catch (err) {
+                                                        console.error("LIVE 언어 자동 반영 실패:", err);
+                                                    }
+                                                }
                                             }}
                                         >
                                             <option value="ko">Korean (한국어)</option>

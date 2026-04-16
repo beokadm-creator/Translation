@@ -22,7 +22,7 @@ const isGarbage = (text: string) => {
     if (/(.*,){4,}/.test(text)) return true;
     if (/^(Implant, Surgery|임플란트, 보철)/i.test(text)) return true;
     // 전체가 괄호/대괄호 소리 표기인 경우
-    if (/^\s*[\(\[][^\)\]]{1,40}[\)\]]\s*$/.test(text.trim())) return true;
+    if (/^\s*[\[(][^\])]{1,40}[\])]\s*$/.test(text.trim())) return true;
     return false;
 };
 
@@ -87,9 +87,8 @@ const AudienceView: React.FC = () => {
         topic: currentSession.topic,
         sourceLanguage: currentSession.sourceLanguage
     } : null;
-
-    const targetLanguages = (currentSession?.targetLanguages?.length ? currentSession.targetLanguages : ['ko', 'en'])
-        .filter(l => l !== 'ja');
+    const currentSessionId = currentSession?.id || null;
+    const currentSourceLanguage = currentSession?.sourceLanguage || null;
 
     // --- Display Info ---
     // 기본 언어: 세션의 첫 번째 타겟 언어 (원본 언어 제외)
@@ -99,13 +98,10 @@ const AudienceView: React.FC = () => {
 
     // 세션 정보가 로드되면 기본 언어 자동 전환 (원본 언어가 아닌 첫 번째 타겟 언어)
     useEffect(() => {
-        if (currentSession) {
-            const sourceLang = currentSession.sourceLanguage || 'ko';
-            const targets = currentSession.targetLanguages?.filter(l => l !== sourceLang) || [];
-            const firstTarget = targets[0] || (sourceLang === 'ko' ? 'en' : 'ko');
-            setActiveLang(firstTarget);
-        }
-    }, [currentSession?.id]);
+        if (!currentSessionId) return;
+        const sourceLang = currentSourceLanguage || 'ko';
+        setActiveLang(sourceLang === 'ko' ? 'en' : 'ko');
+    }, [currentSessionId, currentSourceLanguage]);
 
     // --- Stream State ---
     const { streamData, loadOlderMessages, hasMore } = useProjectStream(activeProjectId, { subscribe: viewMode === 'live' });
@@ -178,7 +174,7 @@ const AudienceView: React.FC = () => {
             const sid = segmentsOrder[i];
             const seg = segmentsMap[sid];
             if (!seg || seg.status === 'merged') continue;
-            const t = (seg[lang] as string) || (seg.refined as string) || '';
+            const t = (seg[lang] as string) || '';
             if (t.trim()) queue.push({ text: t, lang, id: sid });
         }
 
@@ -188,6 +184,11 @@ const AudienceView: React.FC = () => {
         audioQueueRef.current = queue;
         playNext();
     }, [stopAudio, playNext, segmentsOrder, segmentsMap]);
+
+    useEffect(() => {
+        stopAudio();
+        spokenIdsRef.current.clear();
+    }, [activeLang, stopAudio]);
 
     // 5. Scroll & Paging Logic
     useEffect(() => {
@@ -225,7 +226,7 @@ const AudienceView: React.FC = () => {
         if (seg?.status !== 'final') return;
         if (spokenIdsRef.current.has(lastId)) return;
 
-        const text = (seg[activeLang] as string) || (seg.refined as string) || '';
+        const text = (seg[activeLang] as string) || '';
         if (!text.trim()) return;
 
         // 이미 재생 중인 경우에만 새 세그먼트를 큐에 추가
@@ -342,19 +343,6 @@ const AudienceView: React.FC = () => {
         const timer = setInterval(() => setNow(Date.now()), 1000);
         return () => clearInterval(timer);
     }, [viewMode]);
-
-    // 4. Next Session Logic
-    const [nextSession, setNextSession] = useState<SessionItem | null>(null);
-    useEffect(() => {
-        if (sessions.length === 0) {
-            Promise.resolve().then(() => setNextSession(null));
-            return;
-        }
-        const currentTime = new Date().toTimeString().slice(0, 5);
-        const upcoming = sessions.find(s => s.startTime > currentTime);
-        Promise.resolve().then(() => setNextSession(upcoming || sessions[sessions.length - 1]));
-    }, [sessions, now]);
-
 
     // --- Handlers ---
     const handleSelectSession = (sid: string) => {
@@ -480,7 +468,7 @@ const AudienceView: React.FC = () => {
                             {viewMode === 'live' ? (
                                 <>
                                     <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>
-                                    <span>Standby for Next Session</span>
+                                    <span>대기 중</span>
                                 </>
                             ) : "Select a session from menu"}
                         </div>
@@ -599,22 +587,17 @@ const AudienceView: React.FC = () => {
 
                     <div className="flex gap-2">
                         <button
-                            onClick={() => setActiveLang('original')}
-                            className={`px-3 py-1.5 rounded-md text-xs font-medium uppercase tracking-wider transition-colors ${activeLang === 'original' ? tabActiveClass : tabInactiveClass}`}
+                            onClick={() => setActiveLang('ko')}
+                            className={`px-3 py-1.5 rounded-md text-xs font-medium uppercase tracking-wider transition-colors ${activeLang === 'ko' ? tabActiveClass : tabInactiveClass}`}
                         >
-                            Original
+                            KR
                         </button>
-                        {targetLanguages
-                            .filter(lang => lang !== sessionInfo?.sourceLanguage)
-                            .map(lang => (
-                                <button
-                                    key={lang}
-                                    onClick={() => setActiveLang(lang)}
-                                    className={`px-3 py-1.5 rounded-md text-xs font-medium uppercase tracking-wider transition-colors ${activeLang === lang ? tabActiveClass : tabInactiveClass}`}
-                                >
-                                    {lang}
-                                </button>
-                            ))}
+                        <button
+                            onClick={() => setActiveLang('en')}
+                            className={`px-3 py-1.5 rounded-md text-xs font-medium uppercase tracking-wider transition-colors ${activeLang === 'en' ? tabActiveClass : tabInactiveClass}`}
+                        >
+                            EN
+                        </button>
                     </div>
                 </div>
             </div>
@@ -638,26 +621,10 @@ const AudienceView: React.FC = () => {
                         </div>
                     )}
 
-                    {/* Live — Standby / Next Session */}
-                    {viewMode === 'live' && !sessionInfo && nextSession && (
-                        <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center space-y-8">
-                            <div className="text-2xl text-blue-500 font-bold uppercase tracking-widest border-b-2 border-blue-500 pb-2">
-                                Upcoming Session
-                            </div>
-                            <div className={`text-6xl font-black ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                                {nextSession.startTime}
-                            </div>
-                            <div className="space-y-4">
-                                <h1 className={`text-5xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                                    {nextSession.speaker}
-                                </h1>
-                                <p className={`text-2xl ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                                    {nextSession.affiliation}
-                                </p>
-                            </div>
-                            <div className={`text-3xl font-medium max-w-4xl leading-relaxed ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                                {nextSession.topic}
-                            </div>
+                    {viewMode === 'live' && !sessionInfo && (
+                        <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center space-y-4 text-gray-500">
+                            <div className="text-sm font-medium">AI 번역 시스템 대기 중</div>
+                            <div className="text-xs">세션이 시작되면 자동으로 자막이 표시됩니다</div>
                         </div>
                     )}
 
@@ -686,38 +653,15 @@ const AudienceView: React.FC = () => {
                             const isTranslating = seg.status === 'translating'
 
                             let text = ""
-                            let isFallback = false
-
-                            if (activeLang === 'original') {
-                                text = seg.refined || seg.original || ""
-                            } else {
-                                text = seg[activeLang] as string || ""
-                                if (!text) {
-                                    text = seg.refined || seg.original || ""
-                                    isFallback = true
-                                }
-                            }
+                            text = seg[activeLang] as string || ""
 
                             if (!text || text.trim() === "") return null
 
                             const isFinal = seg.status === 'final'
                             const isTimeOut = viewMode === 'live' ? ((now - (seg.timestamp || 0)) > 5000) : true
-                            const showAsRaw = viewMode === 'live' ? (!isFinal && !isTimeOut && !isFallback) : false
+                            const showAsRaw = viewMode === 'live' ? (!isFinal && !isTimeOut) : false
 
-                            if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) {
-                                return (
-                                    <TextItem
-                                        key={id}
-                                        id={id}
-                                        text=""
-                                        isRaw={true}
-                                        targetLang={activeLang}
-                                        fontSize={`${fontSize}px`}
-                                        color={isDarkMode ? "#6b7280" : "#9ca3af"}
-                                        opacity={0.6}
-                                    />
-                                )
-                            }
+                            if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) return null
 
                             if (hideRaw && showAsRaw) return null
 
@@ -729,7 +673,7 @@ const AudienceView: React.FC = () => {
                                     isRaw={showAsRaw}
                                     targetLang={activeLang}
                                     fontSize={`${fontSize}px`}
-                                    color={isFallback ? (isDarkMode ? "#6b7280" : "#9ca3af") : (isDarkMode ? "white" : "black")}
+                                    color={isDarkMode ? "white" : "black"}
                                     opacity={!showAsRaw && !isTranslating ? 1 : 0.7}
                                     isSpeaking={speakingId === id}
                                     onSpeak={isTtsEnabled ? (t, l) => handleSpeak(t, l, id) : undefined}
