@@ -79,16 +79,32 @@ exports.archiveSession = functions.https.onRequest(async (req, res) => {
             return;
         }
         const streamData = snapshot.val();
-        // 2. Save to Session Transcript
-        await transcriptRef.set(streamData);
-        // 3. Clear Stream & State
-        await streamRef.remove();
-        await projectRef.child("state").set({
+        const targetData = {};
+        const updates = {};
+        // 2. 해당 sessionId를 가진 데이터만 필터링
+        Object.entries(streamData).forEach(([key, val]) => {
+            if (val && val.sessionId === sessionId) {
+                targetData[key] = val;
+                // stream에서는 삭제하도록 null 할당
+                updates[`stream/${key}`] = null;
+            }
+        });
+        if (Object.keys(targetData).length === 0) {
+            res.status(200).send({ message: "No stream data found for this session." });
+            return;
+        }
+        // 3. transcript에 저장할 데이터 추가
+        updates[`sessions/${sessionId}/transcript`] = targetData;
+        // 4. state 초기화 (세션 전환 시 문맥 리셋)
+        updates["state"] = {
             bufferText: "",
             bufferIds: [],
+            lastRefinedList: [],
             lastFlushTime: Date.now()
-        });
-        // 4. Reset Active Session if it matches
+        };
+        // 5. Multi-path update로 원자적 적용 (해당 세션 데이터 이동 + state 초기화)
+        await projectRef.update(updates);
+        // 6. Reset Active Session if it matches
         const activeSnap = await projectRef.child("activeSessionId").get();
         if (activeSnap.exists() && activeSnap.val() === sessionId) {
             await projectRef.child("activeSessionId").remove();

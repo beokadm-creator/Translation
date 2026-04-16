@@ -29,9 +29,11 @@ export const purgeSession = functions
       const projectId = (req.query.projectId || req.body.projectId || "").toString();
       if (projectId) {
         await admin.database().ref(`projects/${projectId}/stream`).remove();
-        await admin.database().ref(`projects/${projectId}/state`).update({
+        await admin.database().ref(`projects/${projectId}/state`).set({
           bufferText: "",
-          bufferIds: []
+          bufferIds: [],
+          lastRefinedList: [],
+          lastFlushTime: Date.now()
         });
       }
       res.status(200).json({ success: true, target: projectId || "none" });
