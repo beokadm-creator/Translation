@@ -336,7 +336,7 @@ export const processAudio = functions
             res.set("Access-Control-Allow-Origin", origin || allowedOrigin)
         }
         res.set("Access-Control-Allow-Methods", "POST, OPTIONS")
-        res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Active-Session-Id, X-Custom-Keywords, X-Session-Context, X-Chunk-Min-Length, X-Chunk-Timeout-Ms, X-Chunk-Sentence-End, X-STT-Primary, X-STT-Fallback, X-Trans-Primary, X-Trans-Fallback")
+        res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Active-Session-Id, X-Custom-Keywords, X-Session-Context, X-Chunk-Min-Length, X-Chunk-Timeout-Ms, X-Chunk-Sentence-End, X-STT-Primary, X-STT-Fallback, X-Trans-Primary, X-Trans-Fallback, X-Force-Flush")
         if (req.method === "OPTIONS") { res.status(204).send(""); return }
 
         const tTotal = Date.now()
