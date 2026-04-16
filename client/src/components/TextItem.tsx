@@ -15,35 +15,61 @@ interface Props {
 const TextItem: React.FC<Props> = ({
   id, text, isRaw, targetLang = "original", color, opacity, fontSize, onSpeak, isSpeaking = false
 }) => {
+  const [mounted, setMounted] = useState(false);
+  const [displayText, setDisplayText] = useState(text);
+  const [isTransforming, setIsTransforming] = useState(false);
+  
   const [highlight, setHighlight] = useState(false);
   const [justFinalized, setJustFinalized] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
-  const prevTextRef = useRef(text);
   const prevIsRawRef = useRef(isRaw);
 
+  // 1. Initial Mount Animation
   useEffect(() => {
-    const textChanged = prevTextRef.current !== text;
+    // slight delay to ensure CSS transition triggers
+    const t = setTimeout(() => setMounted(true), 10);
+    return () => clearTimeout(t);
+  }, []);
+
+  // 2. Smooth Text Transformation (Morphing)
+  useEffect(() => {
+    if (text !== displayText) {
+      // Start morphing effect (blur/fade out)
+      setIsTransforming(true);
+      
+      // Swap the text content halfway through the blur
+      const swapTimer = setTimeout(() => {
+        setDisplayText(text);
+      }, 150);
+      
+      // End morphing effect (unblur/fade in)
+      const endTimer = setTimeout(() => {
+        setIsTransforming(false);
+      }, 400);
+      
+      return () => { clearTimeout(swapTimer); clearTimeout(endTimer); };
+    }
+  }, [text, displayText]);
+
+  // 3. Status Change Highlight (Raw -> Final)
+  useEffect(() => {
     const becameFinal = prevIsRawRef.current === true && isRaw === false;
 
-    if (textChanged || becameFinal) {
+    if (becameFinal) {
       Promise.resolve().then(() => setHighlight(true));
       const timer = setTimeout(() => setHighlight(false), 900);
-      prevTextRef.current = text;
-
-      if (becameFinal) {
-        Promise.resolve().then(() => setJustFinalized(true));
-        const finalTimer = setTimeout(() => setJustFinalized(false), 1200);
-        return () => { clearTimeout(timer); clearTimeout(finalTimer); };
-      }
-
+      
+      Promise.resolve().then(() => setJustFinalized(true));
+      const finalTimer = setTimeout(() => setJustFinalized(false), 1200);
+      
       prevIsRawRef.current = isRaw;
-      return () => clearTimeout(timer);
+      return () => { clearTimeout(timer); clearTimeout(finalTimer); };
     }
 
     prevIsRawRef.current = isRaw;
-  }, [text, isRaw]);
+  }, [isRaw]);
 
-  const display = targetLang === "en" ? ` ${text}` : text;
+  const display = targetLang === "en" ? ` ${displayText}` : displayText;
 
   // Color resolution
   const resolvedColor = color || (targetLang === "original"
@@ -51,24 +77,28 @@ const TextItem: React.FC<Props> = ({
     : "white");
 
   const textColor = highlight && !isRaw
-    ? (justFinalized ? "#4ade80" : "#60a5fa")  // green flash on finalize, blue on update
+    ? (justFinalized ? "#4ade80" : "#60a5fa")  // green flash on finalize
     : resolvedColor;
 
   const handleSpeak = () => {
-    if (onSpeak && text && !isRaw) {
-      onSpeak(text, targetLang);
+    if (onSpeak && displayText && !isRaw) {
+      onSpeak(displayText, targetLang);
     }
   };
 
+  // 부드러운 전환을 위한 핵심 CSS 스타일링
   const style: React.CSSProperties = {
-    color: textColor,
+    color: isTransforming ? "transparent" : textColor,
+    textShadow: isTransforming ? `0 0 8px ${textColor}` : "none",
     fontWeight: isRaw ? 400 : 500,
-    opacity: typeof opacity === 'number' ? opacity : (isRaw ? 0.75 : 1),
+    opacity: !mounted ? 0 : (isTransforming ? 0.5 : (typeof opacity === 'number' ? opacity : (isRaw ? 0.75 : 1))),
+    filter: !mounted ? "blur(4px)" : (isTransforming ? "blur(2px)" : "blur(0px)"),
+    transform: !mounted ? "translateY(4px)" : "translateY(0)",
     marginRight: 6,
-    transition: "color 0.6s ease-out, opacity 0.4s ease-in",
+    transition: "color 0.3s ease, text-shadow 0.3s ease, opacity 0.4s ease, filter 0.4s ease, transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)",
     fontSize: fontSize || "inherit",
     position: "relative",
-    display: "inline",
+    display: "inline-block", // transform 적용을 위해 inline-block 사용
     cursor: !isRaw && onSpeak ? "pointer" : "inherit",
   };
 
