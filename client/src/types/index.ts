@@ -65,7 +65,7 @@ export interface Session {
   keywords: string; // comma-separated string (e.g. "implant, sinus, bone graft")
   startTime: string; // HH:MM
   orderIndex?: number;
-  sourceLanguage?: 'ko' | 'en' | 'ja';
+  sourceLanguage?: 'ko' | 'en' | 'ja' | 'zh';
 }
 
 export interface StreamSegment {

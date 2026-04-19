@@ -116,7 +116,7 @@ const AudienceView: React.FC = () => {
     }>;
     const [segmentsMap, setSegmentsMap] = useState<SegmentMap>({});
     
-    const segmentsOrder = useMemo(() => {
+    const segmentsOrder = React.useMemo(() => {
         return Object.keys(segmentsMap)
             .filter(id => segmentsMap[id]?.status !== 'merged')
             .sort((a, b) => (segmentsMap[a]?.timestamp || 0) - (segmentsMap[b]?.timestamp || 0));
@@ -658,7 +658,7 @@ const AudienceView: React.FC = () => {
 
                     {/* Segments (Live or Archive) */}
                     <div className="leading-[1.8] text-justify whitespace-pre-wrap break-words" style={{ letterSpacing: `${letterSpacing}px`, lineHeight }}>
-                        {(sessionInfo || viewMode === 'archive') && segmentsOrder.map((id) => {
+                        {(sessionInfo || viewMode === 'archive') && segmentsOrder.map((id: string) => {
                             const seg = segmentsMap[id]
                             if (!seg || seg.status === 'merged') return null
                             const isTranslating = seg.status === 'translating'

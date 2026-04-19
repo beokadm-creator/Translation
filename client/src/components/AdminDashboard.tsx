@@ -37,7 +37,7 @@ const AdminDashboard: React.FC = () => {
     const [activeSessionId, setActiveSessionId] = useState<string>("");
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [showProjectSettings, setShowProjectSettings] = useState(false);
-    const [settingsTab, setSettingsTab] = useState<'overlay' | 'ai'>('overlay');
+    const [settingsTab, setSettingsTab] = useState<'overlay' | 'ai' | 'persona'>('overlay');
 
     interface ProjectSettings {
         fontSize: number;
@@ -201,7 +201,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     const mr1Ref = useRef<MediaRecorder | null>(null);
     const mr2Ref = useRef<MediaRecorder | null>(null);
     const switchRecordersRef = useRef<(() => void) | null>(null);
-    const liveSourceLangOverrideRef = useRef<'ko' | 'en' | null>(null);
+    const liveSourceLangOverrideRef = useRef<'ko' | 'en' | 'ja' | 'zh' | null>(null);
     const activeIndexRef = useRef<number>(0);
     const chunks1Ref = useRef<Blob[]>([]);
     const chunks2Ref = useRef<Blob[]>([]);
@@ -877,8 +877,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                     
                                                     // 2. 약간의 지연(200ms)을 주어, 방금 컷된 청크가 '이전 언어'로 업로드되게 보장한 후 새 언어 적용
                                                     setTimeout(async () => {
-                                                        liveSourceLangOverrideRef.current = src;
-                                                        setFormData(prev => ({ ...prev, sourceLanguage: src }));
+                                                        liveSourceLangOverrideRef.current = src as 'ko' | 'en' | 'ja' | 'zh';
+                                                    setFormData(prev => ({ ...prev, sourceLanguage: src as any }));
                                                         try {
                                                             const updates: Record<string, unknown> = {};
                                                             updates[`projects/${activeProjectId}/sessions/${selectedSessionId}/sourceLanguage`] = src;
@@ -888,7 +888,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                         }
                                                     }, 200);
                                                 } else {
-                                                    setFormData({ ...formData, sourceLanguage: src });
+                                                    setFormData({ ...formData, sourceLanguage: src as any });
                                                 }
                                             }}
                                         >

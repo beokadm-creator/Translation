@@ -67,7 +67,7 @@ const OverlayView: React.FC = () => {
         type RawSeg = {
             id: string; original?: string; refined?: string;
             status?: string; timestamp: number; sessionId?: string;
-            [key: string]: string | number | undefined;
+            [key: string]: any;
         };
 
         const segments = Object.entries(streamData)
@@ -76,7 +76,7 @@ const OverlayView: React.FC = () => {
             .sort((a, b) => a.timestamp - b.timestamp)
             .slice(-15);
 
-        const texts = segments.map(s => {
+        const texts = segments.map((s: any) => {
             if (activeLang === 'refined') return s.refined ?? s.original ?? '';
             return (s[activeLang] as string) ?? s.refined ?? s.original ?? '';
         }).filter(Boolean);
