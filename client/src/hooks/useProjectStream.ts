@@ -71,6 +71,7 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
     let mounted = true;
     let streamRef: ReturnType<typeof ref> | null = null;
     let streamListener: ((snapshot: { val: () => unknown }) => void) | null = null;
+    let throttleTimer: ReturnType<typeof setTimeout> | null = null;
 
     const resolveAndSubscribe = async () => {
       try {
@@ -88,7 +89,9 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
           );
           streamRef = streamQuery as any;
 
-          streamListener = (snapshot) => {
+          let lastUpdateTs = 0;
+
+          const applySnapshot = (snapshot: any) => {
             if (!mounted) return;
             const raw = snapshot.val();
             if (!raw || Object.keys(raw).length === 0) {
@@ -140,6 +143,22 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
             });
             setLoading(false);
           };
+
+          streamListener = (snapshot) => {
+            const now = Date.now();
+            if (lastUpdateTs > 0 && now - lastUpdateTs < 100) {
+              // Throttling: Schedule the latest snapshot to be applied later
+              if (throttleTimer) clearTimeout(throttleTimer);
+              throttleTimer = setTimeout(() => {
+                lastUpdateTs = Date.now();
+                applySnapshot(snapshot);
+              }, 100 - (now - lastUpdateTs));
+              return;
+            }
+            // First time or after throttle interval
+            lastUpdateTs = now;
+            applySnapshot(snapshot);
+          };
           onValue(streamQuery, streamListener, (err) => {
             console.error("Stream subscription error:", err);
             if (mounted) {
@@ -161,6 +180,7 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
 
     return () => {
       mounted = false;
+      if (throttleTimer) clearTimeout(throttleTimer);
       if (streamRef && streamListener) {
         off(streamRef, 'value', streamListener);
       }

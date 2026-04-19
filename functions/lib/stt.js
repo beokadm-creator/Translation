@@ -192,33 +192,54 @@ const validateTranslation = (data, targets) => {
     }
     return true;
 };
-const buildTranslationResult = (data, sourceLang, rawText) => {
+const buildTranslationResult = (data, sourceLang, rawText, targetLanguages) => {
     const refined = sanitize(data.refined || rawText);
-    return {
-        refined,
-        ko: sourceLang === 'ko' ? refined : sanitize(data.ko || ''),
-        en: sourceLang === 'en' ? refined : sanitize(data.en || ''),
-        isMedical: data.isMedical ?? false
-    };
+    const result = { refined, isMedical: false, provider: '', ms: 0 };
+    for (const lang of targetLanguages) {
+        if (lang === sourceLang) {
+            result[lang] = refined;
+        }
+        else if (data[lang]) {
+            result[lang] = sanitize(data[lang]);
+        }
+        else {
+            result[lang] = ''; // 실패 시 빈 문자열
+        }
+    }
+    result.isMedical = data.isMedical ?? false;
+    return result;
 };
 class OpenAITranslationProvider {
     constructor() {
         this.name = "openai";
     }
-    async translate(rawText, sourceLang, previousContext, sessionContext) {
+    async translate(rawText, sourceLang, previousContext, sessionContext, targetLanguages, persona) {
         const tStart = Date.now();
         const openai = getOpenAI();
         const contextLine = sanitize(sessionContext).slice(0, 180);
         const previousLine = sanitize(previousContext.split(' / ').slice(-1)[0] || '').slice(0, 80);
+        const langFields = targetLanguages.map(l => `"${l}": ""`).join(', ');
+        // Persona 
+        let personaPrompt = "";
+        if (persona && persona.enabled) {
+            const lines = [];
+            if (persona.customInstructions)
+                lines.push(`Instructions: ${persona.customInstructions}`);
+            if (persona.medicalTerms)
+                lines.push(`Medical Dictionary: ${persona.medicalTerms}`);
+            if (lines.length > 0) {
+                personaPrompt = "\n[Persona Context]\n" + lines.join('\n');
+            }
+        }
         const prompt = [
             `source_lang=${sourceLang}`,
             `input=${rawText}`,
             contextLine ? `session_context=${contextLine}` : "",
             previousLine ? `previous_refined=${previousLine}` : "",
-            'Return strict JSON: {"refined":"","ko":"","en":"","isMedical":true}.',
-            'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer content from session_context or previous_refined. (2) Correct only obvious STT errors (e.g. wrong homophone). (3) Do not output topic, speaker name, affiliation, or keywords as standalone content. (4) Never leave ko or en empty; translate fragments as fragments. (5) Keep all clinical terminology literal. (6) DO NOT generate conversational filler, meta-text, or hallucinations.',
-            'If source_lang=ko, refined and ko must stay Korean and en must be English. If source_lang=en, refined and en must stay English and ko must be Korean.',
-            'Example output for source_lang=ko and input="임플란트 픽스처를 식립했습니다.": {"refined":"임플란트 픽스처를 식립했습니다.","ko":"임플란트 픽스처를 식립했습니다.","en":"The implant fixture was placed.","isMedical":true}'
+            personaPrompt,
+            `Return strict JSON: {"refined":"","isMedical":true, ${langFields}}.`,
+            'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer content from session_context or previous_refined. (2) Correct only obvious STT errors (e.g. wrong homophone). (3) Do not output topic, speaker name, affiliation, or keywords as standalone content. (4) Never leave any target language field empty; translate fragments as fragments. (5) Keep all clinical terminology literal. (6) DO NOT generate conversational filler, meta-text, or hallucinations.',
+            `If source_lang matches a target language, the text for that language must remain in the source language.`
         ].filter(Boolean).join('\n');
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
@@ -228,7 +249,7 @@ class OpenAITranslationProvider {
             messages: [
                 {
                     role: "system",
-                    content: "You refine live medical speech-to-text output and produce Korean and English translations in strict JSON. Do not hallucinate or create fake text."
+                    content: "You refine live medical speech-to-text output and produce translations in strict JSON. Do not hallucinate or create fake text."
                 },
                 {
                     role: "user",
@@ -240,9 +261,9 @@ class OpenAITranslationProvider {
         if (!content)
             return null;
         const data = JSON.parse(content);
-        if (!validateTranslation(data, ['ko', 'en']))
+        if (!validateTranslation(data, targetLanguages))
             return null;
-        const result = buildTranslationResult(data, sourceLang, rawText);
+        const result = buildTranslationResult(data, sourceLang, rawText, targetLanguages);
         return { ...result, provider: this.name, ms: Date.now() - tStart };
     }
 }
@@ -250,12 +271,12 @@ class ClaudeTranslationProvider {
     constructor() {
         this.name = "claude";
     }
-    async translate(_rawText, _sourceLang, _previousContext, _sessionContext) {
+    async translate(_rawText, _sourceLang, _previousContext, _sessionContext, _targetLanguages, _persona) {
         throw new Error("Claude not implemented yet");
     }
 }
 class TranslationFactory {
-    static async executeWithFallback(rawText, sourceLang, previousContext, sessionContext, primaryEngineName = 'openai', fallbackEngineName = 'claude') {
+    static async executeWithFallback(rawText, sourceLang, previousContext, sessionContext, targetLanguages, persona, primaryEngineName = 'openai', fallbackEngineName = 'claude') {
         const getProvider = (name) => {
             if (name === 'claude')
                 return new ClaudeTranslationProvider();
@@ -264,7 +285,7 @@ class TranslationFactory {
         const primary = getProvider(primaryEngineName);
         const fallback = getProvider(fallbackEngineName);
         try {
-            const result = await primary.translate(rawText, sourceLang, previousContext, sessionContext);
+            const result = await primary.translate(rawText, sourceLang, previousContext, sessionContext, targetLanguages, persona);
             if (result) {
                 functions.logger.info(`[Translate][${result.provider}] OK`, { ms: result.ms, srcLen: rawText.length });
                 return result;
@@ -273,7 +294,7 @@ class TranslationFactory {
         catch (e) {
             functions.logger.warn(`[Translate][${primary.name}] Failed, attempting fallback`, { err: String(e).slice(0, 180) });
             try {
-                const fbResult = await fallback.translate(rawText, sourceLang, previousContext, sessionContext);
+                const fbResult = await fallback.translate(rawText, sourceLang, previousContext, sessionContext, targetLanguages, persona);
                 if (fbResult) {
                     functions.logger.info(`[Translate][${fbResult.provider}] OK (Fallback)`, { ms: fbResult.ms, srcLen: rawText.length });
                     return fbResult;
@@ -285,9 +306,37 @@ class TranslationFactory {
         }
         functions.logger.error("[Translate] All engines failed, raw text fallback", { input: rawText.slice(0, 50) });
         const safeRaw = sanitize(rawText);
-        return { refined: safeRaw, ko: safeRaw, en: safeRaw, isMedical: false };
+        const fallbackResult = { refined: safeRaw, isMedical: false, provider: "fallback", ms: 0 };
+        for (const lang of targetLanguages) {
+            fallbackResult[lang] = safeRaw;
+        }
+        return fallbackResult;
     }
 }
+// 메모리 캐시 (key: projectId, value: { data: PersonaConfig, expiresAt: number })
+const personaCache = new Map();
+const loadPersona = async (projectId) => {
+    if (!projectId)
+        return null;
+    const now = Date.now();
+    const cached = personaCache.get(projectId);
+    if (cached && cached.expiresAt > now) {
+        return cached.data;
+    }
+    try {
+        const snap = await admin.database().ref(`projects/${projectId}/settings/persona`).get();
+        if (snap.exists()) {
+            const data = snap.val();
+            // 5분(300000ms) 캐싱
+            personaCache.set(projectId, { data, expiresAt: now + 300000 });
+            return data;
+        }
+    }
+    catch (err) {
+        functions.logger.warn(`Failed to load persona for ${projectId}`, { err: String(err) });
+    }
+    return null;
+};
 // ── OpenAI 클라이언트 ─────────────────────────────────────────────────────────
 const getOpenAI = () => {
     if (!_openai) {
@@ -360,6 +409,8 @@ exports.processAudio = functions
         const activeSessionId = (req.headers['x-active-session-id'] || "").toString();
         const customKeywords = decodeURIComponent((req.headers['x-custom-keywords'] || "").toString());
         const sessionContext = decodeURIComponent((req.headers['x-session-context'] || "").toString());
+        const targetLanguagesStr = (req.headers['x-target-languages'] || "ko,en").toString();
+        const targetLanguages = targetLanguagesStr.split(',').map(l => l.trim()).filter(Boolean);
         const minLength = Number(req.headers['x-chunk-min-length'] || 35);
         const timeoutMs = Number(req.headers['x-chunk-timeout-ms'] || 5000);
         const sentenceEnd = (req.headers['x-chunk-sentence-end'] || "true") === "true";
@@ -367,8 +418,20 @@ exports.processAudio = functions
         const fallbackSTT = (req.headers['x-stt-fallback'] || "deepgram").toString();
         const primaryTrans = (req.headers['x-trans-primary'] || "openai").toString();
         const fallbackTrans = (req.headers['x-trans-fallback'] || "claude").toString();
+        const persona = await loadPersona(projectId);
         // ── STEP 1: AI STT ────────────────────────────────────────────
-        const basePrompt = sourceLang === 'ko' ? DENTAL_PROMPT_KO : DENTAL_PROMPT_EN;
+        let basePrompt = sourceLang === 'ko' ? DENTAL_PROMPT_KO : DENTAL_PROMPT_EN;
+        // Persona 기본 프롬프트가 있으면 우선 적용
+        if (persona && persona.enabled) {
+            if (sourceLang === 'ko' && persona.basePromptKo)
+                basePrompt = persona.basePromptKo;
+            if (sourceLang === 'en' && persona.basePromptEn)
+                basePrompt = persona.basePromptEn;
+            if (sourceLang === 'ja' && persona.basePromptJa)
+                basePrompt = persona.basePromptJa;
+            if (sourceLang === 'zh' && persona.basePromptZh)
+                basePrompt = persona.basePromptZh;
+        }
         const whisperPrompt = customKeywords ? `${basePrompt}, ${customKeywords}` : basePrompt;
         const sttResult = await STTFactory.executeWithFallback(buf, sourceLang, whisperPrompt, primarySTT, fallbackSTT);
         functions.logger.info(`[STT][${sttResult.provider}]`, { ms: sttResult.ms });
@@ -472,15 +535,18 @@ exports.processAudio = functions
                 return;
             }
             try {
-                const { refined, ko, en, isMedical } = await TranslationFactory.executeWithFallback(flushText, sourceLang, previousContext, sessionContext, primaryTrans, fallbackTrans);
+                const translationResult = await TranslationFactory.executeWithFallback(flushText, sourceLang, previousContext, sessionContext, targetLanguages, persona, primaryTrans, fallbackTrans);
                 const updates = {};
                 const base = `projects/${projectId}/stream/${targetId}`;
-                updates[`${base}/refined`] = refined;
-                updates[`${base}/ko`] = ko;
-                updates[`${base}/en`] = en;
-                updates[`${base}/isMedical`] = isMedical;
+                updates[`${base}/refined`] = translationResult.refined;
+                updates[`${base}/isMedical`] = translationResult.isMedical;
                 updates[`${base}/status`] = "final";
-                updates[`${base}/mergedIds`] = idsToDelete;
+                for (const lang of targetLanguages) {
+                    updates[`${base}/${lang}`] = translationResult[lang];
+                }
+                if (idsToDelete.length > 0) {
+                    updates[`${base}/mergedIds`] = idsToDelete;
+                }
                 for (const pid of idsToDelete) {
                     updates[`projects/${projectId}/stream/${pid}/status`] = "merged";
                 }
@@ -489,7 +555,7 @@ exports.processAudio = functions
                 // 병렬 번역 시 서로 덮어쓰는 문제가 있으므로, 별도의 트랜잭션으로 안전하게 꼬리물기 저장합니다.
                 await projectRef.child('state/lastRefinedList').transaction((currentList) => {
                     const list = Array.isArray(currentList) ? currentList : [];
-                    return [...list, refined].slice(-5);
+                    return [...list, translationResult.refined].slice(-5);
                 });
                 // 나머지 일반 상태값들은 기존처럼 일괄 업데이트 (Multi-path)
                 await admin.database().ref().update(updates);
@@ -500,9 +566,10 @@ exports.processAudio = functions
                 const errorFixes = {};
                 const safeRaw = sanitize(flushText);
                 errorFixes[`projects/${projectId}/stream/${targetId}/refined`] = safeRaw;
-                errorFixes[`projects/${projectId}/stream/${targetId}/ko`] = safeRaw;
-                errorFixes[`projects/${projectId}/stream/${targetId}/en`] = safeRaw;
                 errorFixes[`projects/${projectId}/stream/${targetId}/status`] = "final";
+                for (const lang of targetLanguages) {
+                    errorFixes[`projects/${projectId}/stream/${targetId}/${lang}`] = safeRaw;
+                }
                 for (const pid of idsToDelete) {
                     errorFixes[`projects/${projectId}/stream/${pid}/status`] = "final";
                 }

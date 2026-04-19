@@ -91,8 +91,7 @@ const AudienceView: React.FC = () => {
     const currentSourceLanguage = currentSession?.sourceLanguage || null;
 
     // --- Display Info ---
-    // 기본 언어: 세션의 첫 번째 타겟 언어 (원본 언어 제외)
-    // 세션 로드 전까지는 'en'을 기본으로 사용
+    const [targetLanguages, setTargetLanguages] = useState<string[]>(['en', 'ko']);
     const [activeLang, setActiveLang] = useState<string>('en');
     const [hideRaw, setHideRaw] = useState<boolean>(true); // Default: hide Whisper raw text
 
@@ -100,8 +99,9 @@ const AudienceView: React.FC = () => {
     useEffect(() => {
         if (!currentSessionId) return;
         const sourceLang = currentSourceLanguage || 'ko';
-        setActiveLang(sourceLang === 'ko' ? 'en' : 'ko');
-    }, [currentSessionId, currentSourceLanguage]);
+        const defaultLang = targetLanguages.find(l => l !== sourceLang) || targetLanguages[0] || 'en';
+        setActiveLang(defaultLang);
+    }, [currentSessionId, currentSourceLanguage, targetLanguages]);
 
     // --- Stream State ---
     const { streamData, loadOlderMessages, hasMore } = useProjectStream(activeProjectId, { subscribe: viewMode === 'live' });
@@ -115,7 +115,13 @@ const AudienceView: React.FC = () => {
         [key: string]: string | number | string[] | undefined;
     }>;
     const [segmentsMap, setSegmentsMap] = useState<SegmentMap>({});
-    const [segmentsOrder, setSegmentsOrder] = useState<string[]>([]);
+    
+    const segmentsOrder = useMemo(() => {
+        return Object.keys(segmentsMap)
+            .filter(id => segmentsMap[id]?.status !== 'merged')
+            .sort((a, b) => (segmentsMap[a]?.timestamp || 0) - (segmentsMap[b]?.timestamp || 0));
+    }, [segmentsMap]);
+
     const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
 
     const scrollToBottom = useCallback(() => {
@@ -258,6 +264,7 @@ const AudienceView: React.FC = () => {
             if (snap.exists()) {
                 const settings = snap.val();
                 if (settings.hideRaw !== undefined) setHideRaw(settings.hideRaw);
+                if (settings.targetLanguages) setTargetLanguages(settings.targetLanguages);
             }
         });
 
@@ -288,7 +295,6 @@ const AudienceView: React.FC = () => {
         stopAudio();
         spokenIdsRef.current.clear();
         setSegmentsMap({});
-        setSegmentsOrder([]);
     }, [activeSessionId, viewMode, stopAudio]);
 
     // 2. Data Handling
@@ -334,7 +340,6 @@ const AudienceView: React.FC = () => {
                 return changed ? next : prev;
             });
         } else if (viewMode === 'archive' && archiveSessionId) {
-            setSegmentsMap({});
             get(ref(database, `projects/${activeProjectId}/sessions/${archiveSessionId}/transcript`)).then(snap => {
                 if (snap.exists()) {
                     setSegmentsMap(snap.val());
@@ -344,10 +349,6 @@ const AudienceView: React.FC = () => {
             });
         }
     }, [streamData, viewMode, archiveSessionId, activeProjectId, activeSessionId]);
-
-    useEffect(() => {
-        setSegmentsOrder(Object.keys(segmentsMap).sort((a, b) => Number(a.split('_')[0]) - Number(b.split('_')[0])));
-    }, [segmentsMap]);
 
     // 3. Time-based Force Final Logic
     const [now, setNow] = useState<number>(() => Date.now());
@@ -599,18 +600,15 @@ const AudienceView: React.FC = () => {
                     </div>
 
                     <div className="flex gap-2">
-                        <button
-                            onClick={() => setActiveLang('ko')}
-                            className={`px-3 py-1.5 rounded-md text-xs font-medium uppercase tracking-wider transition-colors ${activeLang === 'ko' ? tabActiveClass : tabInactiveClass}`}
-                        >
-                            KR
-                        </button>
-                        <button
-                            onClick={() => setActiveLang('en')}
-                            className={`px-3 py-1.5 rounded-md text-xs font-medium uppercase tracking-wider transition-colors ${activeLang === 'en' ? tabActiveClass : tabInactiveClass}`}
-                        >
-                            EN
-                        </button>
+                        {targetLanguages.map(lang => (
+                            <button
+                                key={lang}
+                                onClick={() => setActiveLang(lang)}
+                                className={`px-3 py-1.5 rounded-md text-xs font-medium uppercase tracking-wider transition-colors ${activeLang === lang ? tabActiveClass : tabInactiveClass}`}
+                            >
+                                {lang}
+                            </button>
+                        ))}
                     </div>
                 </div>
             </div>
@@ -670,7 +668,7 @@ const AudienceView: React.FC = () => {
                             if (viewMode === 'live' && isTranslating && activeLang === sessionSourceLang) {
                                 text = (seg.refined as string) || (seg.original as string) || ""
                             } else {
-                                text = seg[activeLang] as string || ""
+                                text = (seg[activeLang] as string) || (seg.refined as string) || (seg.original as string) || ""
                             }
 
                             if (!text || text.trim() === "") return null
@@ -678,8 +676,6 @@ const AudienceView: React.FC = () => {
                             const isFinal = seg.status === 'final'
                             const isTimeOut = viewMode === 'live' ? ((now - (seg.timestamp || 0)) > 5000) : true
                             const showAsRaw = viewMode === 'live' ? (!isFinal && !isTimeOut) : false
-
-                            if (activeLang === 'en' && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) return null
 
                             if (hideRaw && showAsRaw && activeLang !== sessionSourceLang) return null
 

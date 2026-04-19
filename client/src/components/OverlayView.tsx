@@ -66,7 +66,8 @@ const OverlayView: React.FC = () => {
 
         type RawSeg = {
             id: string; original?: string; refined?: string;
-            ko?: string; en?: string; status?: string; timestamp: number; sessionId?: string;
+            status?: string; timestamp: number; sessionId?: string;
+            [key: string]: string | number | undefined;
         };
 
         const segments = Object.entries(streamData)
@@ -76,9 +77,8 @@ const OverlayView: React.FC = () => {
             .slice(-15);
 
         const texts = segments.map(s => {
-            if (activeLang === 'ko') return s.ko ?? s.refined ?? s.original ?? '';
-            if (activeLang === 'en') return s.en ?? s.refined ?? s.original ?? '';
-            return s.refined ?? s.original ?? '';
+            if (activeLang === 'refined') return s.refined ?? s.original ?? '';
+            return (s[activeLang] as string) ?? s.refined ?? s.original ?? '';
         }).filter(Boolean);
 
         setDisplayText(texts.join(' '));

@@ -10,7 +10,16 @@ export interface ProjectSettings {
   slug: string;
   logoUrl?: string;
   date: string;
-  targetLanguages: string[]; // e.g., ["en", "ko"]
+  targetLanguages: string[]; // e.g., ["en", "ko", "ja", "zh"]
+  persona?: {
+      enabled: boolean;
+      basePromptKo?: string;
+      basePromptEn?: string;
+      basePromptJa?: string;
+      basePromptZh?: string;
+      customInstructions: string;
+      medicalTerms: string;
+  };
   parkingMessage?: string;
   recordMode?: 'chunk' | 'vad';
   hideRaw?: boolean;
@@ -62,13 +71,11 @@ export interface Session {
 export interface StreamSegment {
   original: string;
   refined?: string;
-  ko?: string;
-  en?: string;
-  ja?: string;
   status: 'raw' | 'translating' | 'final' | 'merged';
   timestamp: number;
   seq?: number;
   mergedIds?: string[];
+  [lang: string]: any; // Dynamic languages (ko, en, ja, zh, etc.)
 }
 
 export interface ProjectState {

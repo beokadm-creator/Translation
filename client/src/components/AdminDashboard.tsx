@@ -60,6 +60,16 @@ const AdminDashboard: React.FC = () => {
         fallbackSTT: 'openai' | 'deepgram';
         primaryTrans: 'openai' | 'claude';
         fallbackTrans: 'openai' | 'claude';
+        targetLanguages?: string[];
+        persona?: {
+            enabled: boolean;
+            basePromptKo?: string;
+            basePromptEn?: string;
+            basePromptJa?: string;
+            basePromptZh?: string;
+            customInstructions: string;
+            medicalTerms: string;
+        };
 }
 
 const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
@@ -69,7 +79,17 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     fontFamily: 'sans-serif', typingSpeed: 35, bottomOffset: 60,
     hideRaw: true,
     primarySTT: 'openai', fallbackSTT: 'deepgram',
-    primaryTrans: 'openai', fallbackTrans: 'claude'
+    primaryTrans: 'openai', fallbackTrans: 'claude',
+    targetLanguages: ['ko', 'en'],
+    persona: {
+        enabled: false,
+        basePromptKo: '',
+        basePromptEn: '',
+        basePromptJa: '',
+        basePromptZh: '',
+        customInstructions: '',
+        medicalTerms: ''
+    }
 });
 
     // Load Project Settings
@@ -87,6 +107,16 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 fallbackSTT: val.ai?.fallbackSTT || 'deepgram',
                 primaryTrans: val.ai?.primaryTrans || 'openai',
                 fallbackTrans: val.ai?.fallbackTrans || 'claude',
+                targetLanguages: val.targetLanguages || ['ko', 'en'],
+                persona: val.persona || {
+                    enabled: false,
+                    basePromptKo: '',
+                    basePromptEn: '',
+                    basePromptJa: '',
+                    basePromptZh: '',
+                    customInstructions: '',
+                    medicalTerms: ''
+                }
             }));
             }
         });
@@ -119,6 +149,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 fallbackTrans: projectSettings.fallbackTrans,
             };
             updates[`projects/${activeProjectId}/settings/hideRaw`] = Boolean(projectSettings.hideRaw);
+            updates[`projects/${activeProjectId}/settings/targetLanguages`] = projectSettings.targetLanguages;
+            updates[`projects/${activeProjectId}/settings/persona`] = projectSettings.persona;
 
             await update(ref(database), updates);
             alert("Settings Saved!");
@@ -549,6 +581,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                     'X-Chunk-Timeout-Ms': chunkTimeoutMs,
                     'X-Chunk-Sentence-End': chunkSentenceEnd,
                     'X-Force-Flush': isForceFlush ? 'true' : 'false',
+                    'X-Target-Languages': (projectSettings.targetLanguages || ['ko', 'en']).join(','),
                     'X-STT-Primary': projectSettings.primarySTT,
                     'X-STT-Fallback': projectSettings.fallbackSTT,
                     'X-Trans-Primary': projectSettings.primaryTrans,
@@ -737,7 +770,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        const tgtLang = s.sourceLanguage === 'en' ? 'ko' : 'en';
+                                        const tgtLang = (projectSettings.targetLanguages && projectSettings.targetLanguages.length > 0) ? projectSettings.targetLanguages[0] : 'en';
                                         window.open(`/overlay/${activeProjectId}/${tgtLang}`, '_blank');
                                     }}
                                     title="Open Overlay"
@@ -773,13 +806,17 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
 
                             {/* Overlay Links */}
                             {(() => {
-                                const srcLang = (formData.sourceLanguage || 'ko') as 'ko' | 'en';
-                                const tgtLang = srcLang === 'ko' ? 'en' : 'ko';
+                                const srcLang = (formData.sourceLanguage || 'ko') as 'ko' | 'en' | 'ja' | 'zh';
+                                const targets = projectSettings.targetLanguages || ['ko', 'en'];
                                 const origin = window.location.origin;
-                                const links = [
-                                    { lang: tgtLang, label: tgtLang === 'en' ? '🇺🇸 English Overlay' : '🇰🇷 Korean Overlay', primary: true },
-                                    { lang: 'refined', label: srcLang === 'ko' ? '🇰🇷 Korean (Raw)' : '🇺🇸 English (Raw)', primary: false },
-                                ];
+                                
+                                const links = targets.map(lang => ({
+                                    lang,
+                                    label: `${lang.toUpperCase()} Overlay`,
+                                    primary: true
+                                }));
+                                links.push({ lang: 'refined', label: `${srcLang.toUpperCase()} (Raw)`, primary: false });
+
                                 return (
                                     <div className="flex gap-2 mb-6 p-3 bg-[#111111] rounded-lg border border-white/5 flex-wrap items-center shrink-0">
                                         <span className="text-[10px] text-gray-500 uppercase tracking-widest font-medium mr-2">Overlays</span>
@@ -804,7 +841,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                             );
                                         })}
                                         <button
-                                            onClick={() => window.open(`${origin}/overlay/${activeProjectId}/${tgtLang}?debug=true`, '_blank')}
+                                            onClick={() => window.open(`${origin}/overlay/${activeProjectId}/${targets[0]}?debug=true`, '_blank')}
                                             className="px-2 py-1.5 rounded-md text-[10px] bg-white/5 hover:bg-white/10 text-gray-500 ml-auto transition-colors"
                                         >Debug</button>
                                     </div>
@@ -829,8 +866,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                             className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 transition-colors"
                                             value={formData.sourceLanguage || 'ko'}
                                             onChange={async e => {
-                                                const src = e.target.value as 'ko' | 'en';
-                                                const tgt = src === 'ko' ? ['en'] : ['ko'];
+                                                const src = e.target.value as 'ko' | 'en' | 'ja' | 'zh';
                                                 
                                                 if (selectedSessionId && selectedSessionId === activeSessionId) {
                                                     // 1. 현재 녹음 중인 청크를 강제로 컷하고 서버 버퍼를 즉시 번역(flush)하도록 플래그 세팅
@@ -842,37 +878,35 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                     // 2. 약간의 지연(200ms)을 주어, 방금 컷된 청크가 '이전 언어'로 업로드되게 보장한 후 새 언어 적용
                                                     setTimeout(async () => {
                                                         liveSourceLangOverrideRef.current = src;
-                                                        setFormData(prev => ({ ...prev, sourceLanguage: src, targetLanguages: tgt }));
+                                                        setFormData(prev => ({ ...prev, sourceLanguage: src }));
                                                         try {
                                                             const updates: Record<string, unknown> = {};
                                                             updates[`projects/${activeProjectId}/sessions/${selectedSessionId}/sourceLanguage`] = src;
-                                                            updates[`projects/${activeProjectId}/sessions/${selectedSessionId}/targetLanguages`] = tgt;
                                                             await update(ref(database), updates);
                                                         } catch (err) {
                                                             console.error("LIVE 언어 자동 반영 실패:", err);
                                                         }
                                                     }, 200);
                                                 } else {
-                                                    setFormData({ ...formData, sourceLanguage: src, targetLanguages: tgt });
+                                                    setFormData({ ...formData, sourceLanguage: src });
                                                 }
                                             }}
                                         >
                                             <option value="ko">Korean (한국어)</option>
                                             <option value="en">English (영어)</option>
+                                            <option value="ja">Japanese (일본어)</option>
+                                            <option value="zh">Chinese (중국어)</option>
                                         </select>
                                     </div>
                                     <div className="space-y-1.5">
-                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Target Language <span className="normal-case tracking-normal text-gray-600 ml-1">(Auto)</span></label>
+                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Target Language <span className="normal-case tracking-normal text-gray-600 ml-1">(Project Settings)</span></label>
                                         <div className="flex gap-3 px-3 py-1.5 bg-[#111111]/50 rounded-md border border-white/5 h-[34px] items-center">
-                                            {['ko', 'en'].map(l => {
-                                                const isTarget = (formData.sourceLanguage || 'ko') === 'ko' ? l === 'en' : l === 'ko';
-                                                return (
-                                                    <label key={l} className={`flex items-center gap-2 ${isTarget ? 'text-gray-200' : 'text-gray-600'} cursor-not-allowed`}>
-                                                        <input type="checkbox" checked={isTarget} disabled className="cursor-not-allowed" />
-                                                        <span className="uppercase text-xs font-medium">{l}</span>
-                                                    </label>
-                                                );
-                                            })}
+                                            {(projectSettings.targetLanguages || ['ko', 'en']).map(l => (
+                                                <label key={l} className={`flex items-center gap-2 text-gray-200 cursor-not-allowed`}>
+                                                    <input type="checkbox" checked disabled className="cursor-not-allowed" />
+                                                    <span className="uppercase text-xs font-medium">{l}</span>
+                                                </label>
+                                            ))}
                                         </div>
                                     </div>
                                 </div>
@@ -998,9 +1032,106 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                         <div className="flex border-b border-white/5">
                             <button onClick={() => setSettingsTab('overlay')} className={`px-4 py-2 text-sm font-medium transition-colors ${settingsTab === 'overlay' ? 'border-b-2 border-white text-white' : 'text-gray-500 hover:text-gray-300'}`}>Overlay Design</button>
                             <button onClick={() => setSettingsTab('ai')} className={`px-4 py-2 text-sm font-medium transition-colors ${settingsTab === 'ai' ? 'border-b-2 border-white text-white' : 'text-gray-500 hover:text-gray-300'}`}>Audio & AI</button>
+                            <button onClick={() => setSettingsTab('persona')} className={`px-4 py-2 text-sm font-medium transition-colors ${settingsTab === 'persona' ? 'border-b-2 border-white text-white' : 'text-gray-500 hover:text-gray-300'}`}>AI Persona (Prompt)</button>
                         </div>
 
                         <div className="space-y-5 overflow-y-auto max-h-[60vh] pr-1">
+                            {/* Persona Settings */}
+                            {settingsTab === 'persona' && <>
+                                <div className="flex items-center justify-between bg-[#1a1a1a] border border-white/5 p-4 rounded-lg">
+                                    <div>
+                                        <h3 className="text-sm font-medium text-gray-200">Enable Custom Persona</h3>
+                                        <p className="text-[10px] text-gray-500 mt-1">Override default AI prompts with your custom instructions per language.</p>
+                                    </div>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" className="sr-only peer" checked={projectSettings.persona?.enabled || false}
+                                            onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, enabled: e.target.checked } })} />
+                                        <div className="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                    </label>
+                                </div>
+                                
+                                {projectSettings.persona?.enabled && (
+                                    <div className="space-y-4">
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block font-medium">Target Languages</label>
+                                            <div className="flex flex-wrap gap-2">
+                                                {['ko', 'en', 'ja', 'zh'].map(lang => (
+                                                    <label key={lang} className="flex items-center gap-2 text-sm text-gray-300 bg-[#1a1a1a] border border-white/5 px-3 py-1.5 rounded-md cursor-pointer hover:bg-white/5">
+                                                        <input type="checkbox" className="accent-white" 
+                                                            checked={(projectSettings.targetLanguages || []).includes(lang)}
+                                                            onChange={e => {
+                                                                const langs = new Set(projectSettings.targetLanguages || []);
+                                                                if (e.target.checked) langs.add(lang);
+                                                                else langs.delete(lang);
+                                                                setProjectSettings({ ...projectSettings, targetLanguages: Array.from(langs) });
+                                                            }}
+                                                        />
+                                                        <span className="uppercase">{lang}</span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block font-medium">Global Custom Instructions</label>
+                                            <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-3 text-sm text-gray-200 outline-none focus:border-white/20 resize-none h-20 placeholder-gray-600"
+                                                placeholder="e.g. Always output professional and academic tone..."
+                                                value={projectSettings.persona?.customInstructions || ''}
+                                                onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, customInstructions: e.target.value } })}
+                                            />
+                                        </div>
+
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block font-medium">Medical Terms / Dictionary</label>
+                                            <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-3 text-sm text-gray-200 outline-none focus:border-white/20 resize-none h-20 placeholder-gray-600"
+                                                placeholder="e.g. Fixture: 픽스쳐, Abutment: 지대주..."
+                                                value={projectSettings.persona?.medicalTerms || ''}
+                                                onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, medicalTerms: e.target.value } })}
+                                            />
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                            {(projectSettings.targetLanguages || []).includes('ko') && (
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Base Prompt (Korean)</label>
+                                                    <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs text-gray-300 outline-none focus:border-white/20 resize-none h-16"
+                                                        value={projectSettings.persona?.basePromptKo || ''}
+                                                        onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, basePromptKo: e.target.value } })}
+                                                    />
+                                                </div>
+                                            )}
+                                            {(projectSettings.targetLanguages || []).includes('en') && (
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Base Prompt (English)</label>
+                                                    <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs text-gray-300 outline-none focus:border-white/20 resize-none h-16"
+                                                        value={projectSettings.persona?.basePromptEn || ''}
+                                                        onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, basePromptEn: e.target.value } })}
+                                                    />
+                                                </div>
+                                            )}
+                                            {(projectSettings.targetLanguages || []).includes('ja') && (
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Base Prompt (Japanese)</label>
+                                                    <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs text-gray-300 outline-none focus:border-white/20 resize-none h-16"
+                                                        value={projectSettings.persona?.basePromptJa || ''}
+                                                        onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, basePromptJa: e.target.value } })}
+                                                    />
+                                                </div>
+                                            )}
+                                            {(projectSettings.targetLanguages || []).includes('zh') && (
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Base Prompt (Chinese)</label>
+                                                    <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs text-gray-300 outline-none focus:border-white/20 resize-none h-16"
+                                                        value={projectSettings.persona?.basePromptZh || ''}
+                                                        onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, basePromptZh: e.target.value } })}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </>}
+
                             {/* AI Settings */}
                             {settingsTab === 'ai' && <>
                                 <div className="bg-[#1a1a1a] border border-white/5 p-4 rounded-lg space-y-4">
