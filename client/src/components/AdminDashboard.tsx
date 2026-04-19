@@ -1038,6 +1038,29 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                         <div className="space-y-5 overflow-y-auto max-h-[60vh] pr-1">
                             {/* Persona Settings */}
                             {settingsTab === 'persona' && <>
+                                <div className="space-y-4 mb-6">
+                                    <div className="space-y-2 bg-[#1a1a1a] border border-white/5 p-4 rounded-lg">
+                                        <label className="text-[10px] text-gray-500 uppercase tracking-wider block font-bold">Target Languages (Global Setting)</label>
+                                        <p className="text-[10px] text-gray-500 mb-2">Select which languages to generate translations for. These will appear as tabs in the Audience View.</p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {['ko', 'en', 'ja', 'zh'].map(lang => (
+                                                <label key={lang} className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-md cursor-pointer transition-colors ${(projectSettings.targetLanguages || []).includes(lang) ? 'bg-blue-600/20 border-blue-500/30 text-blue-400' : 'bg-[#111111] border-white/5 text-gray-400 hover:bg-white/5'} border`}>
+                                                    <input type="checkbox" className="accent-blue-500" 
+                                                        checked={(projectSettings.targetLanguages || []).includes(lang)}
+                                                        onChange={e => {
+                                                            const langs = new Set(projectSettings.targetLanguages || []);
+                                                            if (e.target.checked) langs.add(lang);
+                                                            else langs.delete(lang);
+                                                            setProjectSettings({ ...projectSettings, targetLanguages: Array.from(langs) });
+                                                        }}
+                                                    />
+                                                    <span className="uppercase font-medium">{lang}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <div className="flex items-center justify-between bg-[#1a1a1a] border border-white/5 p-4 rounded-lg">
                                     <div>
                                         <h3 className="text-sm font-medium text-gray-200">Enable Custom Persona</h3>
@@ -1052,26 +1075,6 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                 
                                 {projectSettings.persona?.enabled && (
                                     <div className="space-y-4">
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block font-medium">Target Languages</label>
-                                            <div className="flex flex-wrap gap-2">
-                                                {['ko', 'en', 'ja', 'zh'].map(lang => (
-                                                    <label key={lang} className="flex items-center gap-2 text-sm text-gray-300 bg-[#1a1a1a] border border-white/5 px-3 py-1.5 rounded-md cursor-pointer hover:bg-white/5">
-                                                        <input type="checkbox" className="accent-white" 
-                                                            checked={(projectSettings.targetLanguages || []).includes(lang)}
-                                                            onChange={e => {
-                                                                const langs = new Set(projectSettings.targetLanguages || []);
-                                                                if (e.target.checked) langs.add(lang);
-                                                                else langs.delete(lang);
-                                                                setProjectSettings({ ...projectSettings, targetLanguages: Array.from(langs) });
-                                                            }}
-                                                        />
-                                                        <span className="uppercase">{lang}</span>
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        </div>
-
                                         <div className="space-y-1.5">
                                             <label className="text-[10px] text-gray-500 uppercase tracking-wider block font-medium">Global Custom Instructions</label>
                                             <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-3 text-sm text-gray-200 outline-none focus:border-white/20 resize-none h-20 placeholder-gray-600"
