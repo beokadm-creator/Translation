@@ -929,11 +929,13 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                         </select>
                                     </div>
                                     <div className="space-y-1.5">
-                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Target Language <span className="normal-case tracking-normal text-gray-600 ml-1">(Project Settings)</span></label>
+                                        <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Target Language <span className="normal-case tracking-normal text-gray-600 ml-1">(Auto-derived)</span></label>
                                         <div className="flex gap-3 px-3 py-1.5 bg-[#111111]/50 rounded-md border border-white/5 h-[34px] items-center">
-                                            {(projectSettings.targetLanguages || ['ko', 'en', 'ja', 'zh']).map(l => (
+                                            {(projectSettings.targetLanguages || ['ko', 'en', 'ja', 'zh'])
+                                                .filter(l => l !== (formData.sourceLanguage || 'ko'))
+                                                .map(l => (
                                                 <label key={l} className={`flex items-center gap-2 text-gray-200 cursor-not-allowed`}>
-                                                    <input type="checkbox" checked disabled className="cursor-not-allowed" />
+                                                    <input type="checkbox" checked disabled className="cursor-not-allowed accent-blue-500" />
                                                     <span className="uppercase text-xs font-medium">{l}</span>
                                                 </label>
                                             ))}

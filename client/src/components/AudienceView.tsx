@@ -616,13 +616,19 @@ const AudienceView: React.FC = () => {
                     </div>
 
                     <div className="flex gap-2">
-                        {targetLanguages.map(lang => (
+                        {targetLanguages
+                            .sort((a, b) => {
+                                if (a === currentSourceLanguage) return -1;
+                                if (b === currentSourceLanguage) return 1;
+                                return 0;
+                            })
+                            .map(lang => (
                             <button
                                 key={lang}
                                 onClick={() => setActiveLang(lang)}
                                 className={`px-3 py-1.5 rounded-md text-xs font-medium uppercase tracking-wider transition-colors ${activeLang === lang ? tabActiveClass : tabInactiveClass}`}
                             >
-                                {lang}
+                                {lang === currentSourceLanguage ? `${lang} (Original)` : lang}
                             </button>
                         ))}
                     </div>
