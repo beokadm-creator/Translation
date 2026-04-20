@@ -50,7 +50,7 @@ exports.archiveSession = functions.https.onRequest(async (req, res) => {
         res.set("Access-Control-Allow-Origin", allowedOrigin);
     }
     res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Target-Languages");
     if (req.method === "OPTIONS") {
         res.status(204).send("");
         return;

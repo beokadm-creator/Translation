@@ -31,7 +31,7 @@ export const createConferenceAPI = functions.https.onRequest(async (req, res) =>
         res.set("Access-Control-Allow-Origin", origin || allowedOrigin);
     }
     res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Target-Languages");
     if (req.method === "OPTIONS") { res.status(204).send(""); return; }
 
     if (req.method !== "POST") {
@@ -139,7 +139,7 @@ const handleCorsAndAuth = (req: Request, res: any) => {
         res.set("Access-Control-Allow-Origin", origin || allowedOrigin);
     }
     res.set("Access-Control-Allow-Methods", "DELETE, OPTIONS");
-    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Target-Languages");
     if (req.method === "OPTIONS") { res.status(204).send(""); return false; }
 
     if (req.method !== "DELETE") {
@@ -221,7 +221,7 @@ export const replaceSessionsAPI = functions.https.onRequest(async (req, res) => 
         res.set("Access-Control-Allow-Origin", origin || allowedOrigin);
     }
     res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Target-Languages");
     if (req.method === "OPTIONS") { res.status(204).send(""); return; }
 
     if (req.method !== "POST") {
