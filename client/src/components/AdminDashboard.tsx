@@ -558,11 +558,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     const uploadChunks = async (chunks: Blob[]) => {
         if (chunks.length === 0) return;
         const blob = new Blob(chunks, { type: "audio/webm" });
-        // CF TooSmall 기준 2000바이트 미만이면 무음/노이즈이므로 스킵
-        if (blob.size < 2000) {
-            console.debug(`[Upload] Skip: too small (${blob.size}B)`);
-            return;
-        }
+        if (blob.size === 0) return;
         try {
             const token = await auth.currentUser?.getIdToken();
             if (!token) {
@@ -704,7 +700,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 // 1. 새로운 레코더를 먼저 시작 (오버랩 시작)
                 if (nextMR && nextMR.state === 'inactive') nextMR.start();
                 
-                // VAD 판단 (2.5초 동안 최대 볼륨이 -45dB 이하면 무음으로 간주)
+                // VAD 판단 (현재 청크 동안 최대 볼륨이 일정 수준 이하면 무음으로 간주하여 서버 전송 스킵)
                 const maxDb = chunkMaxDbRef.current;
                 chunkMaxDbRef.current = -100; // 리셋
                 if (maxDb < -45) {
