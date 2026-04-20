@@ -663,13 +663,14 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             const dest = ac.createMediaStreamDestination();
             gainNode.connect(dest);
 
-            const createRecorder = (targetChunksRef: React.MutableRefObject<Blob[] & { skipVAD?: boolean }>) => {
+            const createRecorder = (targetChunksRef: React.MutableRefObject<Blob[]>) => {
                 const mr = new MediaRecorder(dest.stream, { mimeType: "audio/webm" });
                 mr.ondataavailable = (e) => { if (e.data.size > 0) targetChunksRef.current.push(e.data); };
                 mr.onstop = () => { 
                     const chunks = [...targetChunksRef.current]; 
-                    const skipVAD = targetChunksRef.current.skipVAD;
-                    targetChunksRef.current = Object.assign([], { skipVAD: false });
+                    const skipVAD = (targetChunksRef.current as any).skipVAD;
+                    targetChunksRef.current = []; 
+                    (targetChunksRef.current as any).skipVAD = false;
                     
                     if (skipVAD) {
                         console.debug("[VAD] Client dropped chunk (silence detected).");
@@ -688,15 +689,6 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             setStatus("recording");
             chunkMaxDbRef.current = -100;
 
-            const buf = new Float32Array(analyser.fftSize);
-            const getDb = () => {
-                analyser.getFloatTimeDomainData(buf);
-                let sum = 0;
-                for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-                const rms = Math.sqrt(sum / buf.length);
-                return 20 * Math.log10(Math.max(rms, 1e-8));
-            };
-
             const scheduleNextCut = (ms: number) => {
                 if (segmentTimerRef.current) window.clearTimeout(segmentTimerRef.current);
                 segmentTimerRef.current = window.setTimeout(() => {
@@ -709,37 +701,39 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 const nextIndex = activeIndexRef.current === 0 ? 1 : 0;
                 const nextMR = nextIndex === 0 ? mr1Ref.current : mr2Ref.current;
                 const currentMR = activeIndexRef.current === 0 ? mr1Ref.current : mr2Ref.current;
-                const currentChunksRef = (activeIndexRef.current === 0 ? chunks1Ref : chunks2Ref) as React.MutableRefObject<Blob[] & { skipVAD?: boolean }>;
+                const currentChunksRef = activeIndexRef.current === 0 ? chunks1Ref : chunks2Ref;
                 
                 // 1. 새로운 레코더를 먼저 시작 (오버랩 시작)
                 if (nextMR && nextMR.state === 'inactive') nextMR.start();
                 
-                // VAD 판단 (RAF 기반 maxDb는 백그라운드 탭에서 멈출 수 있으므로, 컷 시점에 즉시 샘플링)
-                const db = getDb();
-                chunkMaxDbRef.current = -100;
-                if (!forceFlushNextChunkRef.current && db < -45) {
-                    currentChunksRef.current.skipVAD = true;
+                // VAD 판단 (2.5초 동안 최대 볼륨이 -45dB 이하면 무음으로 간주)
+                const maxDb = chunkMaxDbRef.current;
+                chunkMaxDbRef.current = -100; // 리셋
+                if (maxDb < -45 && !forceFlushNextChunkRef.current) {
+                    (currentChunksRef.current as any).skipVAD = true;
                 }
 
-                // [F-HIGH-01 Fix] 청크 간격을 하드코딩된 2500ms 대신 설정 UI의 chunkInterval 값을 사용 (없으면 기본 2500ms)
-                const chunkIntervalMs = projectSettings.chunk?.chunkInterval ?? 2500;
-                
                 // 2. 아주 미세한 오버랩(100ms)을 주어 스위칭 순간의 단어 잘림 방지
                 setTimeout(() => {
                     if (currentMR && currentMR.state === 'recording') currentMR.stop();
                     activeIndexRef.current = nextIndex;
 
-                    scheduleNextCut(chunkIntervalMs);
+                    const interval = 2500;
+                    scheduleNextCut(interval);
                 }, 100);
             };
             switchRecordersRef.current = switchRecorders;
 
-            const initialInterval = projectSettings.chunk?.chunkInterval ?? 2500;
-            console.debug(`Starting Chunk Mode (${initialInterval}ms)`);
-            scheduleNextCut(initialInterval);
+            console.debug("Starting Chunk Mode (2500ms)");
+            scheduleNextCut(2500);
 
+            const buf = new Float32Array(analyser.fftSize);
             const loop = () => {
-                const db = getDb();
+                analyser.getFloatTimeDomainData(buf);
+                let sum = 0;
+                for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+                const rms = Math.sqrt(sum / buf.length);
+                const db = 20 * Math.log10(Math.max(rms, 1e-8));
                 setCurrentDb(db);
                 if (db > chunkMaxDbRef.current) chunkMaxDbRef.current = db;
                 rafIdRef.current = window.requestAnimationFrame(loop);
