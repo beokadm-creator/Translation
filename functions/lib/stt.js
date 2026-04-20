@@ -188,15 +188,24 @@ class STTFactory {
 }
 // ── 번역 파이프라인 ───────────────────────────────────────────────────────────
 // 번역 결과 유효성 검사 (필수 target 필드가 모두 채워졌는지 확인)
-const validateTranslation = (data, targets) => {
-    if (!data)
+const validateTranslation = (data, targets, sourceLang) => {
+    if (!data) {
+        functions.logger.warn("[Validate] data is null or undefined");
         return false;
-    if (targets.length === 0)
+    }
+    if (targets.length === 0) {
+        functions.logger.warn("[Validate] targets array is empty");
         return false;
+    }
     for (const t of targets) {
+        // 소스 언어와 타겟 언어가 동일한 경우, OpenAI가 빈 문자열을 반환할 수 있으므로 검증에서 예외 처리
+        if (t === sourceLang)
+            continue;
         const val = data[t];
-        if (!val || String(val).trim().length === 0)
+        if (!val || String(val).trim().length === 0) {
+            functions.logger.warn(`[Validate] target field '${t}' is empty or missing`, { data });
             return false;
+        }
     }
     return true;
 };
@@ -276,7 +285,7 @@ class OpenAITranslationProvider {
             functions.logger.error("[Translate] JSON.parse error", { content: content.slice(0, 100), err: String(e) });
             return null;
         }
-        if (!validateTranslation(data, targetLanguages))
+        if (!validateTranslation(data, targetLanguages, sourceLang))
             return null;
         const result = buildTranslationResult(data, sourceLang, rawText, targetLanguages);
         return { ...result, provider: this.name, ms: Date.now() - tStart };
