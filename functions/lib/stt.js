@@ -54,8 +54,8 @@ let _openai = null;
 // ── Hallucination 필터 ────────────────────────────────────────────────────────
 // 정적 URL 도메인만 핀포인트로 필터 (전체 문장 삭제 방지)
 const URL_FILTER_REGEX = /(?:https?:\/\/)?(?:www\.)?(?:sites\.google\.com|cst\.eu\.com|Amara\.org|amara\.org|youtube\.com|youtu\.be)\S*/gi;
-// 메타 언어 단어만 핀포인트로 필터
-const META_FILTER_REGEX = /(?:Thank you for watching\.?|Thanks for watching\.?|Thank you\.?|시청해 주셔서 감사합니다\.?|시청해주셔서 감사합니다\.?|MBC 뉴스|SBS 뉴스|KBS 뉴스|YTN 뉴스|JTBC 뉴스|연합뉴스|유료광고|유료 광고|paid advertisement|disclaimer|면책 조항|면책조항|영상편집 및 자막|자막 제공 및 광고|광고를 포함하고|알 수 없는 소리|\[Music\]|\(Music\)|\[music\]|\(music\)|\[Applause\]|\(Applause\)|\[applause\]|\(applause\)|\[Laughter\]|\(Laughter\)|\[laughter\]|\(laughter\)|\(박수\)|\[박수\]|\(웃음\)|\[웃음\]|\(환호\)|\[환호\]|\(음악\)|\[음악\]|\(노래\)|\[노래\]|\(소음\)|\[소음\]|\(침묵\)|\[침묵\]|\(무음\)|\[무음\])/gi;
+// 메타 언어 단어만 핀포인트로 필터 (일본어/중국어 환각 포함)
+const META_FILTER_REGEX = /(?:Thank you for watching\.?|Thanks for watching\.?|Thank you\.?|시청해 주셔서 감사합니다\.?|시청해주셔서 감사합니다\.?|ご視聴ありがとうございました\.?|ご視聴いただきありがとうございました\.?|チャンネル登録お願いします\.?|字幕提供|サブタイトル|MBC 뉴스|SBS 뉴스|KBS 뉴스|YTN 뉴스|JTBC 뉴스|연합뉴스|新しい話者、所属、新しいトピック|新しい話題|유료광고|유료 광고|paid advertisement|disclaimer|면책 조항|면책조항|영상편집 및 자막|자막 제공 및 광고|광고를 포함하고|알 수 없는 소리|\[Music\]|\(Music\)|\[music\]|\(music\)|\[Applause\]|\(Applause\)|\[applause\]|\(applause\)|\[Laughter\]|\(Laughter\)|\[laughter\]|\(laughter\)|\(박수\)|\[박수\]|\(웃음\)|\[웃음\]|\(환호\)|\[환호\]|\(음악\)|\[음악\]|\(노래\)|\[노래\]|\(소음\)|\[소음\]|\(침묵\)|\[침묵\]|\(무음\)|\[무음\])/gi;
 const sanitize = (s) => {
     let t = (s || "").toString();
     t = t.replace(/[`]{3,}/g, "").replace(/[`]/g, "");
@@ -125,12 +125,17 @@ const isGarbage = (text, _originalText, promptText) => {
         return true;
     // 침묵 시 흔히 나오는 짧은 환각어 필터 (짧은 문구에서만 발동, 긴 정상 발화는 보존)
     // 주의: '좋아요' / '구독' 단독 사용 금지 - 정상 발화("좋아요, 다음으로...") 삭제됨
-    const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독과 좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사|^감사합니다\.?$|영상편집|자막 제공|광고를 포함|알 수 없는 소리|subtitles by|subtitle by|자막.*제작|번역.*제공|MBC 뉴스|SBS 뉴스|KBS 뉴스|임플란트.*상악동.*골이식|상악동.*골이식.*픽스처|픽스처.*어버트먼트|충분한.*수직|충분한.*수직이)/i;
+    const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독과 좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사|^감사합니다\.?$|영상편집|자막 제공|광고를 포함|알 수 없는 소리|subtitles by|subtitle by|자막.*제작|번역.*제공|MBC 뉴스|SBS 뉴스|KBS 뉴스|임플란트.*상악동.*골이식|상악동.*골이식.*픽스처|픽스처.*어버트먼트|충분한.*수직|충분한.*수직이|ご視聴|チャンネル登録|新しい話者、所属、新しいトピック|新しい話題|字幕提供)/i;
     if (filterGarbage.test(text.trim()) && text.length < 150)
         return true;
     // 성음만으로 된 건 버림 (다국어 지원: 한글, 영문, 숫자 외에 한자, 히라가나, 가타카나 등 모든 문자 허용)
     const alphanumeric = text.replace(/[^\p{L}\p{N}]/gu, '');
     if (alphanumeric.length < 2)
+        return true;
+    // 언어 불일치 환각 감지 (예: 소스 언어는 한국어인데 일본어 히라가나/가타카나가 지나치게 많이 나오는 경우 등)
+    // 그러나 일본어 뉴스 앵커 음성처럼 완전히 다른 내용의 환각이 나올 수 있음.
+    // 긴 무음 구간에서 흔히 발생하는 일본어 뉴스 환각 패턴 처리
+    if (text.includes("新しい話者") || text.includes("新しいトピック") || text.includes("新しい話題"))
         return true;
     return false;
 };
@@ -255,7 +260,7 @@ class OpenAITranslationProvider {
             previousLine ? `previous_refined=${previousLine}` : "",
             personaPrompt,
             `Return strict JSON: {"refined":"","isMedical":true, ${langFields}}.`,
-            'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer content from session_context or previous_refined. (2) Correct only obvious STT errors (e.g. wrong homophone). (3) Do not output topic, speaker name, affiliation, or keywords as standalone content. (4) Never leave any target language field empty; translate fragments as fragments. (5) Keep all clinical terminology literal. (6) DO NOT generate conversational filler, meta-text, or hallucinations.',
+            'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer content from session_context or previous_refined. (2) Correct only obvious STT errors (e.g. wrong homophone). (3) Do not output topic, speaker name, affiliation, or keywords as standalone content. (4) Never leave any target language field empty; translate fragments as fragments. (5) Keep all clinical terminology literal. (6) DO NOT generate conversational filler, meta-text, or hallucinations. (7) If input is just a meta-tag hallucination like "新しい話者、所属、新しいトピック" or "新しい話題", return empty strings.',
             `If source_lang matches a target language, the text for that language must remain in the source language.`
         ].filter(Boolean).join('\n');
         const completion = await openai.chat.completions.create({
