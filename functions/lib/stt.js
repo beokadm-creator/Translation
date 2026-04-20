@@ -66,12 +66,15 @@ const sanitize = (s) => {
 };
 // 반복 루프 체크
 const hasRepetitionLoop = (text) => {
-    const words = text.split(/[,. ]+/).filter(Boolean).slice(0, 40);
+    // 다국어 지원: 한중일 띄어쓰기 없는 문장도 글자 단위로 분리하여 검사 (영어/한국어는 단어 단위)
+    // CJK 문자는 각각 한 글자씩 분리하고, 알파벳/숫자는 단어 단위로 분리
+    const tokens = text.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|[\p{L}\p{N}]+/gu) || [];
+    const words = tokens.slice(0, 40);
     if (words.length < 8)
         return false;
-    // 서로 다른 단어가 6개 이하이고 전체 길이가 80자 이상이면 반복으로 판단
+    // 서로 다른 토큰이 6개 이하이고 전체 길이가 80자(알파벳) 또는 20자(CJK) 이상이면 반복으로 판단
     const unique = new Set(words.map(w => w.toLowerCase()));
-    return unique.size <= 6 && text.length > 80;
+    return unique.size <= 6 && (text.length > 80 || (text.length > 20 && tokens.length === text.replace(/\s/g, '').length));
 };
 const normalizeLoose = (text) => (text || "")
     .toLowerCase()
@@ -125,8 +128,8 @@ const isGarbage = (text, _originalText, promptText) => {
     const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독과 좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사|^감사합니다\.?$|영상편집|자막 제공|광고를 포함|알 수 없는 소리|subtitles by|subtitle by|자막.*제작|번역.*제공|MBC 뉴스|SBS 뉴스|KBS 뉴스|임플란트.*상악동.*골이식|상악동.*골이식.*픽스처|픽스처.*어버트먼트|충분한.*수직|충분한.*수직이)/i;
     if (filterGarbage.test(text.trim()) && text.length < 150)
         return true;
-    // 성음만으로 된 건 버림
-    const alphanumeric = text.replace(/[^a-zA-Z0-9가-힣ㄱ-ㅎㅏ-ㅣ]/g, '');
+    // 성음만으로 된 건 버림 (다국어 지원: 한글, 영문, 숫자 외에 한자, 히라가나, 가타카나 등 모든 문자 허용)
+    const alphanumeric = text.replace(/[^\p{L}\p{N}]/gu, '');
     if (alphanumeric.length < 2)
         return true;
     return false;
