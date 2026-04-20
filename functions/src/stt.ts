@@ -120,8 +120,9 @@ class OpenAISTTProvider implements STTProvider {
     name = "openai";
     async transcribe(audioStream: Readable, sourceLang: string, prompt: string): Promise<STTResult> {
         const tStart = Date.now();
+        const file = Object.assign(audioStream, { path: "audio.webm" });
         const stt = await getOpenAI().audio.transcriptions.create({
-            file: audioStream as any, model: "gpt-4o-transcribe", language: sourceLang,
+            file: file as unknown as File, model: "gpt-4o-transcribe", language: sourceLang,
             prompt: prompt, temperature: 0,
         });
         return { text: (stt?.text || "").trim(), ms: Date.now() - tStart, provider: this.name };
@@ -156,14 +157,16 @@ class STTFactory {
             const stream = Readable.from(audioBuffer) as Readable & { path: string };
             stream.path = "audio.webm";
             return await primary.transcribe(stream, sourceLang, prompt);
-        } catch (e: any) {
-            functions.logger.error("[STT] Primary engine failed, attempting fallback", { error: e.message });
+        } catch (e: unknown) {
+            const errorStr = e instanceof Error ? e.message : String(e);
+            functions.logger.error("[STT] Primary engine failed, attempting fallback", { error: errorStr });
             try {
                 const streamFallback = Readable.from(audioBuffer) as Readable & { path: string };
                 streamFallback.path = "audio.webm";
                 return await fallback.transcribe(streamFallback, sourceLang, prompt);
-            } catch (fallbackError: any) {
-                functions.logger.error("[STT] Fallback engine also failed", { error: fallbackError.message });
+            } catch (fallbackError: unknown) {
+                const fallbackErrorStr = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+                functions.logger.error("[STT] Fallback engine also failed", { error: fallbackErrorStr });
                 throw fallbackError;
             }
         }
@@ -175,6 +178,7 @@ class STTFactory {
 // 번역 결과 유효성 검사 (필수 target 필드가 모두 채워졌는지 확인)
 const validateTranslation = (data: Record<string, unknown>, targets: readonly string[]): boolean => {
     if (!data) return false
+    if (targets.length === 0) return false
     for (const t of targets) {
         const val = data[t]
         if (!val || String(val).trim().length === 0) return false
@@ -270,7 +274,14 @@ class OpenAITranslationProvider implements TranslationProvider {
         const content = completion.choices[0]?.message?.content || ""
         if (!content) return null
 
-        const data = JSON.parse(content) as Record<string, unknown>
+        let data: Record<string, unknown>
+        try {
+            data = JSON.parse(content)
+        } catch (e) {
+            functions.logger.error("[Translate] JSON.parse error", { content: content.slice(0, 100), err: String(e) })
+            return null
+        }
+        
         if (!validateTranslation(data, targetLanguages)) return null
 
         const result = buildTranslationResult(data, sourceLang, rawText, targetLanguages);
@@ -311,16 +322,18 @@ class TranslationFactory {
                 functions.logger.info(`[Translate][${result.provider}] OK`, { ms: result.ms, srcLen: rawText.length });
                 return result;
             }
-        } catch (e: any) {
-            functions.logger.warn(`[Translate][${primary.name}] Failed, attempting fallback`, { err: String(e).slice(0, 180) });
+        } catch (e: unknown) {
+            const errorStr = e instanceof Error ? e.message : String(e);
+            functions.logger.warn(`[Translate][${primary.name}] Failed, attempting fallback`, { err: errorStr.slice(0, 180) });
             try {
                 const fbResult = await fallback.translate(rawText, sourceLang, previousContext, sessionContext, targetLanguages, persona);
                 if (fbResult) {
                     functions.logger.info(`[Translate][${fbResult.provider}] OK (Fallback)`, { ms: fbResult.ms, srcLen: rawText.length });
                     return fbResult;
                 }
-            } catch (fallbackErr: any) {
-                functions.logger.warn(`[Translate][${fallback.name}] Fallback failed`, { err: String(fallbackErr).slice(0, 180) });
+            } catch (fallbackErr: unknown) {
+                const fallbackErrStr = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+                functions.logger.warn(`[Translate][${fallback.name}] Fallback failed`, { err: fallbackErrStr.slice(0, 180) });
             }
         }
 
@@ -352,6 +365,21 @@ const loadPersona = async (projectId: string): Promise<PersonaConfig | null> => 
     if (!projectId) return null;
     
     const now = Date.now();
+    
+    // 정리(eviction) 로직: 만료된 항목 삭제
+    if (personaCache.size > 100) {
+        for (const [key, value] of personaCache.entries()) {
+            if (value.expiresAt <= now) {
+                personaCache.delete(key);
+            }
+        }
+        // 여전히 크면 무작위(첫번째) 삭제
+        if (personaCache.size > 100) {
+            const firstKey = personaCache.keys().next().value;
+            if (firstKey) personaCache.delete(firstKey);
+        }
+    }
+
     const cached = personaCache.get(projectId);
     if (cached && cached.expiresAt > now) {
         return cached.data;
@@ -394,11 +422,14 @@ export const processAudio = functions
 
         // CORS
         const origin = req.headers.origin as string
-        const allowedOrigin = process.env.ALLOWED_ORIGIN || (functions.config()?.app?.allowed_origin as string) || "*"
-        if (allowedOrigin === "*" || allowedOrigin === origin) {
-            res.set("Access-Control-Allow-Origin", allowedOrigin === "*" ? "*" : origin)
+        const allowedOrigins = (process.env.ALLOWED_ORIGIN || (functions.config()?.app?.allowed_origin as string) || "*").split(',').map(s => s.trim());
+        
+        if (allowedOrigins.includes("*")) {
+            res.set("Access-Control-Allow-Origin", "*");
+        } else if (origin && allowedOrigins.includes(origin)) {
+            res.set("Access-Control-Allow-Origin", origin);
         } else {
-            res.set("Access-Control-Allow-Origin", origin || allowedOrigin)
+            res.set("Access-Control-Allow-Origin", allowedOrigins[0] || "*");
         }
         res.set("Access-Control-Allow-Methods", "POST, OPTIONS")
         res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Active-Session-Id, X-Custom-Keywords, X-Session-Context, X-Chunk-Min-Length, X-Chunk-Timeout-Ms, X-Chunk-Sentence-End, X-STT-Primary, X-STT-Fallback, X-Trans-Primary, X-Trans-Fallback, X-Force-Flush")
@@ -410,8 +441,19 @@ export const processAudio = functions
             if (!admin.apps.length) throw new Error("Admin not initialized")
             const auth = (req.headers.authorization || "").toString()
             if (!auth.startsWith("Bearer ")) { res.status(401).json({ success: false }); return }
+            const token = auth.split("Bearer ")[1];
+            try {
+                await admin.auth().verifyIdToken(token);
+            } catch (error) {
+                res.status(401).json({ success: false, error: "Invalid token" });
+                return;
+            }
 
             const projectId = (req.query.projectId || "").toString();
+            if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+                res.status(400).json({ success: false, error: "Invalid projectId" });
+                return;
+            }
         const sourceLabel = (req.query.sourceLabel || "").toString();
         const queryLang = (req.query.sourceLang || "").toString();
 
@@ -446,7 +488,7 @@ export const processAudio = functions
         const persona = await loadPersona(projectId);
 
         // ── STEP 1: AI STT ────────────────────────────────────────────
-            let basePrompt = sourceLang === 'ko' ? DENTAL_PROMPT_KO : DENTAL_PROMPT_EN;
+            let basePrompt = "";
             
             // Persona 기본 프롬프트가 있으면 우선 적용
             if (persona && persona.enabled) {
@@ -456,7 +498,7 @@ export const processAudio = functions
                 if (sourceLang === 'zh' && persona.basePromptZh) basePrompt = persona.basePromptZh;
             }
 
-            const whisperPrompt = customKeywords ? `${basePrompt}, ${customKeywords}` : basePrompt;
+            const whisperPrompt = [basePrompt, customKeywords].filter(Boolean).join(', ');
 
             const sttResult = await STTFactory.executeWithFallback(buf, sourceLang, whisperPrompt, primarySTT, fallbackSTT);
             functions.logger.info(`[STT][${sttResult.provider}]`, { ms: sttResult.ms });
@@ -508,7 +550,7 @@ export const processAudio = functions
             // 동시 요청이 있으면 RTDB가 자동으로 재시도하여 데이터 유실 없음.
             let flushData: { targetId: string; idsToDelete: string[]; bufferText: string; previousContext: string } | null = null
 
-            await projectRef.child('state').transaction((currentState: Record<string, unknown> | null) => {
+            await projectRef.child('state').transaction((currentState: unknown) => {
                 // 트랜잭션 재시도(Retry) 시 이전 시도의 flushData를 반드시 초기화하여 덮어쓰기 방지
                 flushData = null;
                 const st = (currentState || {}) as Record<string, unknown>
@@ -545,7 +587,7 @@ export const processAudio = functions
                         idsToDelete: newBufferIds.slice(1),
                         bufferText: newBufferText,
                         previousContext: previousContext
-                    } as any
+                    };
                     return {
                         bufferText: '',
                         bufferIds: [],
@@ -602,16 +644,17 @@ export const processAudio = functions
                     // ── 3단계 디테일 튜닝: 문맥(lastRefinedList) 업데이트 시 Race Condition 방지를 위한 개별 트랜잭션 처리 ──
                     // 기존의 updates 객체 할당(updates[`.../lastRefinedList`] = ...) 방식은 
                     // 병렬 번역 시 서로 덮어쓰는 문제가 있으므로, 별도의 트랜잭션으로 안전하게 꼬리물기 저장합니다.
-                    await projectRef.child('state/lastRefinedList').transaction((currentList: any) => {
+                    await projectRef.child('state/lastRefinedList').transaction((currentList: unknown) => {
                         const list: string[] = Array.isArray(currentList) ? currentList : [];
                         return [...list, translationResult.refined].slice(-5);
                     });
 
                     // 나머지 일반 상태값들은 기존처럼 일괄 업데이트 (Multi-path)
                     await admin.database().ref().update(updates)
-                } catch (e: any) {
+                } catch (e: unknown) {
+                    const errorStr = e instanceof Error ? e.message : String(e);
                     // ── 3단계 디테일 튜닝: 번역 실패 및 에러 복구 시 확실한 로깅 및 무한 로딩 방지 ──
-                    functions.logger.error("[processAudio] Translation or update failed", { error: e.message || e })
+                    functions.logger.error("[processAudio] Translation or update failed", { error: errorStr })
                     
                     const errorFixes: Record<string, unknown> = {}
                     const safeRaw = sanitize(flushText);
@@ -625,14 +668,16 @@ export const processAudio = functions
                     }
                     
                     // 복구 업데이트 자체도 실패할 수 있으므로 catch를 달아 Cloud Function 크래시를 방지
-                    await admin.database().ref().update(errorFixes).catch(err => {
-                        functions.logger.error("[processAudio] Fallback DB update failed", { error: err.message || err })
+                    await admin.database().ref().update(errorFixes).catch((err: unknown) => {
+                        const fallbackErrStr = err instanceof Error ? err.message : String(err);
+                        functions.logger.error("[processAudio] Fallback DB update failed", { error: fallbackErrStr })
                     })
                 }
             }
             // flushData가 null이면 버퍼링 중 → transaction이 이미 상태 저장 완료
 
-        } catch (e: any) {
-            try { res.status(500).json({ success: false, error: e.message }) } catch { }
+        } catch (e: unknown) {
+            const errorStr = e instanceof Error ? e.message : String(e);
+            try { res.status(500).json({ success: false, error: errorStr }) } catch { }
         }
     })

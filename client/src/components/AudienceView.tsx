@@ -308,7 +308,8 @@ const AudienceView: React.FC = () => {
                 
                 // ── 누락된 로직: streamData에서 삭제된 항목(초기화 등)을 next에서도 삭제 ──
                 Object.keys(next).forEach(k => {
-                    if (!streamData[k] || (streamData[k] as any).sessionId !== activeSessionId) {
+                    const streamItem = streamData[k] as { sessionId?: string } | undefined;
+                    if (!streamItem || streamItem.sessionId !== activeSessionId) {
                         delete next[k];
                         changed = true;
                     }
@@ -327,7 +328,10 @@ const AudienceView: React.FC = () => {
                     // 병합된 이전 세그먼트 삭제
                     if (segment.mergedIds && Array.isArray(segment.mergedIds)) {
                         segment.mergedIds.forEach((pid: string) => {
-                            if (next[pid]) { delete next[pid]; changed = true; }
+                            if (next[pid]) {
+                                delete next[pid];
+                                changed = true;
+                            }
                         });
                     }
                     

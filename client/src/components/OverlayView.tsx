@@ -76,7 +76,7 @@ const OverlayView: React.FC = () => {
             .sort((a, b) => a.timestamp - b.timestamp)
             .slice(-15);
 
-        const texts = segments.map((s: any) => {
+        const texts = segments.map((s: RawSeg) => {
             if (activeLang === 'refined') return s.refined ?? s.original ?? '';
             return (s[activeLang] as string) ?? s.refined ?? s.original ?? '';
         }).filter(Boolean);

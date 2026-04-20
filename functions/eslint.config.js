@@ -14,7 +14,7 @@ export default tseslint.config(
       globals: globals.node,
     },
     rules: {
-      '@typescript-eslint/no-explicit-any': 'off', // Allow 'as any' for service account compatibility
+      '@typescript-eslint/no-explicit-any': 'warn', // Warn about 'as any' usage to encourage better typing
     },
   },
 )

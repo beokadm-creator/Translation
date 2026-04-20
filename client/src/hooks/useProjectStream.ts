@@ -9,6 +9,7 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const oldestTimestampRef = useRef<number | null>(null);
+  const isFetchingRef = useRef<boolean>(false);
   const maxItems = Math.max(50, options.maxItems ?? 2000);
 
   const trimStreamData = (data: Record<string, unknown>) => {
@@ -24,9 +25,10 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
 
   // 과거 데이터(이전 50개)를 불러오는 페이징 함수
   const loadOlderMessages = async () => {
-    if (!realProjectId || !hasMore || !oldestTimestampRef.current) return;
+    if (!realProjectId || !hasMore || !oldestTimestampRef.current || isFetchingRef.current) return;
     
     try {
+      isFetchingRef.current = true;
       const olderQuery = query(
         ref(rtdb, `projects/${realProjectId}/stream`),
         orderByChild('timestamp'),
@@ -38,17 +40,17 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
       const data = snapshot.val();
       
       if (data) {
-        const items = Object.values(data) as any[];
+        const items = Object.values(data) as Array<{ timestamp: number }>;
         if (items.length > 0) {
           const newOldest = Math.min(...items.map(i => i.timestamp));
           oldestTimestampRef.current = newOldest;
           
           setStreamData(prev => {
             const merged = { ...data, ...(prev || {}) };
-            const trimmed = trimStreamData(merged) as Record<string, any>;
-            const nextItems = Object.values(trimmed) as any[];
+            const trimmed = trimStreamData(merged) as Record<string, unknown>;
+            const nextItems = Object.values(trimmed) as Array<{ timestamp: number }>;
             oldestTimestampRef.current = nextItems.length ? Math.min(...nextItems.map(i => i.timestamp)) : null;
-            return trimmed;
+            return trimmed as Record<string, any>;
           });
         }
         if (items.length < 50) {
@@ -59,6 +61,8 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
       }
     } catch (err) {
       console.error("과거 메시지 불러오기 실패:", err);
+    } finally {
+      isFetchingRef.current = false;
     }
   };
 
@@ -87,7 +91,7 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
             orderByChild('timestamp'),
             limitToLast(50)
           );
-          streamRef = streamQuery as any;
+          streamRef = streamQuery as unknown as ReturnType<typeof ref>;
 
           let lastUpdateTs = 0;
 
@@ -105,7 +109,7 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
             
             // 초기 로딩 시 가장 오래된 메시지 타임스탬프 기록
             if (!oldestTimestampRef.current && Object.keys(data).length > 0) {
-              const items = Object.values(data) as any[];
+              const items = Object.values(data) as Array<{ timestamp: number }>;
               oldestTimestampRef.current = Math.min(...items.map(i => i.timestamp));
             }
 
@@ -113,7 +117,7 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
             setStreamData(prev => {
               if (!prev) return trimStreamData(data) as Record<string, any>;
               
-              const dataItems = Object.values(data) as any[];
+              const dataItems = Object.values(data) as Array<{ timestamp: number }>;
               const isFull = dataItems.length >= 50; // limitToLast 값과 일치
               const minDataTs = dataItems.length > 0 ? Math.min(...dataItems.map(i => i.timestamp)) : 0;
               
@@ -136,10 +140,10 @@ export const useProjectStream = (projectIdOrSlug: string | undefined, options: {
               });
 
               const merged = { ...next, ...data };
-              const trimmed = trimStreamData(merged) as Record<string, any>;
-              const nextItems = Object.values(trimmed) as any[];
+              const trimmed = trimStreamData(merged) as Record<string, unknown>;
+              const nextItems = Object.values(trimmed) as Array<{ timestamp: number }>;
               oldestTimestampRef.current = nextItems.length ? Math.min(...nextItems.map(i => i.timestamp)) : null;
-              return trimmed;
+              return trimmed as Record<string, any>;
             });
             setLoading(false);
           };

@@ -5,9 +5,9 @@
       ".write": "auth != null"
     },
     "projects": {
-      ".read": true,
+      ".read": "auth != null",
       "$projectId": {
-        ".read": true,
+        ".read": "auth != null",
         ".write": "auth != null",
         "stream": {
           ".read": true,
@@ -24,17 +24,17 @@
         },
         "sessions": {
           "$sessionId": {
-            ".read": "auth != null",
+            ".read": true,
             ".write": "auth != null"
           },
-          ".read": "auth != null",
+          ".read": true,
           ".write": "auth != null",
           ".indexOn": [
             "accessCode"
           ]
         },
         "activeSessionId": {
-          ".read": "auth != null",
+          ".read": true,
           ".write": "auth != null"
         },
         "state": {

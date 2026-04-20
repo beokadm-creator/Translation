@@ -18,12 +18,12 @@ interface Session {
     keywords: string;
     startTime: string;
     orderIndex?: number;
-    sourceLanguage?: 'ko' | 'en';
+    sourceLanguage?: 'ko' | 'en' | 'ja' | 'zh';
     targetLanguages?: string[];
 }
 
 const LANG_FLAGS: Record<string, string> = {
-    ko: '🇰🇷', en: '🇺🇸'
+    ko: '🇰🇷', en: '🇺🇸', ja: '🇯🇵', zh: '🇨🇳'
 };
 
 const CF_BASE = import.meta.env.VITE_CF_BASE_URL || 'https://us-central1-translation-comm.cloudfunctions.net';
@@ -70,6 +70,11 @@ const AdminDashboard: React.FC = () => {
             customInstructions: string;
             medicalTerms: string;
         };
+        chunk?: {
+            minLength?: number;
+            timeoutMs?: number;
+            sentenceEnd?: boolean;
+        };
 }
 
 const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
@@ -108,6 +113,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 primaryTrans: val.ai?.primaryTrans || 'openai',
                 fallbackTrans: val.ai?.fallbackTrans || 'claude',
                 targetLanguages: val.targetLanguages || ['ko', 'en'],
+                chunk: val.chunk || { minLength: 35, timeoutMs: 5000, sentenceEnd: true },
                 persona: val.persona || {
                     enabled: false,
                     basePromptKo: '',
@@ -119,10 +125,24 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 }
             }));
             }
-        });
+        }).catch(err => console.error("설정 로드 실패:", err));
     }, [activeProjectId]);
 
     const saveProjectSettings = async () => {
+        if (!projectSettings.targetLanguages || projectSettings.targetLanguages.length === 0) {
+            alert("최소 1개의 Target Language를 선택해야 합니다.");
+            return;
+        }
+        if (projectSettings.persona?.enabled) {
+            if ((projectSettings.persona.customInstructions || '').length > 500) {
+                alert("Custom Instructions는 500자를 초과할 수 없습니다.");
+                return;
+            }
+            if ((projectSettings.persona.medicalTerms || '').length > 1000) {
+                alert("Medical Terms는 1000자를 초과할 수 없습니다.");
+                return;
+            }
+        }
         try {
             const updates: Record<string, unknown> = {};
             updates[`projects/${activeProjectId}/settings/overlay`] = {
@@ -150,6 +170,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             };
             updates[`projects/${activeProjectId}/settings/hideRaw`] = Boolean(projectSettings.hideRaw);
             updates[`projects/${activeProjectId}/settings/targetLanguages`] = projectSettings.targetLanguages;
+            updates[`projects/${activeProjectId}/settings/chunk`] = projectSettings.chunk;
             updates[`projects/${activeProjectId}/settings/persona`] = projectSettings.persona;
 
             await update(ref(database), updates);
@@ -190,9 +211,10 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             } else {
                 alert("초기화 실패: " + data.error);
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
+            const errorStr = e instanceof Error ? e.message : String(e);
             console.error("Purge Failed:", e);
-            alert("초기화 실패: " + e.message);
+            alert("초기화 실패: " + errorStr);
         }
     };
 
@@ -269,7 +291,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                     // ── 누락된 로직: streamData에서 삭제된 항목(초기화/아카이브 등)을 next에서도 삭제 ──
                     Object.keys(next).forEach(k => {
                         // 현재 라이브 세션의 데이터만 남겨야 함 (streamData에 없거나, 세션ID가 다르면 지움)
-                        if (!streamData[k] || (streamData[k] as any).sessionId !== activeSessionId) {
+                        const streamItem = streamData[k] as { sessionId?: string } | undefined;
+                        if (!streamItem || streamItem.sessionId !== activeSessionId) {
                             delete next[k];
                             changed = true;
                         }
@@ -277,10 +300,10 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
 
                     Object.entries(streamData).forEach(([k, v]: [string, unknown]) => {
                         if (!v) return;
-                        const value = v as StreamSegment;
+                        const value = v as StreamSegment & { sessionId?: string };
                         
                         // 현재 라이브 세션의 데이터만 처리
-                        if ((value as any).sessionId !== activeSessionId) return;
+                        if (value.sessionId !== activeSessionId) return;
 
                         if (value.mergedIds && Array.isArray(value.mergedIds)) {
                             value.mergedIds.forEach((pid: string) => {
@@ -350,7 +373,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     const handleSaveSession = async () => {
         if (!selectedSessionId) return;
         try {
-            const updates: Record<string, any> = {};
+            const updates: Record<string, unknown> = {};
             updates[`projects/${activeProjectId}/sessions/${selectedSessionId}`] = formData;
             
             await update(ref(database), updates);
@@ -373,7 +396,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
 
         try {
             // ── 3단계 디테일 튜닝: 다중 경로 업데이트(Multi-path Update)로 통신 낭비 및 불일치 방지 ──
-            const updates: Record<string, any> = {};
+            const updates: Record<string, unknown> = {};
             updates[`projects/${activeProjectId}/sessions/${s1.id}/orderIndex`] = o2;
             updates[`projects/${activeProjectId}/sessions/${s2.id}/orderIndex`] = o1;
             
@@ -400,9 +423,10 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 const errData = await response.json().catch(() => ({}));
                 throw new Error(errData.message || `HTTP error! status: ${response.status}`);
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
+            const errorStr = e instanceof Error ? e.message : String(e);
             console.error("Archive Failed:", e);
-            alert(`세션 아카이브에 실패했습니다. 이전 데이터가 남아있을 수 있습니다.\n에러: ${e.message}`);
+            alert(`세션 아카이브에 실패했습니다. 이전 데이터가 남아있을 수 있습니다.\n에러: ${errorStr}`);
             throw e; // 호출한 곳(handleGoLive)에서 후속 처리 중단할 수 있도록 throw
         }
     };
@@ -426,15 +450,16 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
         if (!selectedSessionId) return;
         if (!window.confirm("Clear all transcript data for this session?")) return;
         try {
-            const updates: Record<string, any> = {};
+            const updates: Record<string, unknown> = {};
             updates[`projects/${activeProjectId}/sessions/${selectedSessionId}/transcript`] = null;
             
             // 만약 현재 라이브 중인 세션을 초기화한다면, stream과 state도 같이 비워야 고스트 데이터가 남지 않음
             if (selectedSessionId === activeSessionId) {
                 const streamSnap = await get(ref(database, `projects/${activeProjectId}/stream`));
                 if (streamSnap.exists()) {
-                    Object.entries(streamSnap.val()).forEach(([k, v]: [string, any]) => {
-                        if (v && v.sessionId === selectedSessionId) {
+                    Object.entries(streamSnap.val() as Record<string, unknown>).forEach(([k, v]) => {
+                        const val = v as { sessionId?: string };
+                        if (val && val.sessionId === selectedSessionId) {
                             updates[`projects/${activeProjectId}/stream/${k}`] = null;
                         }
                     });
@@ -450,8 +475,9 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 // 라이브 중이 아닌 세션을 지울 때도 혹시 stream에 남아있을 수 있는 쓰레기 데이터를 정리
                 const streamSnap = await get(ref(database, `projects/${activeProjectId}/stream`));
                 if (streamSnap.exists()) {
-                    Object.entries(streamSnap.val()).forEach(([k, v]: [string, any]) => {
-                        if (v && v.sessionId === selectedSessionId) {
+                    Object.entries(streamSnap.val() as Record<string, unknown>).forEach(([k, v]) => {
+                        const val = v as { sessionId?: string };
+                        if (val && val.sessionId === selectedSessionId) {
                             updates[`projects/${activeProjectId}/stream/${k}`] = null;
                         }
                     });
@@ -532,7 +558,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
         const blob = new Blob(chunks, { type: "audio/webm" });
         // CF TooSmall 기준 2000바이트 미만이면 무음/노이즈이므로 스킵
         if (blob.size < 2000) {
-            console.log(`[Upload] Skip: too small (${blob.size}B)`);
+            console.debug(`[Upload] Skip: too small (${blob.size}B)`);
             return;
         }
         try {
@@ -557,16 +583,16 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             // GPT 번역용 배경지식 (번역 모델에서도 환각 가능성을 원천 차단하기 위해 초록은 제외)
             const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}`;
 
-            // 3. 청크 설정값 (과거 안정화 버전 롤백: Timeout 5000ms, MinLength 35)
-            const chunkMinLength = "35";
-            const chunkTimeoutMs = "5000";
-            const chunkSentenceEnd = "true";
+            // 3. 청크 설정값 (과거 안정화 버전 롤백 대신 설정 UI와 연동)
+            const chunkMinLength = (projectSettings.chunk?.minLength ?? 35).toString();
+            const chunkTimeoutMs = (projectSettings.chunk?.timeoutMs ?? 5000).toString();
+            const chunkSentenceEnd = (projectSettings.chunk?.sentenceEnd ?? true).toString();
 
             const isForceFlush = forceFlushNextChunkRef.current;
             if (isForceFlush) forceFlushNextChunkRef.current = false;
 
             const url = `${CF_BASE}/processAudio?projectId=${encodeURIComponent(activeProjectId)}&sourceLabel=admin&sourceLang=${currentLang}`;
-            console.log(`[Upload] Sending ${blob.size}B → CF (project=${activeProjectId}, lang=${currentLang}, flush=${isForceFlush})`);
+            console.debug(`[Upload] Sending ${blob.size}B → CF (project=${activeProjectId}, lang=${currentLang}, flush=${isForceFlush})`);
             
             fetch(url, {
                 method: 'POST',
@@ -592,10 +618,10 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 const data = await r.json().catch(() => ({}));
                 if (r.ok && data.success) {
                     if (data.info || data.error === 'TooSmall') {
-                        console.log(`[Upload] CF filtered: ${data.error || data.info}`);
+                        console.debug(`[Upload] CF filtered: ${data.error || data.info}`);
                     } else {
                         setStatus('streaming');
-                        console.log(`[Upload] ✅ OK - "${data.text ? data.text.slice(0, 50) : 'empty/filtered'}"`);
+                        console.debug(`[Upload] ✅ OK - "${data.text ? data.text.slice(0, 50) : 'empty/filtered'}"`);
                     }
                 } else if (r.status === 401) {
                     console.error('[Upload] ❌ 401 Unauthorized');
@@ -634,17 +660,16 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             const dest = ac.createMediaStreamDestination();
             gainNode.connect(dest);
 
-            const createRecorder = (targetChunksRef: React.MutableRefObject<Blob[]>) => {
+            const createRecorder = (targetChunksRef: React.MutableRefObject<Blob[] & { skipVAD?: boolean }>) => {
                 const mr = new MediaRecorder(dest.stream, { mimeType: "audio/webm" });
                 mr.ondataavailable = (e) => { if (e.data.size > 0) targetChunksRef.current.push(e.data); };
                 mr.onstop = () => { 
                     const chunks = [...targetChunksRef.current]; 
-                    const skipVAD = (targetChunksRef.current as any).skipVAD;
-                    targetChunksRef.current = []; 
-                    (targetChunksRef.current as any).skipVAD = false;
+                    const skipVAD = targetChunksRef.current.skipVAD;
+                    targetChunksRef.current = Object.assign([], { skipVAD: false });
                     
                     if (skipVAD) {
-                        console.log("[VAD] Client dropped chunk (silence detected).");
+                        console.debug("[VAD] Client dropped chunk (silence detected).");
                     } else {
                         uploadChunks(chunks); 
                     }
@@ -663,7 +688,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             const scheduleNextCut = (ms: number) => {
                 if (segmentTimerRef.current) window.clearTimeout(segmentTimerRef.current);
                 segmentTimerRef.current = window.setTimeout(() => {
-                    console.log("Forced Timeout -> Cutting");
+                    console.debug("Forced Timeout -> Cutting");
                     switchRecorders();
                 }, ms);
             };
@@ -672,7 +697,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 const nextIndex = activeIndexRef.current === 0 ? 1 : 0;
                 const nextMR = nextIndex === 0 ? mr1Ref.current : mr2Ref.current;
                 const currentMR = activeIndexRef.current === 0 ? mr1Ref.current : mr2Ref.current;
-                const currentChunksRef = activeIndexRef.current === 0 ? chunks1Ref : chunks2Ref;
+                const currentChunksRef = (activeIndexRef.current === 0 ? chunks1Ref : chunks2Ref) as React.MutableRefObject<Blob[] & { skipVAD?: boolean }>;
                 
                 // 1. 새로운 레코더를 먼저 시작 (오버랩 시작)
                 if (nextMR && nextMR.state === 'inactive') nextMR.start();
@@ -681,7 +706,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 const maxDb = chunkMaxDbRef.current;
                 chunkMaxDbRef.current = -100; // 리셋
                 if (maxDb < -45) {
-                    (currentChunksRef.current as any).skipVAD = true;
+                    currentChunksRef.current.skipVAD = true;
                 }
 
                 // 2. 아주 미세한 오버랩(100ms)을 주어 스위칭 순간의 단어 잘림 방지
@@ -695,7 +720,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             };
             switchRecordersRef.current = switchRecorders;
 
-            console.log("Starting Chunk Mode (2500ms)");
+            console.debug("Starting Chunk Mode (2500ms)");
             scheduleNextCut(2500);
 
             const buf = new Float32Array(analyser.fftSize);
@@ -799,7 +824,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                     <button onClick={() => { if (window.confirm("Archive this session?")) triggerArchive(selectedSessionId); }} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-md text-xs font-medium text-gray-400 transition-colors">Archive</button>
                                     <button onClick={handleSaveSession} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-md text-xs font-medium text-gray-300 transition-colors">Save</button>
                                     <button onClick={handleGoLive} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors ${activeSessionId === selectedSessionId ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-green-600 text-white hover:bg-green-500'}`}>
-                                        {activeSessionId === selectedSessionId ? 'Live Active' : 'Go Live'}
+                                        {activeSessionId === selectedSessionId ? 'Stop Live' : 'Go Live'}
                                     </button>
                                 </div>
                             </div>
@@ -877,8 +902,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                     
                                                     // 2. 약간의 지연(200ms)을 주어, 방금 컷된 청크가 '이전 언어'로 업로드되게 보장한 후 새 언어 적용
                                                     setTimeout(async () => {
-                                                        liveSourceLangOverrideRef.current = src as 'ko' | 'en' | 'ja' | 'zh';
-                                                    setFormData(prev => ({ ...prev, sourceLanguage: src as any }));
+                                                        liveSourceLangOverrideRef.current = src;
+                                                        setFormData(prev => ({ ...prev, sourceLanguage: src }));
                                                         try {
                                                             const updates: Record<string, unknown> = {};
                                                             updates[`projects/${activeProjectId}/sessions/${selectedSessionId}/sourceLanguage`] = src;
@@ -888,7 +913,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                         }
                                                     }, 200);
                                                 } else {
-                                                    setFormData({ ...formData, sourceLanguage: src as any });
+                                                    setFormData({ ...formData, sourceLanguage: src });
                                                 }
                                             }}
                                         >
