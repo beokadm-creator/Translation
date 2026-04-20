@@ -559,6 +559,11 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
         if (chunks.length === 0) return;
         const blob = new Blob(chunks, { type: "audio/webm" });
         if (blob.size === 0) return;
+        // CF TooSmall 기준 2000바이트 미만이면 무음/노이즈이므로 스킵
+        if (blob.size < 2000) {
+            console.debug(`[Upload] Skip: too small (${blob.size}B)`);
+            return;
+        }
         try {
             const token = await auth.currentUser?.getIdToken();
             if (!token) {
@@ -683,6 +688,15 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             setStatus("recording");
             chunkMaxDbRef.current = -100;
 
+            const buf = new Float32Array(analyser.fftSize);
+            const getDb = () => {
+                analyser.getFloatTimeDomainData(buf);
+                let sum = 0;
+                for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+                const rms = Math.sqrt(sum / buf.length);
+                return 20 * Math.log10(Math.max(rms, 1e-8));
+            };
+
             const scheduleNextCut = (ms: number) => {
                 if (segmentTimerRef.current) window.clearTimeout(segmentTimerRef.current);
                 segmentTimerRef.current = window.setTimeout(() => {
@@ -700,10 +714,10 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 // 1. 새로운 레코더를 먼저 시작 (오버랩 시작)
                 if (nextMR && nextMR.state === 'inactive') nextMR.start();
                 
-                // VAD 판단 (현재 청크 동안 최대 볼륨이 일정 수준 이하면 무음으로 간주하여 서버 전송 스킵)
-                const maxDb = chunkMaxDbRef.current;
-                chunkMaxDbRef.current = -100; // 리셋
-                if (maxDb < -45) {
+                // VAD 판단 (RAF 기반 maxDb는 백그라운드 탭에서 멈출 수 있으므로, 컷 시점에 즉시 샘플링)
+                const db = getDb();
+                chunkMaxDbRef.current = -100;
+                if (!forceFlushNextChunkRef.current && db < -45) {
                     currentChunksRef.current.skipVAD = true;
                 }
 
@@ -724,13 +738,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             console.debug(`Starting Chunk Mode (${initialInterval}ms)`);
             scheduleNextCut(initialInterval);
 
-            const buf = new Float32Array(analyser.fftSize);
             const loop = () => {
-                analyser.getFloatTimeDomainData(buf);
-                let sum = 0;
-                for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-                const rms = Math.sqrt(sum / buf.length);
-                const db = 20 * Math.log10(Math.max(rms, 1e-8));
+                const db = getDb();
                 setCurrentDb(db);
                 if (db > chunkMaxDbRef.current) chunkMaxDbRef.current = db;
                 rafIdRef.current = window.requestAnimationFrame(loop);
