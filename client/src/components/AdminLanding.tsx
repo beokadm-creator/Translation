@@ -94,6 +94,8 @@ const AdminLanding: React.FC = () => {
                       confId: data[k].settings?.conferenceId
                   }));
                   setAllProjects(list);
+              } else {
+                  setAllProjects([]);
               }
           };
           loadAll();
@@ -138,7 +140,14 @@ const AdminLanding: React.FC = () => {
       const projectRef = ref(rtdb, `projects/${projectId}`);
       
       const snap = await get(projectRef);
-      if (snap.exists()) return alert("Project ID exists!");
+      if (snap.exists()) {
+          // 확인: 사용자가 지운 줄 알았는데 남아있다면(고아 데이터), 덮어쓸 것인지 경고
+          if (!window.confirm(`Project ID (Slug) "${projectId}" already exists in the database. Do you want to overwrite it? All previous data in this Hall will be PERMANENTLY ERASED.`)) {
+              return;
+          }
+          // 기존 데이터 삭제(초기화)
+          await remove(projectRef);
+      }
 
       await set(child(projectRef, 'settings'), {
           ...projForm,
@@ -149,29 +158,80 @@ const AdminLanding: React.FC = () => {
       // Init State
       await set(child(projectRef, 'state'), {
           bufferText: "",
-          bufferIds: []
+          bufferIds: [],
+          lastRefinedList: [],
+          lastFlushTime: Date.now()
+      });
+
+      // Add to local state immediately so it shows up in the list
+      setConfProjects(prev => {
+          const filtered = prev.filter(p => p.slug !== projectId);
+          return [...filtered, { ...projForm, slug: projectId, conferenceId: selectedConfId }];
       });
 
       setIsCreatingProj(false);
-      alert("Project Created!");
+      setProjForm({
+          name: "",
+          slug: "",
+          date: new Date().toISOString().split('T')[0],
+          targetLanguages: ["ko", "en", "ja", "zh"],
+          parkingMessage: "The session will start shortly.",
+          conferenceId: ""
+      });
+      alert("Project (Hall) Created!");
   };
 
   const handleDeleteProject = async (projectId: string) => {
-      if (!window.confirm(`PERMANENTLY DELETE project "${projectId}"? All data will be lost.`)) return;
-      await remove(ref(rtdb, `projects/${projectId}`));
+      if (!window.confirm(`PERMANENTLY DELETE project (Hall) "${projectId}"? All data will be lost.`)) return;
       
-      // Refresh list
-      setAllProjects(prev => prev.filter(p => p.id !== projectId));
-      setConfProjects(prev => prev.filter(p => p.slug !== projectId));
+      try {
+          await remove(ref(rtdb, `projects/${projectId}`));
+          
+          // Refresh list
+          setAllProjects(prev => prev.filter(p => p.id !== projectId));
+          setConfProjects(prev => prev.filter(p => p.slug !== projectId));
+          alert("Hall deleted cleanly!");
+      } catch (error) {
+          console.error("Failed to delete project:", error);
+          alert("Failed to delete Hall.");
+      }
   };
 
   const handleDeleteConference = async (confId: string) => {
       if (!window.confirm(`PERMANENTLY DELETE conference? All related projects will also be affected.`)) return;
-      await remove(ref(rtdb, `conferences/${confId}`));
       
-      // Refresh list
-      setConferences(prev => prev.filter(c => c.id !== confId));
-      if (selectedConfId === confId) setSelectedConfId(null);
+      try {
+          // 1. Remove conference from RTDB
+          await remove(ref(rtdb, `conferences/${confId}`));
+          
+          // 2. Remove all projects (Halls) associated with this conference
+          const snap = await get(ref(rtdb, 'projects'));
+          if (snap.exists()) {
+              const data = snap.val();
+              const updates: Record<string, null> = {};
+              Object.keys(data).forEach(projectId => {
+                  if (data[projectId]?.settings?.conferenceId === confId) {
+                      updates[`projects/${projectId}`] = null;
+                  }
+              });
+              
+              if (Object.keys(updates).length > 0) {
+                  // Remove projects using multi-path update
+                  await import('firebase/database').then(({ update }) => update(ref(rtdb), updates));
+              }
+          }
+          
+          // Refresh list
+          setConferences(prev => prev.filter(c => c.id !== confId));
+          if (selectedConfId === confId) {
+              setSelectedConfId(null);
+              setConfProjects([]);
+          }
+          alert("Conference and its associated Halls deleted cleanly!");
+      } catch (error) {
+          console.error("Failed to delete conference cleanly:", error);
+          alert("Failed to delete conference properly.");
+      }
   };
 
   return (
