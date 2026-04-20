@@ -41,15 +41,11 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.processAudio = void 0;
 const functions = __importStar(require("firebase-functions/v1"));
 const admin = __importStar(require("firebase-admin"));
-const openai_1 = __importDefault(require("openai"));
-const stream_1 = require("stream");
+const openai_1 = __importStar(require("openai"));
 let _openai = null;
 // ── Hallucination 필터 ────────────────────────────────────────────────────────
 // 정적 URL 도메인만 핀포인트로 필터 (전체 문장 삭제 방지)
@@ -143,11 +139,11 @@ class OpenAISTTProvider {
     constructor() {
         this.name = "openai";
     }
-    async transcribe(audioStream, sourceLang, prompt) {
+    async transcribe(audioBuffer, sourceLang, prompt) {
         const tStart = Date.now();
-        const file = Object.assign(audioStream, { path: "audio.webm" });
+        const file = await (0, openai_1.toFile)(audioBuffer, "audio.webm", { type: "audio/webm" });
         const stt = await getOpenAI().audio.transcriptions.create({
-            file: file, model: "gpt-4o-transcribe", language: sourceLang,
+            file: file, model: "whisper-1", language: sourceLang,
             prompt: prompt, temperature: 0,
         });
         return { text: (stt?.text || "").trim(), ms: Date.now() - tStart, provider: this.name };
@@ -157,7 +153,7 @@ class DeepgramSTTProvider {
     constructor() {
         this.name = "deepgram";
     }
-    async transcribe(_audioStream, _sourceLang, _prompt) {
+    async transcribe(_audioBuffer, _sourceLang, _prompt) {
         throw new Error("Deepgram not implemented yet");
     }
 }
@@ -171,24 +167,28 @@ class STTFactory {
         const primary = getProvider(primaryEngineName);
         const fallback = getProvider(fallbackEngineName);
         try {
-            const stream = stream_1.Readable.from(audioBuffer);
-            stream.path = "audio.webm";
-            return await primary.transcribe(stream, sourceLang, prompt);
+            const result = await primary.transcribe(audioBuffer, sourceLang, prompt);
+            if (result) {
+                functions.logger.info(`[STT][${result.provider}]`, { ms: result.ms });
+                return result;
+            }
         }
         catch (e) {
             const errorStr = e instanceof Error ? e.message : String(e);
-            functions.logger.error("[STT] Primary engine failed, attempting fallback", { error: errorStr });
+            functions.logger.warn(`[STT][${primary.name}] Failed, attempting fallback`, { err: errorStr.slice(0, 180) });
             try {
-                const streamFallback = stream_1.Readable.from(audioBuffer);
-                streamFallback.path = "audio.webm";
-                return await fallback.transcribe(streamFallback, sourceLang, prompt);
+                const fbResult = await fallback.transcribe(audioBuffer, sourceLang, prompt);
+                if (fbResult) {
+                    functions.logger.info(`[STT][${fbResult.provider}] (Fallback)`, { ms: fbResult.ms });
+                    return fbResult;
+                }
             }
-            catch (fallbackError) {
-                const fallbackErrorStr = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-                functions.logger.error("[STT] Fallback engine also failed", { error: fallbackErrorStr });
-                throw fallbackError;
+            catch (fallbackErr) {
+                const fallbackErrStr = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+                functions.logger.warn(`[STT][${fallback.name}] Fallback failed`, { err: fallbackErrStr.slice(0, 180) });
             }
         }
+        throw new Error("All STT engines failed");
     }
 }
 // ── 번역 파이프라인 ───────────────────────────────────────────────────────────
@@ -240,6 +240,8 @@ class OpenAITranslationProvider {
         const openai = getOpenAI();
         const contextLine = sanitize(sessionContext).slice(0, 180);
         const previousLine = sanitize(previousContext.split(' / ').slice(-1)[0] || '').slice(0, 80);
+        const langMap = { ko: "Korean", en: "English", ja: "Japanese", zh: "Chinese" };
+        const targetsLine = targetLanguages.map(l => `${l}=${langMap[l] || l}`).join(', ');
         const langFields = targetLanguages.map(l => `"${l}": ""`).join(', ');
         // Persona 
         let personaPrompt = "";
@@ -255,12 +257,13 @@ class OpenAITranslationProvider {
         }
         const prompt = [
             `source_lang=${sourceLang}`,
+            `targets=${targetsLine}`,
             `input=${rawText}`,
             contextLine ? `session_context=${contextLine}` : "",
             previousLine ? `previous_refined=${previousLine}` : "",
             personaPrompt,
             `Return strict JSON: {"refined":"","isMedical":true, ${langFields}}.`,
-            'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer content from session_context or previous_refined. (2) Correct only obvious STT errors (e.g. wrong homophone). (3) Do not output topic, speaker name, affiliation, or keywords as standalone content. (4) Never leave any target language field empty; translate fragments as fragments. (5) Keep all clinical terminology literal. (6) DO NOT generate conversational filler, meta-text, or hallucinations. (7) If input is just a meta-tag hallucination like "新しい話者、所属、新しいトピック" or "新しい話題", return empty strings.',
+            'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer content from session_context or previous_refined. (2) Correct only obvious STT errors (e.g. wrong homophone). (3) Translate "input" into EVERY target language field. (4) Never leave any target language field empty; translate fragments as fragments. (5) Keep all clinical terminology literal. (6) DO NOT generate conversational filler, meta-text, or hallucinations. (7) If input is just a meta-tag hallucination like "新しい話者、所属、新しいトピック" or "新しい話題", return empty strings.',
             `If source_lang matches a target language, the text for that language must remain in the source language.`
         ].filter(Boolean).join('\n');
         const completion = await openai.chat.completions.create({
@@ -289,6 +292,43 @@ class OpenAITranslationProvider {
         catch (e) {
             functions.logger.error("[Translate] JSON.parse error", { content: content.slice(0, 100), err: String(e) });
             return null;
+        }
+        const missing = targetLanguages.filter(t => t !== sourceLang && (!data[t] || String(data[t]).trim().length === 0));
+        if (missing.length > 0) {
+            const repairFields = missing.map(l => `"${l}": ""`).join(', ');
+            const repairTargetsLine = missing.map(l => `${l}=${langMap[l] || l}`).join(', ');
+            const repairPrompt = [
+                `source_lang=${sourceLang}`,
+                `targets=${repairTargetsLine}`,
+                `input=${rawText}`,
+                `Return strict JSON: {${repairFields}}.`,
+                'Rules: (1) Translate "input" into EVERY target language field. (2) Never leave any field empty.'
+            ].join('\n');
+            try {
+                const repair = await openai.chat.completions.create({
+                    model: "gpt-4o-mini",
+                    temperature: 0,
+                    max_tokens: 800,
+                    response_format: { type: "json_object" },
+                    messages: [
+                        { role: "system", content: "You translate text into requested target languages and output strict JSON only." },
+                        { role: "user", content: repairPrompt }
+                    ]
+                });
+                const repairContent = repair.choices[0]?.message?.content || "";
+                if (repairContent) {
+                    const repairData = JSON.parse(repairContent);
+                    for (const lang of missing) {
+                        const v = repairData[lang];
+                        if (v && String(v).trim().length > 0)
+                            data[lang] = v;
+                    }
+                }
+            }
+            catch (e) {
+                const errStr = e instanceof Error ? e.message : String(e);
+                functions.logger.warn("[Translate] repair attempt failed", { err: errStr.slice(0, 180) });
+            }
         }
         if (!validateTranslation(data, targetLanguages, sourceLang))
             return null;
