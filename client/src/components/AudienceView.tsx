@@ -91,16 +91,22 @@ const AudienceView: React.FC = () => {
     const currentSourceLanguage = currentSession?.sourceLanguage || null;
 
     // --- Display Info ---
-    const [targetLanguages, setTargetLanguages] = useState<string[]>(['en', 'ko']);
+    const [targetLanguages, setTargetLanguages] = useState<string[]>(['ko', 'en', 'ja', 'zh']);
     const [activeLang, setActiveLang] = useState<string>('en');
     const [hideRaw, setHideRaw] = useState<boolean>(true); // Default: hide Whisper raw text
 
     // 세션 정보가 로드되면 기본 언어 자동 전환 (원본 언어가 아닌 첫 번째 타겟 언어)
+    const prevSessionIdRef = useRef<string | null>(null);
     useEffect(() => {
         if (!currentSessionId) return;
-        const sourceLang = currentSourceLanguage || 'ko';
-        const defaultLang = targetLanguages.find(l => l !== sourceLang) || targetLanguages[0] || 'en';
-        setActiveLang(defaultLang);
+        
+        // 세션이 변경되었을 때만 activeLang을 리셋 (동일 세션 내에서는 사용자의 탭 선택을 유지)
+        if (prevSessionIdRef.current !== currentSessionId) {
+            const sourceLang = currentSourceLanguage || 'ko';
+            const defaultLang = targetLanguages.find(l => l !== sourceLang) || targetLanguages[0] || 'en';
+            setActiveLang(defaultLang);
+            prevSessionIdRef.current = currentSessionId;
+        }
     }, [currentSessionId, currentSourceLanguage, targetLanguages]);
 
     // --- Stream State ---
@@ -264,7 +270,13 @@ const AudienceView: React.FC = () => {
             if (snap.exists()) {
                 const settings = snap.val();
                 if (settings.hideRaw !== undefined) setHideRaw(settings.hideRaw);
-                if (settings.targetLanguages) setTargetLanguages(settings.targetLanguages);
+                // ── [F-CRIT-01 Fix] DB에 targetLanguages가 없거나 빈 배열일 때의 예외 처리 ──
+                if (settings.targetLanguages && Array.isArray(settings.targetLanguages) && settings.targetLanguages.length > 0) {
+                    setTargetLanguages(settings.targetLanguages);
+                } else {
+                    // 레거시 프로젝트 호환성을 위해 기본 4개국어 세팅 보장
+                    setTargetLanguages(['ko', 'en', 'ja', 'zh']);
+                }
             }
         });
 

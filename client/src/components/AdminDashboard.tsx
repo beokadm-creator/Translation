@@ -74,6 +74,8 @@ const AdminDashboard: React.FC = () => {
             minLength?: number;
             timeoutMs?: number;
             sentenceEnd?: boolean;
+            chunkInterval?: number;
+            vadMaxCutMs?: number;
         };
 }
 
@@ -85,7 +87,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     hideRaw: true,
     primarySTT: 'openai', fallbackSTT: 'deepgram',
     primaryTrans: 'openai', fallbackTrans: 'claude',
-    targetLanguages: ['ko', 'en'],
+    targetLanguages: ['ko', 'en', 'ja', 'zh'],
     persona: {
         enabled: false,
         basePromptKo: '',
@@ -112,7 +114,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 fallbackSTT: val.ai?.fallbackSTT || 'deepgram',
                 primaryTrans: val.ai?.primaryTrans || 'openai',
                 fallbackTrans: val.ai?.fallbackTrans || 'claude',
-                targetLanguages: val.targetLanguages || ['ko', 'en'],
+                targetLanguages: val.targetLanguages || ['ko', 'en', 'ja', 'zh'],
                 chunk: val.chunk || { minLength: 35, timeoutMs: 5000, sentenceEnd: true },
                 persona: val.persona || {
                     enabled: false,
@@ -354,7 +356,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 startTime: "09:00",
                 orderIndex: maxOrder + 1,
                 sourceLanguage: 'ko',
-                targetLanguages: ['en']
+                targetLanguages: ['ko', 'en', 'ja', 'zh']
             };
             await set(newRef, newSession);
             setSelectedSessionId(newSession.id);
@@ -607,7 +609,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                     'X-Chunk-Timeout-Ms': chunkTimeoutMs,
                     'X-Chunk-Sentence-End': chunkSentenceEnd,
                     'X-Force-Flush': isForceFlush ? 'true' : 'false',
-                    'X-Target-Languages': (projectSettings.targetLanguages || ['ko', 'en']).join(','),
+                    'X-Target-Languages': (projectSettings.targetLanguages || ['ko', 'en', 'ja', 'zh']).join(','),
                     'X-STT-Primary': projectSettings.primarySTT,
                     'X-STT-Fallback': projectSettings.fallbackSTT,
                     'X-Trans-Primary': projectSettings.primaryTrans,
@@ -709,19 +711,22 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                     currentChunksRef.current.skipVAD = true;
                 }
 
+                // [F-HIGH-01 Fix] 청크 간격을 하드코딩된 2500ms 대신 설정 UI의 chunkInterval 값을 사용 (없으면 기본 2500ms)
+                const chunkIntervalMs = projectSettings.chunk?.chunkInterval ?? 2500;
+                
                 // 2. 아주 미세한 오버랩(100ms)을 주어 스위칭 순간의 단어 잘림 방지
                 setTimeout(() => {
                     if (currentMR && currentMR.state === 'recording') currentMR.stop();
                     activeIndexRef.current = nextIndex;
 
-                    const interval = 2500;
-                    scheduleNextCut(interval);
+                    scheduleNextCut(chunkIntervalMs);
                 }, 100);
             };
             switchRecordersRef.current = switchRecorders;
 
-            console.debug("Starting Chunk Mode (2500ms)");
-            scheduleNextCut(2500);
+            const initialInterval = projectSettings.chunk?.chunkInterval ?? 2500;
+            console.debug(`Starting Chunk Mode (${initialInterval}ms)`);
+            scheduleNextCut(initialInterval);
 
             const buf = new Float32Array(analyser.fftSize);
             const loop = () => {
@@ -832,7 +837,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                             {/* Overlay Links */}
                             {(() => {
                                 const srcLang = (formData.sourceLanguage || 'ko') as 'ko' | 'en' | 'ja' | 'zh';
-                                const targets = projectSettings.targetLanguages || ['ko', 'en'];
+                                const targets = projectSettings.targetLanguages || ['ko', 'en', 'ja', 'zh'];
                                 const origin = window.location.origin;
                                 
                                 const links = targets.map(lang => ({
@@ -926,7 +931,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                     <div className="space-y-1.5">
                                         <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Target Language <span className="normal-case tracking-normal text-gray-600 ml-1">(Project Settings)</span></label>
                                         <div className="flex gap-3 px-3 py-1.5 bg-[#111111]/50 rounded-md border border-white/5 h-[34px] items-center">
-                                            {(projectSettings.targetLanguages || ['ko', 'en']).map(l => (
+                                            {(projectSettings.targetLanguages || ['ko', 'en', 'ja', 'zh']).map(l => (
                                                 <label key={l} className={`flex items-center gap-2 text-gray-200 cursor-not-allowed`}>
                                                     <input type="checkbox" checked disabled className="cursor-not-allowed" />
                                                     <span className="uppercase text-xs font-medium">{l}</span>

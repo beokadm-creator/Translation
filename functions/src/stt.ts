@@ -309,7 +309,12 @@ class TranslationFactory {
     ): Promise<TranslationResult> {
         
         const getProvider = (name: string): TranslationProvider => {
-            if (name === 'claude') return new ClaudeTranslationProvider();
+            // [F-HIGH-05 Fix] Claude가 미구현 상태이므로, Claude가 선택된 경우에도 강제로 OpenAI를 반환하여 안전하게 동작하도록 조치합니다.
+            // 향후 Claude 구현 시 이 분기 처리를 복구하면 됩니다.
+            if (name === 'claude') {
+                functions.logger.warn("[Translate] Claude is not implemented yet, falling back to OpenAI automatically");
+                return new OpenAITranslationProvider();
+            }
             return new OpenAITranslationProvider();
         };
 
@@ -475,7 +480,7 @@ export const processAudio = functions
         const activeSessionId = (req.headers['x-active-session-id'] || "").toString();
         const customKeywords = decodeURIComponent((req.headers['x-custom-keywords'] || "").toString());
         const sessionContext = decodeURIComponent((req.headers['x-session-context'] || "").toString());
-        const targetLanguagesStr = (req.headers['x-target-languages'] || "ko,en").toString();
+        const targetLanguagesStr = (req.headers['x-target-languages'] || "ko,en,ja,zh").toString();
         const targetLanguages = targetLanguagesStr.split(',').map(l => l.trim()).filter(Boolean);
         const minLength = Number(req.headers['x-chunk-min-length'] || 35);
         const timeoutMs = Number(req.headers['x-chunk-timeout-ms'] || 5000);

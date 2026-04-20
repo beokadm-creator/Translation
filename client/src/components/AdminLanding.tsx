@@ -33,7 +33,7 @@ const AdminLanding: React.FC = () => {
     name: "",
     slug: "",
     date: new Date().toISOString().split('T')[0],
-    targetLanguages: ["en"],
+    targetLanguages: ["ko", "en", "ja", "zh"],
     parkingMessage: "The session will start shortly.",
     conferenceId: ""
   });

@@ -104,7 +104,7 @@ exports.createConferenceAPI = functions.https.onRequest(async (req, res) => {
                     name: proj.name,
                     slug: projectId,
                     date: proj.date || startDate,
-                    targetLanguages: proj.targetLanguages || ["en"],
+                    targetLanguages: proj.targetLanguages || ["ko", "en", "ja", "zh"],
                     parkingMessage: proj.parkingMessage || "The session will start shortly.",
                     conferenceId: confId,
                     // Default AI & Overlay settings
