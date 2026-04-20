@@ -131,7 +131,7 @@ class OpenAISTTProvider implements STTProvider {
         const tStart = Date.now();
         const file = await toFile(audioBuffer, "audio.webm", { type: "audio/webm" });
         const stt = await getOpenAI().audio.transcriptions.create({
-            file: file, model: "whisper-1", language: sourceLang,
+            file: file, model: "gpt-4o-transcribe", language: sourceLang,
             prompt: prompt, temperature: 0,
         });
         return { text: (stt?.text || "").trim(), ms: Date.now() - tStart, provider: this.name };
