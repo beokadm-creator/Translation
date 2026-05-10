@@ -12,7 +12,7 @@ import * as functions from "firebase-functions/v1"
 import * as admin from "firebase-admin"
 import OpenAI, { toFile } from "openai"
 import type { Request } from "express"
-import { Readable } from "stream"
+
 
 let _openai: OpenAI | null = null
 
@@ -284,7 +284,7 @@ class OpenAITranslationProvider implements TranslationProvider {
         ].filter(Boolean).join('\n')
 
         const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-4.1-mini",
         temperature: 0,
         max_tokens: 1000,
         response_format: { type: "json_object" },
@@ -324,7 +324,7 @@ class OpenAITranslationProvider implements TranslationProvider {
             ].join('\n')
             try {
                 const repair = await openai.chat.completions.create({
-                    model: "gpt-4o-mini",
+                    model: "gpt-4.1-mini",
                     temperature: 0,
                     max_tokens: 800,
                     response_format: { type: "json_object" },
@@ -499,8 +499,6 @@ const getOpenAI = (): OpenAI => {
     return _openai
 }
 
-const DENTAL_PROMPT_KO = "임플란트, 상악동, 골이식, 픽스처, 어버트먼트, 크라운, 보철"
-const DENTAL_PROMPT_EN = "Implant, Sinus, Bone Graft, Fixture, Abutment, Crown"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. HTTP Trigger: Immediate Display + Progressive Buffering
