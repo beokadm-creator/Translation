@@ -52,11 +52,11 @@ const OPENAI_TRANSLATION_LABEL = import.meta.env.VITE_OPENAI_TRANSLATION_LABEL |
 const REALTIME_STT_LABEL = import.meta.env.VITE_REALTIME_STT_LABEL || 'gpt-realtime-whisper';
 const REALTIME_TRANSLATION_LABEL = import.meta.env.VITE_REALTIME_TRANSLATION_LABEL || OPENAI_TRANSLATION_LABEL;
 
-// Phase 3 Realtime relay. When this
-// env var is set the admin can opt into the streaming path; otherwise the
-// existing 3-second chunked HTTP path stays in effect (zero behavior change).
+// Phase 3 Realtime relay. Keep it opt-in by default so the proven chunked HTTP
+// path remains the production fallback unless explicitly enabled.
 const RELAY_URL = import.meta.env.VITE_RELAY_URL as string | undefined;
 const REALTIME_ENABLED = Boolean(RELAY_URL);
+const REALTIME_DEFAULT_ON = import.meta.env.VITE_REALTIME_DEFAULT_ON === 'true';
 
 const AdminDashboard: React.FC = () => {
     const { projectId } = useParams<{ projectId: string }>();
@@ -266,7 +266,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     const chunkMaxDbRef = useRef<number>(-100);
     const forceFlushNextChunkRef = useRef<boolean>(false);
     const [sourceType, setSourceType] = useState<'mic' | 'system'>('mic');
-    const [useRealtime, setUseRealtime] = useState<boolean>(REALTIME_ENABLED);
+    const [useRealtime, setUseRealtime] = useState<boolean>(REALTIME_ENABLED && REALTIME_DEFAULT_ON);
     const [segmentsMap, setSegmentsMap] = useState<Record<string, StreamSegment>>({});
 
     // Realtime relay handles (Phase 3). The hook is always mounted; it stays
