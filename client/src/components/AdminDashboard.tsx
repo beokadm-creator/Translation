@@ -1352,8 +1352,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                         <div className="flex justify-between items-center border-b border-white/5 pb-4">
                             <h2 className="text-base font-semibold tracking-tight text-gray-100">Project Settings</h2>
                             <div className="flex gap-2 text-[10px]">
-                                <span className="bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-1 rounded-md font-mono">STT: gpt-4o-transcribe</span>
-                                <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded-md font-mono">Trans: gpt-4o-mini</span>
+                                <span className="bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-1 rounded-md font-mono">STT: {projectSettings.primarySTT === 'deepgram' ? 'Deepgram Nova-3' : 'gpt-4o-transcribe'}</span>
+                                <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded-md font-mono">Trans: {projectSettings.primaryTrans === 'claude' ? 'Claude Haiku 4.5' : 'gpt-4o-mini'}</span>
                             </div>
                         </div>
 
@@ -1480,7 +1480,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                     onChange={e => setProjectSettings({...projectSettings, primarySTT: e.target.value as 'openai' | 'deepgram'})}
                                                 >
                                                     <option value="openai">OpenAI (gpt-4o-transcribe)</option>
-                                                    <option value="deepgram">Deepgram (Nova-3)</option>
+                                                    <option value="deepgram">Deepgram (Nova-3 Medical)</option>
                                                 </select>
                                             </div>
                                             <div className="space-y-1.5">
@@ -1490,7 +1490,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                     value={projectSettings.fallbackSTT}
                                                     onChange={e => setProjectSettings({...projectSettings, fallbackSTT: e.target.value as 'openai' | 'deepgram'})}
                                                 >
-                                                    <option value="deepgram">Deepgram (Nova-3)</option>
+                                                    <option value="deepgram">Deepgram (Nova-3 Medical)</option>
                                                     <option value="openai">OpenAI (gpt-4o-transcribe)</option>
                                                 </select>
                                             </div>
@@ -1505,7 +1505,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                     onChange={e => setProjectSettings({...projectSettings, primaryTrans: e.target.value as 'openai' | 'claude'})}
                                                 >
                                                     <option value="openai">OpenAI (gpt-4o-mini)</option>
-                                                    <option value="claude">Anthropic (Claude 3 Haiku)</option>
+                                                    <option value="claude">Anthropic (Claude Haiku 4.5)</option>
                                                 </select>
                                             </div>
                                             <div className="space-y-1.5">
@@ -1515,7 +1515,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                     value={projectSettings.fallbackTrans}
                                                     onChange={e => setProjectSettings({...projectSettings, fallbackTrans: e.target.value as 'openai' | 'claude'})}
                                                 >
-                                                    <option value="claude">Anthropic (Claude 3 Haiku)</option>
+                                                    <option value="claude">Anthropic (Claude Haiku 4.5)</option>
                                                     <option value="openai">OpenAI (gpt-4o-mini)</option>
                                                 </select>
                                             </div>
