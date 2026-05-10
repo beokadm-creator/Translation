@@ -122,28 +122,37 @@ function buildResult(
 
 type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh"
 
-function parseReasoningEffort(raw: string | undefined): ReasoningEffort {
-    const v = (raw || "medium").toLowerCase()
+function parseReasoningEffort(raw: string | undefined): ReasoningEffort | undefined {
+    if (!raw) return undefined
+    const v = raw.toLowerCase()
     if (v === "minimal" || v === "low" || v === "medium" || v === "high" || v === "xhigh") {
         return v
     }
-    return "medium"
+    return undefined
+}
+
+// The translation step does NOT need a reasoning model — gpt-4o-mini has
+// been working well for refinement + ko/en/ja JSON output in production.
+// The real upgrade in this branch is the STT side (gpt-realtime-whisper).
+// Override via OPENAI_REASONING_MODEL only when you want to experiment
+// (e.g. "gpt-4o" for slightly better disambiguation, "gpt-realtime-2"
+// with OPENAI_REASONING_EFFORT for GPT-5-class reasoning).
+const DEFAULT_TRANSLATION_MODEL = "gpt-4o-mini"
+
+// Detect whether a given model id is a reasoning model that accepts the
+// `reasoning_effort` parameter. Non-reasoning models reject it.
+function isReasoningModel(model: string): boolean {
+    return /^(o\d|gpt-realtime-2|gpt-5)/i.test(model)
 }
 
 export class Translator {
     private openai: OpenAI
     private readonly model: string
-    private readonly reasoningEffort: ReasoningEffort
+    private readonly reasoningEffort: ReasoningEffort | undefined
 
-    constructor(openai: OpenAI, model = "gpt-realtime-2") {
+    constructor(openai: OpenAI, model = DEFAULT_TRANSLATION_MODEL) {
         this.openai = openai
         this.model = model
-        // OPENAI_REASONING_EFFORT — defaults to "medium" for medical accuracy
-        // over raw speed. Set to "low" (~30% faster) for casual sessions like
-        // an opening ceremony, or "high" / "xhigh" for highly clinical talks
-        // where ambiguous terminology disambiguation matters most. Each
-        // bump roughly doubles latency but materially improves context
-        // grounding per OpenAI's Audio MultiChallenge numbers.
         this.reasoningEffort = parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT)
     }
 
@@ -156,7 +165,11 @@ export class Translator {
 
         const completion = await this.openai.chat.completions.create({
             model: this.model,
-            reasoning_effort: this.reasoningEffort,
+            // Only attach reasoning_effort when the model actually supports it.
+            // Non-reasoning models like gpt-4o-mini reject unknown parameters.
+            ...(isReasoningModel(this.model) && this.reasoningEffort
+                ? { reasoning_effort: this.reasoningEffort }
+                : {}),
             temperature: 0,
             max_tokens: 1000,
             response_format: { type: "json_object" },

@@ -39,7 +39,7 @@ app.get("/health", (_req, res) => {
     res.json({
         status: "ok",
         sttModel: process.env.OPENAI_STT_MODEL || "gpt-realtime-whisper",
-        reasoningModel: process.env.OPENAI_REASONING_MODEL || "gpt-realtime-2",
+        translationModel: process.env.OPENAI_REASONING_MODEL || "gpt-4o-mini",
     })
 })
 
@@ -104,6 +104,6 @@ io.on("connection", (socket) => {
 httpServer.listen(PORT, () => {
     // eslint-disable-next-line no-console
     console.log(
-        `[relay] Listening on :${PORT} — STT=${process.env.OPENAI_STT_MODEL || "gpt-realtime-whisper"}, Reasoning=${process.env.OPENAI_REASONING_MODEL || "gpt-realtime-2"}`,
+        `[relay] Listening on :${PORT} — STT=${process.env.OPENAI_STT_MODEL || "gpt-realtime-whisper"}, Translation=${process.env.OPENAI_REASONING_MODEL || "gpt-4o-mini"}`,
     )
 })

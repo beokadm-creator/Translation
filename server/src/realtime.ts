@@ -25,8 +25,11 @@ import { loadPersona, mergePersona } from "./persona.js"
 import { Translator, type PersonaConfig, type TranslateResult } from "./translate.js"
 
 const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
+// The actual upgrade is the STT side (gpt-realtime-whisper). Translation
+// stays on the model that was working in production. Both are env-overridable
+// for instant rollback or experimentation.
 const STT_MODEL = process.env.OPENAI_STT_MODEL || "gpt-realtime-whisper"
-const REASONING_MODEL = process.env.OPENAI_REASONING_MODEL || "gpt-realtime-2"
+const TRANSLATION_MODEL = process.env.OPENAI_REASONING_MODEL || "gpt-4o-mini"
 
 const DENTAL_PROMPT_KO = "임플란트, 상악동, 골이식, 픽스처, 어버트먼트, 크라운, 보철"
 const DENTAL_PROMPT_EN = "Implant, Sinus, Bone Graft, Fixture, Abutment, Crown"
@@ -79,7 +82,7 @@ export class RealtimeRelaySession {
         this.init = init
         this.apiKey = apiKey
         this.openai = new OpenAI({ apiKey })
-        this.translator = new Translator(this.openai, REASONING_MODEL)
+        this.translator = new Translator(this.openai, TRANSLATION_MODEL)
     }
 
     async start(): Promise<void> {
