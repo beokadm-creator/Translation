@@ -17,11 +17,13 @@ import * as admin from "firebase-admin"
 import { RealtimeRelaySession } from "./realtime.js"
 import type { PersonaConfig } from "./translate.js"
 
-if (!admin.apps.length) {
+try {
     admin.initializeApp({
         credential: admin.credential.applicationDefault(),
         databaseURL: process.env.FIREBASE_DATABASE_URL,
     })
+} catch {
+    // already initialized (dev hot-reload)
 }
 
 const PORT = Number(process.env.PORT || 3000)
