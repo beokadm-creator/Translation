@@ -7,7 +7,22 @@ import TextItem from './TextItem';
 import { useProjectStream } from '../hooks/useProjectStream';
 import HealthDashboard from './HealthDashboard';
 import type { StreamSegment } from '../types';
+import {
+    useRealtimeRelay,
+    createPcm16Pipeline,
+    type RelayInit,
+} from '../hooks/useRealtimeRelay';
 
+
+interface SessionPersona {
+    enabled: boolean;
+    basePromptKo?: string;
+    basePromptEn?: string;
+    basePromptJa?: string;
+    basePromptZh?: string;
+    customInstructions?: string;
+    medicalTerms?: string;
+}
 
 interface Session {
     id: string;
@@ -20,6 +35,8 @@ interface Session {
     orderIndex?: number;
     sourceLanguage?: 'ko' | 'en' | 'ja' | 'zh';
     targetLanguages?: string[];
+    /** Optional per-session persona override (falls back to project default). */
+    persona?: SessionPersona;
 }
 
 const LANG_FLAGS: Record<string, string> = {
@@ -27,6 +44,12 @@ const LANG_FLAGS: Record<string, string> = {
 };
 
 const CF_BASE = import.meta.env.VITE_CF_BASE_URL || 'https://us-central1-translation-comm.cloudfunctions.net';
+
+// Phase 3 Realtime relay (gpt-realtime-whisper + gpt-realtime-2). When this
+// env var is set the admin can opt into the streaming path; otherwise the
+// existing 3-second chunked HTTP path stays in effect (zero behavior change).
+const RELAY_URL = import.meta.env.VITE_RELAY_URL as string | undefined;
+const REALTIME_ENABLED = Boolean(RELAY_URL);
 
 const AdminDashboard: React.FC = () => {
     const { projectId } = useParams<{ projectId: string }>();
@@ -236,6 +259,56 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     const chunkMaxDbRef = useRef<number>(-100);
     const forceFlushNextChunkRef = useRef<boolean>(false);
     const [sourceType, setSourceType] = useState<'mic' | 'system'>('mic');
+    const [useRealtime, setUseRealtime] = useState<boolean>(REALTIME_ENABLED);
+
+    // Realtime relay handles (Phase 3). The hook is always mounted; it stays
+    // idle until connect() is called. The PCM worklet node is held in a ref so
+    // stopRecording can disconnect it cleanly.
+    const realtimeWorkletRef = useRef<AudioWorkletNode | null>(null);
+    const realtime = useRealtimeRelay({
+        relayUrl: RELAY_URL || '',
+        onError: (msg) => {
+            console.warn('[Relay] error:', msg);
+            setStatus('error');
+        },
+    });
+
+    // Resolve which persona will actually drive STT + translation right now,
+    // mirroring the server-side two-tier lookup (session override → project
+    // default). Used for the visible "Active Persona" badge so admins can
+    // confirm at a glance that, e.g., the opening-ceremony override is live.
+    interface ActivePersonaInfo {
+        source: 'session' | 'project' | 'none';
+        label: string;
+        medicalTermsCount: number;
+        hasCustomInstructions: boolean;
+    }
+    const activePersonaInfo: ActivePersonaInfo = useMemo(() => {
+        const activeSession = sessions.find((s) => s.id === activeSessionId);
+        const sessionPersona = activeSession?.persona;
+        const project = projectSettings.persona;
+
+        const countTerms = (s?: string): number =>
+            s ? s.split(',').map((x) => x.trim()).filter(Boolean).length : 0;
+
+        if (sessionPersona?.enabled) {
+            return {
+                source: 'session',
+                label: activeSession?.speaker || 'Session Override',
+                medicalTermsCount: countTerms(sessionPersona.medicalTerms),
+                hasCustomInstructions: Boolean(sessionPersona.customInstructions),
+            };
+        }
+        if (project?.enabled) {
+            return {
+                source: 'project',
+                label: 'Project Default',
+                medicalTermsCount: countTerms(project.medicalTerms),
+                hasCustomInstructions: Boolean(project.customInstructions),
+            };
+        }
+        return { source: 'none', label: 'Off', medicalTermsCount: 0, hasCustomInstructions: false };
+    }, [sessions, activeSessionId, projectSettings.persona]);
 
     // --- Isolation View State ---
     const [viewMode, setViewMode] = useState<'live' | 'archive'>('live');
@@ -650,6 +723,56 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 mic = await navigator.mediaDevices.getUserMedia({ audio: true });
             }
             setStream(mic);
+
+            // ── Phase 3: Realtime streaming path ─────────────────────────────
+            if (useRealtime && RELAY_URL) {
+                const activeSession = sessions.find((s) => s.id === activeSessionId);
+                const sourceLang = (liveSourceLangOverrideRef.current || activeSession?.sourceLanguage || 'ko') as 'ko' | 'en' | 'ja' | 'zh';
+                const speakerTerms = [activeSession?.speaker, activeSession?.affiliation, activeSession?.topic].filter(Boolean).join(', ');
+                const customKeywords = [activeSession?.keywords, speakerTerms].filter(Boolean).join(', ');
+                const sessionContext = `Topic: ${activeSession?.topic || ''}, Keywords: ${activeSession?.keywords || ''}, Speaker: ${activeSession?.speaker || ''}, Affiliation: ${activeSession?.affiliation || ''}`;
+
+                const init: RelayInit = {
+                    projectId: activeProjectId,
+                    activeSessionId: activeSessionId || '',
+                    sourceLang,
+                    sessionContext,
+                    customKeywords,
+                    targetLanguages: projectSettings.targetLanguages || ['ko', 'en', 'ja'],
+                    // Persona is configured by the admin in Settings; the server
+                    // additionally re-reads RTDB as a defense-in-depth fallback.
+                    persona: projectSettings.persona ? {
+                        enabled: projectSettings.persona.enabled,
+                        basePromptKo: projectSettings.persona.basePromptKo,
+                        basePromptEn: projectSettings.persona.basePromptEn,
+                        basePromptJa: projectSettings.persona.basePromptJa,
+                        basePromptZh: projectSettings.persona.basePromptZh,
+                        customInstructions: projectSettings.persona.customInstructions,
+                        medicalTerms: projectSettings.persona.medicalTerms,
+                    } : null,
+                    sourceLabel: 'admin',
+                };
+
+                await realtime.connect(init);
+                const { audioContext, workletNode } = await createPcm16Pipeline(mic);
+                audioContextRef.current = audioContext;
+                realtimeWorkletRef.current = workletNode;
+
+                workletNode.port.onmessage = (e: MessageEvent<{ type: string; pcm?: ArrayBuffer; value?: number }>) => {
+                    const data = e.data;
+                    if (data.type === 'frame' && data.pcm) {
+                        realtime.sendPcmFrame(data.pcm);
+                    } else if (data.type === 'rms' && typeof data.value === 'number') {
+                        const db = 20 * Math.log10(Math.max(data.value, 1e-8));
+                        setCurrentDb(db);
+                    }
+                };
+
+                setIsRecording(true);
+                setStatus('streaming');
+                return;
+            }
+            // ── Legacy chunked HTTP path (kept for instant rollback) ─────────
             const ac = new (window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)();
             audioContextRef.current = ac;
             const source = ac.createMediaStreamSource(mic);
@@ -748,13 +871,23 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
         if (mr2Ref.current?.state === 'recording') mr2Ref.current.stop();
         switchRecordersRef.current = null;
         liveSourceLangOverrideRef.current = null;
+
+        // Phase 3: tear down Realtime path if active.
+        if (realtimeWorkletRef.current) {
+            try { realtimeWorkletRef.current.port.onmessage = null; } catch { /* noop */ }
+            try { realtimeWorkletRef.current.disconnect(); } catch { /* noop */ }
+            realtimeWorkletRef.current = null;
+            realtime.forceFlush();
+            realtime.disconnect();
+        }
+
         stream?.getTracks().forEach(t => t.stop());
         audioContextRef.current?.close();
         if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
         setIsRecording(false);
         setStatus("idle");
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [stream]);
+    }, [stream, realtime]);
 
     return (
         <div className="flex h-screen bg-[#0a0a0a] text-gray-200 overflow-hidden font-sans selection:bg-blue-500/30">
@@ -960,6 +1093,141 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                     <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Keywords <span className="normal-case tracking-normal text-gray-600 ml-1">(Comma separated)</span></label>
                                     <input className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-1.5 text-sm focus:border-white/30 outline-none text-gray-100 placeholder-gray-600 transition-colors" placeholder="e.g. Implant, Sinus, Bone Graft" value={formData.keywords || ''} onChange={e => setFormData({ ...formData, keywords: e.target.value })} />
                                 </div>
+
+                                {/* Per-Session Persona Override — for sessions that need a different
+                                    AI context than the project default (e.g. opening ceremony with
+                                    no medical jargon, or a non-clinical talk inside a clinical
+                                    conference). When the checkbox is off, the project-level persona
+                                    from Settings → AI Persona is used instead. */}
+                                <div className="bg-[#0d0d0d] border border-white/5 rounded-lg p-4 space-y-3">
+                                    <div className="flex items-start gap-3">
+                                        <input
+                                            type="checkbox"
+                                            id="chkSessionPersona"
+                                            checked={Boolean(formData.persona?.enabled)}
+                                            onChange={e => setFormData({
+                                                ...formData,
+                                                persona: {
+                                                    enabled: e.target.checked,
+                                                    basePromptKo: formData.persona?.basePromptKo ?? '',
+                                                    basePromptEn: formData.persona?.basePromptEn ?? '',
+                                                    basePromptJa: formData.persona?.basePromptJa ?? '',
+                                                    basePromptZh: formData.persona?.basePromptZh ?? '',
+                                                    customInstructions: formData.persona?.customInstructions ?? '',
+                                                    medicalTerms: formData.persona?.medicalTerms ?? '',
+                                                },
+                                            })}
+                                            className="mt-0.5 w-4 h-4 rounded border-gray-600 bg-[#111111] accent-blue-500"
+                                        />
+                                        <div className="flex-1">
+                                            <label htmlFor="chkSessionPersona" className="text-sm text-gray-200 cursor-pointer font-medium">
+                                                Override Persona for this Session
+                                            </label>
+                                            <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">
+                                                Use a session-specific persona (e.g. <span className="text-gray-400">"Opening Ceremony — no medical terms"</span>) instead of the project default.
+                                                Falls back to project-level persona when off.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {formData.persona?.enabled && (
+                                        <div className="space-y-3 pl-7 border-l border-blue-500/20 ml-1.5">
+                                            <div className="space-y-1.5">
+                                                <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">
+                                                    Custom Instructions
+                                                    <span className="normal-case tracking-normal text-gray-600 ml-1">(applied to translation refinement)</span>
+                                                </label>
+                                                <textarea
+                                                    className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-2 text-sm focus:border-blue-500/30 outline-none text-gray-100 placeholder-gray-600 transition-colors resize-none h-20 leading-relaxed"
+                                                    placeholder='e.g. "This is an opening ceremony. Use formal greeting tone. Do not assume medical content."'
+                                                    maxLength={500}
+                                                    value={formData.persona.customInstructions || ''}
+                                                    onChange={e => setFormData({
+                                                        ...formData,
+                                                        persona: { ...formData.persona!, customInstructions: e.target.value },
+                                                    })}
+                                                />
+                                                <p className="text-[9px] text-gray-600 text-right">
+                                                    {(formData.persona.customInstructions || '').length} / 500
+                                                </p>
+                                            </div>
+
+                                            <div className="space-y-1.5">
+                                                <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">
+                                                    Medical Terms
+                                                    <span className="normal-case tracking-normal text-gray-600 ml-1">(comma separated)</span>
+                                                </label>
+                                                <textarea
+                                                    className="w-full bg-[#111111] border border-white/10 rounded-md px-3 py-2 text-sm focus:border-blue-500/30 outline-none text-gray-100 placeholder-gray-600 transition-colors resize-none h-20 leading-relaxed font-mono text-xs"
+                                                    placeholder="Leave empty for opening ceremony / non-clinical sessions"
+                                                    maxLength={1000}
+                                                    value={formData.persona.medicalTerms || ''}
+                                                    onChange={e => setFormData({
+                                                        ...formData,
+                                                        persona: { ...formData.persona!, medicalTerms: e.target.value },
+                                                    })}
+                                                />
+                                                <p className="text-[9px] text-gray-600 text-right">
+                                                    {(formData.persona.medicalTerms || '').length} / 1000
+                                                </p>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <div className="space-y-1.5">
+                                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Base Prompt (KO)</label>
+                                                    <input
+                                                        className="w-full bg-[#111111] border border-white/10 rounded-md px-2.5 py-1.5 text-xs focus:border-blue-500/30 outline-none text-gray-100 placeholder-gray-600 transition-colors"
+                                                        placeholder="STT prompt for Korean"
+                                                        value={formData.persona.basePromptKo || ''}
+                                                        onChange={e => setFormData({
+                                                            ...formData,
+                                                            persona: { ...formData.persona!, basePromptKo: e.target.value },
+                                                        })}
+                                                    />
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Base Prompt (EN)</label>
+                                                    <input
+                                                        className="w-full bg-[#111111] border border-white/10 rounded-md px-2.5 py-1.5 text-xs focus:border-blue-500/30 outline-none text-gray-100 placeholder-gray-600 transition-colors"
+                                                        placeholder="STT prompt for English"
+                                                        value={formData.persona.basePromptEn || ''}
+                                                        onChange={e => setFormData({
+                                                            ...formData,
+                                                            persona: { ...formData.persona!, basePromptEn: e.target.value },
+                                                        })}
+                                                    />
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Base Prompt (JA)</label>
+                                                    <input
+                                                        className="w-full bg-[#111111] border border-white/10 rounded-md px-2.5 py-1.5 text-xs focus:border-blue-500/30 outline-none text-gray-100 placeholder-gray-600 transition-colors"
+                                                        placeholder="STT prompt for Japanese"
+                                                        value={formData.persona.basePromptJa || ''}
+                                                        onChange={e => setFormData({
+                                                            ...formData,
+                                                            persona: { ...formData.persona!, basePromptJa: e.target.value },
+                                                        })}
+                                                    />
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <label className="block text-[10px] text-gray-500 uppercase tracking-wider font-medium">Base Prompt (ZH)</label>
+                                                    <input
+                                                        className="w-full bg-[#111111] border border-white/10 rounded-md px-2.5 py-1.5 text-xs focus:border-blue-500/30 outline-none text-gray-100 placeholder-gray-600 transition-colors"
+                                                        placeholder="STT prompt for Chinese"
+                                                        value={formData.persona.basePromptZh || ''}
+                                                        onChange={e => setFormData({
+                                                            ...formData,
+                                                            persona: { ...formData.persona!, basePromptZh: e.target.value },
+                                                        })}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <p className="text-[10px] text-blue-400/80 leading-relaxed">
+                                                Tip: For an opening ceremony, leave Medical Terms empty and add Custom Instructions like "Formal greeting tone, no medical jargon."
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     ) : (
@@ -987,7 +1255,30 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                             </div>
                             <HealthDashboard projectId={activeProjectId} />
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-3">
+                            {/* Active Persona — clear indicator of which persona STT/translation is using right now. */}
+                            <div
+                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[10px] font-medium ${
+                                    activePersonaInfo.source === 'session'
+                                        ? 'bg-blue-500/10 border-blue-500/20 text-blue-400'
+                                        : activePersonaInfo.source === 'project'
+                                            ? 'bg-white/5 border-white/10 text-gray-300'
+                                            : 'bg-white/5 border-white/10 text-gray-500'
+                                }`}
+                                title={
+                                    activePersonaInfo.source === 'session'
+                                        ? 'Session override is active — supersedes the project default'
+                                        : activePersonaInfo.source === 'project'
+                                            ? 'No session override — using project default persona'
+                                            : 'Persona disabled — only base medical prompt is used'
+                                }
+                            >
+                                <span className="uppercase tracking-widest text-gray-500">Persona</span>
+                                <span>{activePersonaInfo.source === 'none' ? 'Off' : activePersonaInfo.label}</span>
+                                {activePersonaInfo.medicalTermsCount > 0 && (
+                                    <span className="text-gray-500">· {activePersonaInfo.medicalTermsCount} terms</span>
+                                )}
+                            </div>
                             <span className="text-[10px] text-gray-600 uppercase tracking-widest">Status</span>
                             <span className={`text-xs font-medium font-mono ${status === 'recording' || status === 'streaming' ? 'text-green-400' : 'text-gray-500'}`}>{status}</span>
                         </div>
@@ -1231,6 +1522,24 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                         The server reassembles context automatically for optimal translation quality.
                                     </p>
                                 </div>
+
+                                {RELAY_URL && (
+                                    <div className="flex items-start gap-3 pt-3 border-t border-white/5">
+                                        <input type="checkbox" id="chkRealtime"
+                                            checked={useRealtime}
+                                            onChange={e => setUseRealtime(e.target.checked)}
+                                            disabled={isRecording}
+                                            className="mt-0.5 w-4 h-4 rounded border-gray-600 bg-[#111111] accent-white" />
+                                        <div>
+                                            <label htmlFor="chkRealtime" className="text-sm text-gray-300 cursor-pointer font-medium">
+                                                Realtime Streaming Mode <span className="text-[10px] text-blue-400 font-mono ml-1">(gpt-realtime-whisper + gpt-realtime-2)</span>
+                                            </label>
+                                            <p className="text-[10px] text-gray-500 mt-0.5">
+                                                Stream audio over WebSocket to the OpenAI Realtime API. Sub-second partial transcripts, GPT-5-class refinement, no chunk buffering. Falls back to the legacy 2.5s HTTP path when off.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div className="flex items-start gap-3 pt-3 border-t border-white/5">
                                     <input type="checkbox" id="chkHideRaw"

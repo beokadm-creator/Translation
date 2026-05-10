@@ -66,6 +66,24 @@ export interface Session {
   startTime: string; // HH:MM
   orderIndex?: number;
   sourceLanguage?: 'ko' | 'en' | 'ja' | 'zh';
+  /**
+   * Optional per-session persona override. When `enabled` is true, this
+   * persona supersedes the project-level default for STT prompting and
+   * translation refinement. Use this to swap personas between, e.g., an
+   * opening ceremony (no medical terms) and a clinical research session
+   * (full dental dictionary) inside the same conference.
+   */
+  persona?: SessionPersonaOverride;
+}
+
+export interface SessionPersonaOverride {
+  enabled: boolean;
+  basePromptKo?: string;
+  basePromptEn?: string;
+  basePromptJa?: string;
+  basePromptZh?: string;
+  customInstructions?: string;
+  medicalTerms?: string;
 }
 
 export interface StreamSegment {

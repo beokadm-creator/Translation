@@ -431,11 +431,30 @@ interface PersonaConfig {
 // 메모리 캐시 (key: projectId, value: { data: PersonaConfig, expiresAt: number })
 const personaCache = new Map<string, { data: PersonaConfig, expiresAt: number }>();
 
-const loadPersona = async (projectId: string): Promise<PersonaConfig | null> => {
+// Two-tier persona resolution:
+//   1. Per-session override at projects/{p}/sessions/{s}/persona (if enabled)
+//   2. Project default at projects/{p}/settings/persona
+// Cache key includes sessionId so opening-ceremony vs. clinical-research
+// sessions don't shadow each other in the 5-minute cache window.
+const readPersonaPath = async (path: string): Promise<PersonaConfig | null> => {
+    try {
+        const snap = await admin.database().ref(path).get();
+        if (!snap.exists()) return null;
+        return snap.val() as PersonaConfig;
+    } catch (err) {
+        functions.logger.warn(`Failed to read persona at ${path}`, { err: String(err) });
+        return null;
+    }
+}
+
+const loadPersona = async (
+    projectId: string,
+    sessionId?: string,
+): Promise<PersonaConfig | null> => {
     if (!projectId) return null;
-    
+
     const now = Date.now();
-    
+
     // 정리(eviction) 로직: 만료된 항목 삭제
     if (personaCache.size > 100) {
         for (const [key, value] of personaCache.entries()) {
@@ -443,30 +462,31 @@ const loadPersona = async (projectId: string): Promise<PersonaConfig | null> => 
                 personaCache.delete(key);
             }
         }
-        // 여전히 크면 무작위(첫번째) 삭제
         if (personaCache.size > 100) {
             const firstKey = personaCache.keys().next().value;
             if (firstKey) personaCache.delete(firstKey);
         }
     }
 
-    const cached = personaCache.get(projectId);
+    const cacheKey = sessionId ? `${projectId}::${sessionId}` : projectId;
+    const cached = personaCache.get(cacheKey);
     if (cached && cached.expiresAt > now) {
         return cached.data;
     }
 
-    try {
-        const snap = await admin.database().ref(`projects/${projectId}/settings/persona`).get();
-        if (snap.exists()) {
-            const data = snap.val() as PersonaConfig;
-            // 5분(300000ms) 캐싱
-            personaCache.set(projectId, { data, expiresAt: now + 300000 });
-            return data;
-        }
-    } catch (err) {
-        functions.logger.warn(`Failed to load persona for ${projectId}`, { err: String(err) });
+    let resolved: PersonaConfig | null = null;
+    if (sessionId) {
+        const sessionPersona = await readPersonaPath(
+            `projects/${projectId}/sessions/${sessionId}/persona`,
+        );
+        if (sessionPersona && sessionPersona.enabled) resolved = sessionPersona;
     }
-    return null;
+    if (!resolved) {
+        resolved = await readPersonaPath(`projects/${projectId}/settings/persona`);
+    }
+
+    personaCache.set(cacheKey, { data: resolved as PersonaConfig, expiresAt: now + 300000 });
+    return resolved;
 }
 
 // ── OpenAI 클라이언트 ─────────────────────────────────────────────────────────
@@ -555,7 +575,9 @@ export const processAudio = functions
         const primaryTrans = (req.headers['x-trans-primary'] || "openai").toString();
         const fallbackTrans = (req.headers['x-trans-fallback'] || "claude").toString();
 
-        const persona = await loadPersona(projectId);
+        // Pass activeSessionId so per-session persona overrides (e.g. opening
+        // ceremony vs. clinical research) take precedence over the project default.
+        const persona = await loadPersona(projectId, activeSessionId || undefined);
 
         // ── STEP 1: AI STT ────────────────────────────────────────────
             let basePrompt = "";

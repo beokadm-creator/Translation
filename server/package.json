@@ -1,12 +1,16 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Realtime relay between admin clients and the OpenAI Realtime API (gpt-realtime-whisper + gpt-realtime-2).",
+  "type": "module",
+  "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "dev": "ts-node-dev --respawn --transpile-only --esm src/index.ts",
+    "start": "node dist/index.js"
   },
-  "keywords": [],
+  "keywords": ["realtime", "openai", "gpt-realtime", "whisper", "translation"],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -15,12 +19,14 @@
     "express": "^5.2.1",
     "firebase-admin": "^13.8.0",
     "openai": "^6.34.0",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^25.6.0",
+    "@types/ws": "^8.5.13",
     "ts-node-dev": "^2.0.0",
     "typescript": "^6.0.2"
   }
