@@ -43,9 +43,16 @@ const LANG_FLAGS: Record<string, string> = {
     ko: '🇰🇷', en: '🇺🇸', ja: '🇯🇵', zh: '🇨🇳'
 };
 
-const CF_BASE = import.meta.env.VITE_CF_BASE_URL || 'https://us-central1-translation-comm.cloudfunctions.net';
+const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined;
+const FUNCTIONS_REGION = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1';
+const CF_BASE = import.meta.env.VITE_CF_BASE_URL || (FIREBASE_PROJECT_ID ? `https://${FUNCTIONS_REGION}-${FIREBASE_PROJECT_ID}.cloudfunctions.net` : '');
 
-// Phase 3 Realtime relay (gpt-realtime-whisper + gpt-realtime-2). When this
+const OPENAI_STT_LABEL = import.meta.env.VITE_OPENAI_STT_LABEL || 'gpt-4o-transcribe';
+const OPENAI_TRANSLATION_LABEL = import.meta.env.VITE_OPENAI_TRANSLATION_LABEL || 'gpt-4.1-mini';
+const REALTIME_STT_LABEL = import.meta.env.VITE_REALTIME_STT_LABEL || 'gpt-realtime-whisper';
+const REALTIME_TRANSLATION_LABEL = import.meta.env.VITE_REALTIME_TRANSLATION_LABEL || OPENAI_TRANSLATION_LABEL;
+
+// Phase 3 Realtime relay. When this
 // env var is set the admin can opt into the streaming path; otherwise the
 // existing 3-second chunked HTTP path stays in effect (zero behavior change).
 const RELAY_URL = import.meta.env.VITE_RELAY_URL as string | undefined;
@@ -79,10 +86,10 @@ const AdminDashboard: React.FC = () => {
         typingSpeed: number;
         bottomOffset: number;
         hideRaw: boolean;
-        primarySTT: 'openai' | 'deepgram';
-        fallbackSTT: 'openai' | 'deepgram';
-        primaryTrans: 'openai' | 'claude';
-        fallbackTrans: 'openai' | 'claude';
+        primarySTT: 'openai';
+        fallbackSTT: 'openai';
+        primaryTrans: 'openai';
+        fallbackTrans: 'openai';
         targetLanguages?: string[];
         persona?: {
             enabled: boolean;
@@ -108,8 +115,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     displayStyle: 'youtube', letterSpacing: 0, maxLines: 2, lineHeight: 1.5,
     fontFamily: 'sans-serif', typingSpeed: 35, bottomOffset: 60,
     hideRaw: true,
-    primarySTT: 'openai', fallbackSTT: 'deepgram',
-    primaryTrans: 'openai', fallbackTrans: 'claude',
+    primarySTT: 'openai', fallbackSTT: 'openai',
+    primaryTrans: 'openai', fallbackTrans: 'openai',
     targetLanguages: ['ko', 'en', 'ja', 'zh'],
     persona: {
         enabled: false,
@@ -133,10 +140,10 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 ...prev,
                 ...(val.overlay || {}),
                 hideRaw: val.hideRaw !== undefined ? val.hideRaw : true,
-                primarySTT: val.ai?.primarySTT || 'openai',
-                fallbackSTT: val.ai?.fallbackSTT || 'deepgram',
-                primaryTrans: val.ai?.primaryTrans || 'openai',
-                fallbackTrans: val.ai?.fallbackTrans || 'claude',
+                primarySTT: 'openai',
+                fallbackSTT: 'openai',
+                primaryTrans: 'openai',
+                fallbackTrans: 'openai',
                 targetLanguages: val.targetLanguages || ['ko', 'en', 'ja', 'zh'],
                 chunk: val.chunk || { minLength: 35, timeoutMs: 5000, sentenceEnd: true },
                 persona: val.persona || {
@@ -260,6 +267,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     const forceFlushNextChunkRef = useRef<boolean>(false);
     const [sourceType, setSourceType] = useState<'mic' | 'system'>('mic');
     const [useRealtime, setUseRealtime] = useState<boolean>(REALTIME_ENABLED);
+    const [segmentsMap, setSegmentsMap] = useState<Record<string, StreamSegment>>({});
 
     // Realtime relay handles (Phase 3). The hook is always mounted; it stays
     // idle until connect() is called. The PCM worklet node is held in a ref so
@@ -270,6 +278,33 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
         onError: (msg) => {
             console.warn('[Relay] error:', msg);
             setStatus('error');
+        },
+        onPartial: (segmentId, text) => {
+            setSegmentsMap(prev => ({
+                ...prev,
+                [segmentId]: {
+                    ...prev[segmentId],
+                    original: text,
+                    refined: text,
+                    status: 'translating',
+                    timestamp: prev[segmentId]?.timestamp || Date.now(),
+                    sessionId: activeSessionId,
+                    sourceLabel: 'admin',
+                },
+            }));
+        },
+        onFinal: (segmentId, text) => {
+            setSegmentsMap(prev => {
+                if (!prev[segmentId]) return prev;
+                return {
+                    ...prev,
+                    [segmentId]: {
+                        ...prev[segmentId],
+                        refined: text,
+                        status: 'final',
+                    },
+                };
+            });
         },
     });
 
@@ -315,9 +350,6 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
 
     // Hook always runs, but we ignore its data if not in live mode
     const { streamData } = useProjectStream(activeProjectId, { subscribe: true });
-
-    const [segmentsMap, setSegmentsMap] = useState<Record<string, StreamSegment>>({});
-
 
     // --- 1. CMS Logic ---
     useEffect(() => {
@@ -513,7 +545,20 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             return;
         }
         try {
-            await set(ref(database, `projects/${activeProjectId}/sessions/${s.id}`), null);
+            const token = await auth.currentUser?.getIdToken();
+            if (!token) throw new Error('Not authenticated');
+            const response = await fetch(`${CF_BASE}/deleteSessionAPI`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ projectId: activeProjectId, sessionId: s.id }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.success === false) {
+                throw new Error(data.error || data.message || `HTTP ${response.status}`);
+            }
             if (selectedSessionId === s.id) setSelectedSessionId(null);
         } catch (e) {
             console.error("삭제 실패:", e);
@@ -738,7 +783,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                     sourceLang,
                     sessionContext,
                     customKeywords,
-                    targetLanguages: projectSettings.targetLanguages || ['ko', 'en', 'ja'],
+                    targetLanguages: projectSettings.targetLanguages || ['ko', 'en', 'ja', 'zh'],
                     // Persona is configured by the admin in Settings; the server
                     // additionally re-reads RTDB as a defense-in-depth fallback.
                     persona: projectSettings.persona ? {
@@ -1277,7 +1322,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                         ? 'Session override is active — supersedes the project default'
                                         : activePersonaInfo.source === 'project'
                                             ? 'No session override — using project default persona'
-                                            : 'Persona disabled — only base medical prompt is used'
+                                            : 'Persona disabled — only session keywords and source language are used'
                                 }
                             >
                                 <span className="uppercase tracking-widest text-gray-500">Persona</span>
@@ -1352,8 +1397,8 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                         <div className="flex justify-between items-center border-b border-white/5 pb-4">
                             <h2 className="text-base font-semibold tracking-tight text-gray-100">Project Settings</h2>
                             <div className="flex gap-2 text-[10px]">
-                                <span className="bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-1 rounded-md font-mono">STT: {projectSettings.primarySTT === 'deepgram' ? 'Deepgram Nova-3' : 'gpt-4o-transcribe'}</span>
-                                <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded-md font-mono">Trans: {projectSettings.primaryTrans === 'claude' ? 'Claude Haiku 4.5' : 'gpt-4o-mini'}</span>
+                                <span className="bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-1 rounded-md font-mono">STT: {OPENAI_STT_LABEL}</span>
+                                <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded-md font-mono">Trans: {OPENAI_TRANSLATION_LABEL}</span>
                             </div>
                         </div>
 
@@ -1477,10 +1522,9 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                 <select
                                                     className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs font-medium text-green-400 outline-none focus:border-white/20"
                                                     value={projectSettings.primarySTT}
-                                                    onChange={e => setProjectSettings({...projectSettings, primarySTT: e.target.value as 'openai' | 'deepgram'})}
+                                                    onChange={() => setProjectSettings({...projectSettings, primarySTT: 'openai'})}
                                                 >
-                                                    <option value="openai">OpenAI (gpt-4o-transcribe)</option>
-                                                    <option value="deepgram">Deepgram (Nova-3 Medical)</option>
+                                                    <option value="openai">OpenAI ({OPENAI_STT_LABEL})</option>
                                                 </select>
                                             </div>
                                             <div className="space-y-1.5">
@@ -1488,10 +1532,9 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                 <select
                                                     className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs font-medium text-gray-400 outline-none focus:border-white/20"
                                                     value={projectSettings.fallbackSTT}
-                                                    onChange={e => setProjectSettings({...projectSettings, fallbackSTT: e.target.value as 'openai' | 'deepgram'})}
+                                                    onChange={() => setProjectSettings({...projectSettings, fallbackSTT: 'openai'})}
                                                 >
-                                                    <option value="deepgram">Deepgram (Nova-3 Medical)</option>
-                                                    <option value="openai">OpenAI (gpt-4o-transcribe)</option>
+                                                    <option value="openai">OpenAI ({OPENAI_STT_LABEL})</option>
                                                 </select>
                                             </div>
                                         </div>
@@ -1502,10 +1545,9 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                 <select
                                                     className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs font-medium text-blue-400 outline-none focus:border-white/20"
                                                     value={projectSettings.primaryTrans}
-                                                    onChange={e => setProjectSettings({...projectSettings, primaryTrans: e.target.value as 'openai' | 'claude'})}
+                                                    onChange={() => setProjectSettings({...projectSettings, primaryTrans: 'openai'})}
                                                 >
-                                                    <option value="openai">OpenAI (gpt-4o-mini)</option>
-                                                    <option value="claude">Anthropic (Claude Haiku 4.5)</option>
+                                                    <option value="openai">OpenAI ({OPENAI_TRANSLATION_LABEL})</option>
                                                 </select>
                                             </div>
                                             <div className="space-y-1.5">
@@ -1513,10 +1555,9 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                                 <select
                                                     className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs font-medium text-gray-400 outline-none focus:border-white/20"
                                                     value={projectSettings.fallbackTrans}
-                                                    onChange={e => setProjectSettings({...projectSettings, fallbackTrans: e.target.value as 'openai' | 'claude'})}
+                                                    onChange={() => setProjectSettings({...projectSettings, fallbackTrans: 'openai'})}
                                                 >
-                                                    <option value="claude">Anthropic (Claude Haiku 4.5)</option>
-                                                    <option value="openai">OpenAI (gpt-4o-mini)</option>
+                                                    <option value="openai">OpenAI ({OPENAI_TRANSLATION_LABEL})</option>
                                                 </select>
                                             </div>
                                         </div>
@@ -1540,10 +1581,10 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                             className="mt-0.5 w-4 h-4 rounded border-gray-600 bg-[#111111] accent-white" />
                                         <div>
                                             <label htmlFor="chkRealtime" className="text-sm text-gray-300 cursor-pointer font-medium">
-                                                Realtime Streaming Mode <span className="text-[10px] text-blue-400 font-mono ml-1">(gpt-realtime-whisper + gpt-realtime-2)</span>
+                                                Realtime Streaming Mode <span className="text-[10px] text-blue-400 font-mono ml-1">({REALTIME_STT_LABEL} + {REALTIME_TRANSLATION_LABEL})</span>
                                             </label>
                                             <p className="text-[10px] text-gray-500 mt-0.5">
-                                                Stream audio over WebSocket to the OpenAI Realtime API. Sub-second partial transcripts, GPT-5-class refinement, no chunk buffering. Falls back to the legacy 2.5s HTTP path when off.
+                                                Stream audio over WebSocket to the OpenAI Realtime API. Sub-second partial transcripts with context-buffered {REALTIME_TRANSLATION_LABEL} translation. Falls back to the legacy 2.5s HTTP path when off.
                                             </p>
                                         </div>
                                     </div>

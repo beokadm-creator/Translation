@@ -1,4 +1,4 @@
-// Refinement + ko/en/ja translation via gpt-realtime-2 (text mode).
+// Refinement + ko/en/ja translation via gpt-4.1-mini.
 //
 // We deliberately keep this layer separate from the streaming STT path. The
 // realtime relay calls translate() once per "final" transcript segment and
@@ -43,7 +43,7 @@ const LANG_NAME: Record<string, string> = {
 }
 
 const SYSTEM_PROMPT =
-    "You refine live medical speech-to-text output and produce translations in strict JSON. Do not hallucinate or create fake text."
+    "You first refine live speech-to-text using persona/context, then translate the refined text in strict JSON. Do not hallucinate or create fake text."
 
 function buildPersonaBlock(persona: PersonaConfig | null): string {
     if (!persona || !persona.enabled) return ""
@@ -51,26 +51,27 @@ function buildPersonaBlock(persona: PersonaConfig | null): string {
     if (persona.customInstructions) lines.push(`Instructions: ${persona.customInstructions}`)
     if (persona.medicalTerms) lines.push(`Medical Dictionary: ${persona.medicalTerms}`)
     if (lines.length === 0) return ""
-    return "\n[Persona Context]\n" + lines.join("\n")
+    return "\n[Persona Context for refinement only]\n" + lines.join("\n")
 }
 
 function buildPrompt(input: TranslateInput): string {
     const { rawText, sourceLang, sessionContext, previousRefined, targetLanguages, persona } = input
     const targetsLine = targetLanguages.map((l) => `${l}=${LANG_NAME[l] || l}`).join(", ")
     const langFields = targetLanguages.map((l) => `"${l}": ""`).join(", ")
-    const contextLine = sanitize(sessionContext).slice(0, 180)
-    const previousLine = sanitize(previousRefined).slice(0, 80)
+    const contextLine = sanitize(sessionContext).slice(0, 500)
+    const previousLine = sanitize(previousRefined).slice(0, 700)
 
     return [
         `source_lang=${sourceLang}`,
         `targets=${targetsLine}`,
         `input=${rawText}`,
         contextLine ? `session_context=${contextLine}` : "",
-        previousLine ? `previous_refined=${previousLine}` : "",
+        previousLine ? `previous_refined_context=${previousLine}` : "",
         buildPersonaBlock(persona),
         `Return strict JSON: {"refined":"","isMedical":true, ${langFields}}.`,
-        'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer content from session_context or previous_refined. (2) Correct only obvious STT errors (e.g. wrong homophone). (3) Translate "input" into EVERY target language field. (4) Never leave any target language field empty; translate fragments as fragments. (5) Keep all clinical terminology literal. (6) DO NOT generate conversational filler, meta-text, or hallucinations. (7) If input is just a meta-tag hallucination like "新しい話者、所属、新しいトピック" or "新しい話題", return empty strings.',
-        `If source_lang matches a target language, the text for that language must remain in the source language.`,
+        'Workflow: (A) Use persona, session_context, and previous_refined_context ONLY to resolve context and correct obvious STT errors in "refined". (B) Translate the final "refined" text into every target language field.',
+        'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer new content from context. (2) Persona must not change translation style, tone, or add domain assumptions after refinement; translation follows only the refined text. (3) Never leave any target language field empty; translate fragments as fragments. (4) Keep clinical terminology literal when it is present in refined. (5) DO NOT generate conversational filler, meta-text, or hallucinations. (6) If input is just a meta-tag hallucination like "新しい話者、所属、新しいトピック" or "新しい話題", return empty strings.',
+        `If source_lang matches a target language, that field must equal refined.`,
     ]
         .filter(Boolean)
         .join("\n")
@@ -131,18 +132,14 @@ function parseReasoningEffort(raw: string | undefined): ReasoningEffort | undefi
     return undefined
 }
 
-// The translation step does NOT need a reasoning model — gpt-4o-mini has
-// been working well for refinement + ko/en/ja JSON output in production.
-// The real upgrade in this branch is the STT side (gpt-realtime-whisper).
-// Override via OPENAI_REASONING_MODEL only when you want to experiment
-// (e.g. "gpt-4o" for slightly better disambiguation, "gpt-realtime-2"
-// with OPENAI_REASONING_EFFORT for GPT-5-class reasoning).
-const DEFAULT_TRANSLATION_MODEL = "gpt-4o-mini"
+// The STT upgrade is gpt-realtime-whisper. Translation intentionally stays on
+// gpt-4.1-mini for higher-quality refinement + ko/en/ja JSON output.
+const DEFAULT_TRANSLATION_MODEL = process.env.OPENAI_TRANSLATION_MODEL || "gpt-4.1-mini"
 
 // Detect whether a given model id is a reasoning model that accepts the
 // `reasoning_effort` parameter. Non-reasoning models reject it.
 function isReasoningModel(model: string): boolean {
-    return /^(o\d|gpt-realtime-2|gpt-5)/i.test(model)
+    return /^(o\d|gpt-5)/i.test(model)
 }
 
 export class Translator {
@@ -166,7 +163,7 @@ export class Translator {
         const completion = await this.openai.chat.completions.create({
             model: this.model,
             // Only attach reasoning_effort when the model actually supports it.
-            // Non-reasoning models like gpt-4o-mini reject unknown parameters.
+            // Non-reasoning models like gpt-4.1-mini reject unknown parameters.
             ...(isReasoningModel(this.model) && this.reasoningEffort
                 ? { reasoning_effort: this.reasoningEffort }
                 : {}),
@@ -190,6 +187,7 @@ export class Translator {
         }
 
         // Repair pass for any missing target fields.
+        const refinedForRepair = sanitize((parsed.refined as string) || rawText)
         const missing = targetLanguages.filter(
             (t) => t !== sourceLang && (!parsed[t] || String(parsed[t]).trim().length === 0),
         )
@@ -199,9 +197,9 @@ export class Translator {
             const repairPrompt = [
                 `source_lang=${sourceLang}`,
                 `targets=${repairTargets}`,
-                `input=${rawText}`,
+                `refined=${refinedForRepair}`,
                 `Return strict JSON: {${repairFields}}.`,
-                'Rules: (1) Translate "input" into EVERY target language field. (2) Never leave any field empty.',
+                'Rules: (1) Translate "refined" into EVERY target language field. (2) Never leave any field empty. (3) Do not use persona or external context in this repair pass.',
             ].join("\n")
 
             try {

@@ -1,7 +1,7 @@
 // Realtime relay server.
 //
 // Bridges browser admin clients (Socket.IO) to OpenAI's Realtime API
-// (gpt-realtime-whisper for streaming STT + gpt-realtime-2 for refinement and
+// (gpt-realtime-whisper for streaming STT + gpt-4.1-mini for refinement and
 // translation). Long-lived WebSockets aren't a great fit for Firebase Cloud
 // Functions, so this service is intended to run on Cloud Run (production) or
 // `npm run dev` locally. Authentication piggybacks on Firebase Auth: each
@@ -39,7 +39,7 @@ app.get("/health", (_req, res) => {
     res.json({
         status: "ok",
         sttModel: process.env.OPENAI_STT_MODEL || "gpt-realtime-whisper",
-        translationModel: process.env.OPENAI_REASONING_MODEL || "gpt-4o-mini",
+        translationModel: process.env.OPENAI_REASONING_MODEL || process.env.OPENAI_TRANSLATION_MODEL || "gpt-4.1-mini",
     })
 })
 
@@ -104,6 +104,6 @@ io.on("connection", (socket) => {
 httpServer.listen(PORT, () => {
     // eslint-disable-next-line no-console
     console.log(
-        `[relay] Listening on :${PORT} — STT=${process.env.OPENAI_STT_MODEL || "gpt-realtime-whisper"}, Translation=${process.env.OPENAI_REASONING_MODEL || "gpt-4o-mini"}`,
+        `[relay] Listening on :${PORT} — STT=${process.env.OPENAI_STT_MODEL || "gpt-realtime-whisper"}, Translation=${process.env.OPENAI_REASONING_MODEL || process.env.OPENAI_TRANSLATION_MODEL || "gpt-4.1-mini"}`,
     )
 })

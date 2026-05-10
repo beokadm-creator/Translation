@@ -1,6 +1,6 @@
 // Version: v12.3 (Stable - OpenAI Only)
 // STT:         gpt-4o-transcribe  (language + domain keyword prompt)
-// Translation: gpt-4o-mini        (JSON strict, temperature 0)
+// Translation: gpt-4.1-mini      (JSON strict, temperature 0)
 // KEY FLOW:
 // 1. Every speech segment is written to DB IMMEDIATELY as 'translating'.
 // 2. Audience sees the raw text in ~1-2 seconds.
@@ -15,6 +15,15 @@ import type { Request } from "express"
 
 
 let _openai: OpenAI | null = null
+
+const getConfiguredModel = (envKey: string, configKey: string, fallback: string): string =>
+    process.env[envKey] || (functions.config()?.openai?.[configKey] as string) || fallback
+
+const getOpenAISttModel = (): string =>
+    getConfiguredModel("OPENAI_STT_MODEL", "stt_model", "gpt-4o-transcribe")
+
+const getOpenAITranslationModel = (): string =>
+    getConfiguredModel("OPENAI_TRANSLATION_MODEL", "translation_model", "gpt-4.1-mini")
 
 // ── Hallucination 필터 ────────────────────────────────────────────────────────
 // 정적 URL 도메인만 핀포인트로 필터 (전체 문장 삭제 방지)
@@ -66,7 +75,6 @@ const isPromptLeakage = (text: string, promptText?: string): boolean => {
     if (normalizedPrompt.includes(normalizedText) && normalizedText.length >= 40) return true
 
     // 2. 키워드가 문장 사이에 연속으로 박혀있는 경우 감지
-    // "임플란트, 상악동, 골이식, 픽스처, 어버트먼트, 크라운, 보철" 등
     const promptItems = promptText
         .split(',')
         .map(item => normalizeLoose(item))
@@ -99,7 +107,7 @@ const isGarbage = (text: string, _originalText?: string, promptText?: string): b
 
     // 침묵 시 흔히 나오는 짧은 환각어 필터 (짧은 문구에서만 발동, 긴 정상 발화는 보존)
     // 주의: '좋아요' / '구독' 단독 사용 금지 - 정상 발화("좋아요, 다음으로...") 삭제됨
-    const filterGarbage = /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독과 좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사|^감사합니다\.?$|영상편집|자막 제공|광고를 포함|알 수 없는 소리|subtitles by|subtitle by|자막.*제작|번역.*제공|MBC 뉴스|SBS 뉴스|KBS 뉴스|임플란트.*상악동.*골이식|상악동.*골이식.*픽스처|픽스처.*어버트먼트|충분한.*수직|충분한.*수직이|ご視聴|チャンネル登録|新しい話者、所属、新しいトピック|新しい話題|字幕提供)/i
+    const filterGarbage = /(Transcribe exactly|발화 내용만 정확히|구독과 좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사|^감사합니다\.?$|영상편집|자막 제공|광고를 포함|알 수 없는 소리|subtitles by|subtitle by|자막.*제작|번역.*제공|MBC 뉴스|SBS 뉴스|KBS 뉴스|ご視聴|チャンネル登録|新しい話者、所属、新しいトピック|新しい話題|字幕提供)/i
     if (filterGarbage.test(text.trim()) && text.length < 150) return true
 
     // 성음만으로 된 건 버림 (다국어 지원: 한글, 영문, 숫자 외에 한자, 히라가나, 가타카나 등 모든 문자 허용)
@@ -131,17 +139,10 @@ class OpenAISTTProvider implements STTProvider {
         const tStart = Date.now();
         const file = await toFile(audioBuffer, "audio.webm", { type: "audio/webm" });
         const stt = await getOpenAI().audio.transcriptions.create({
-            file: file, model: "gpt-4o-transcribe", language: sourceLang,
+            file: file, model: getOpenAISttModel(), language: sourceLang,
             prompt: prompt, temperature: 0,
         });
         return { text: (stt?.text || "").trim(), ms: Date.now() - tStart, provider: this.name };
-    }
-}
-
-class DeepgramSTTProvider implements STTProvider {
-    name = "deepgram";
-    async transcribe(_audioBuffer: Buffer, _sourceLang: string, _prompt: string): Promise<STTResult> {
-        throw new Error("Deepgram not implemented yet");
     }
 }
 
@@ -151,11 +152,10 @@ class STTFactory {
         sourceLang: string, 
         prompt: string,
         primaryEngineName: string = 'openai',
-        fallbackEngineName: string = 'deepgram'
+        fallbackEngineName: string = 'openai'
     ): Promise<STTResult> {
         
         const getProvider = (name: string): STTProvider => {
-            if (name === 'deepgram') return new DeepgramSTTProvider();
             return new OpenAISTTProvider();
         };
 
@@ -253,8 +253,8 @@ class OpenAITranslationProvider implements TranslationProvider {
     async translate(rawText: string, sourceLang: string, previousContext: string, sessionContext: string, targetLanguages: string[], persona: PersonaConfig | null): Promise<TranslationResult | null> {
         const tStart = Date.now();
         const openai = getOpenAI()
-        const contextLine = sanitize(sessionContext).slice(0, 180)
-        const previousLine = sanitize(previousContext.split(' / ').slice(-1)[0] || '').slice(0, 80)
+        const contextLine = sanitize(sessionContext).slice(0, 500)
+        const previousLine = sanitize(previousContext).slice(0, 700)
         
         const langMap: Record<string, string> = { ko: "Korean", en: "English", ja: "Japanese", zh: "Chinese" }
         const targetsLine = targetLanguages.map(l => `${l}=${langMap[l] || l}`).join(', ')
@@ -267,7 +267,7 @@ class OpenAITranslationProvider implements TranslationProvider {
             if (persona.customInstructions) lines.push(`Instructions: ${persona.customInstructions}`);
             if (persona.medicalTerms) lines.push(`Medical Dictionary: ${persona.medicalTerms}`);
             if (lines.length > 0) {
-                personaPrompt = "\n[Persona Context]\n" + lines.join('\n');
+                personaPrompt = "\n[Persona Context for refinement only]\n" + lines.join('\n');
             }
         }
 
@@ -276,22 +276,23 @@ class OpenAITranslationProvider implements TranslationProvider {
             `targets=${targetsLine}`,
             `input=${rawText}`,
             contextLine ? `session_context=${contextLine}` : "",
-            previousLine ? `previous_refined=${previousLine}` : "",
+            previousLine ? `previous_refined_context=${previousLine}` : "",
             personaPrompt,
             `Return strict JSON: {"refined":"","isMedical":true, ${langFields}}.`,
-            'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer content from session_context or previous_refined. (2) Correct only obvious STT errors (e.g. wrong homophone). (3) Translate "input" into EVERY target language field. (4) Never leave any target language field empty; translate fragments as fragments. (5) Keep all clinical terminology literal. (6) DO NOT generate conversational filler, meta-text, or hallucinations. (7) If input is just a meta-tag hallucination like "新しい話者、所属、新しいトピック" or "新しい話題", return empty strings.',
-            `If source_lang matches a target language, the text for that language must remain in the source language.`
+            'Workflow: (A) Use persona, session_context, and previous_refined_context ONLY to resolve context and correct obvious STT errors in "refined". (B) Translate the final "refined" text into every target language field.',
+            'Rules: (1) Output ONLY what is in "input" — never add, expand, or infer new content from context. (2) Persona must not change translation style, tone, or add domain assumptions after refinement; translation follows only the refined text. (3) Never leave any target language field empty; translate fragments as fragments. (4) Keep clinical terminology literal when it is present in refined. (5) DO NOT generate conversational filler, meta-text, or hallucinations. (6) If input is just a meta-tag hallucination like "新しい話者、所属、新しいトピック" or "新しい話題", return empty strings.',
+            `If source_lang matches a target language, that field must equal refined.`
         ].filter(Boolean).join('\n')
 
         const completion = await openai.chat.completions.create({
-        model: "gpt-4.1-mini",
+        model: getOpenAITranslationModel(),
         temperature: 0,
         max_tokens: 1000,
         response_format: { type: "json_object" },
         messages: [
                 {
                     role: "system",
-                    content: "You refine live medical speech-to-text output and produce translations in strict JSON. Do not hallucinate or create fake text."
+                    content: "You first refine live speech-to-text using persona/context, then translate the refined text in strict JSON. Do not hallucinate or create fake text."
                 },
                 {
                     role: "user",
@@ -311,6 +312,7 @@ class OpenAITranslationProvider implements TranslationProvider {
             return null
         }
         
+        const refinedForRepair = sanitize((data.refined as string) || rawText)
         const missing = targetLanguages.filter(t => t !== sourceLang && (!data[t] || String(data[t]).trim().length === 0))
         if (missing.length > 0) {
             const repairFields = missing.map(l => `"${l}": ""`).join(', ')
@@ -318,13 +320,13 @@ class OpenAITranslationProvider implements TranslationProvider {
             const repairPrompt = [
                 `source_lang=${sourceLang}`,
                 `targets=${repairTargetsLine}`,
-                `input=${rawText}`,
+                `refined=${refinedForRepair}`,
                 `Return strict JSON: {${repairFields}}.`,
-                'Rules: (1) Translate "input" into EVERY target language field. (2) Never leave any field empty.'
+                'Rules: (1) Translate "refined" into EVERY target language field. (2) Never leave any field empty. (3) Do not use persona or external context in this repair pass.'
             ].join('\n')
             try {
                 const repair = await openai.chat.completions.create({
-                    model: "gpt-4.1-mini",
+                    model: getOpenAITranslationModel(),
                     temperature: 0,
                     max_tokens: 800,
                     response_format: { type: "json_object" },
@@ -354,13 +356,6 @@ class OpenAITranslationProvider implements TranslationProvider {
     }
 }
 
-class ClaudeTranslationProvider implements TranslationProvider {
-    name = "claude";
-    async translate(_rawText: string, _sourceLang: string, _previousContext: string, _sessionContext: string, _targetLanguages: string[], _persona: PersonaConfig | null): Promise<TranslationResult | null> {
-        throw new Error("Claude not implemented yet");
-    }
-}
-
 class TranslationFactory {
     static async executeWithFallback(
         rawText: string,
@@ -370,16 +365,10 @@ class TranslationFactory {
         targetLanguages: string[],
         persona: PersonaConfig | null,
         primaryEngineName: string = 'openai',
-        fallbackEngineName: string = 'claude'
+        fallbackEngineName: string = 'openai'
     ): Promise<TranslationResult> {
         
         const getProvider = (name: string): TranslationProvider => {
-            // [F-HIGH-05 Fix] Claude가 미구현 상태이므로, Claude가 선택된 경우에도 강제로 OpenAI를 반환하여 안전하게 동작하도록 조치합니다.
-            // 향후 Claude 구현 시 이 분기 처리를 복구하면 됩니다.
-            if (name === 'claude') {
-                functions.logger.warn("[Translate] Claude is not implemented yet, falling back to OpenAI automatically");
-                return new OpenAITranslationProvider();
-            }
             return new OpenAITranslationProvider();
         };
 
@@ -450,6 +439,7 @@ const readPersonaPath = async (path: string): Promise<PersonaConfig | null> => {
 const loadPersona = async (
     projectId: string,
     sessionId?: string,
+    forceFresh = false,
 ): Promise<PersonaConfig | null> => {
     if (!projectId) return null;
 
@@ -470,7 +460,7 @@ const loadPersona = async (
 
     const cacheKey = sessionId ? `${projectId}::${sessionId}` : projectId;
     const cached = personaCache.get(cacheKey);
-    if (cached && cached.expiresAt > now) {
+    if (!forceFresh && cached && cached.expiresAt > now) {
         return cached.data;
     }
 
@@ -569,13 +559,13 @@ export const processAudio = functions
         const timeoutMs = Number(req.headers['x-chunk-timeout-ms'] || 5000);
         const sentenceEnd = (req.headers['x-chunk-sentence-end'] || "true") === "true";
         const primarySTT = (req.headers['x-stt-primary'] || "openai").toString();
-        const fallbackSTT = (req.headers['x-stt-fallback'] || "deepgram").toString();
+        const fallbackSTT = (req.headers['x-stt-fallback'] || "openai").toString();
         const primaryTrans = (req.headers['x-trans-primary'] || "openai").toString();
-        const fallbackTrans = (req.headers['x-trans-fallback'] || "claude").toString();
+        const fallbackTrans = (req.headers['x-trans-fallback'] || "openai").toString();
 
         // Pass activeSessionId so per-session persona overrides (e.g. opening
         // ceremony vs. clinical research) take precedence over the project default.
-        const persona = await loadPersona(projectId, activeSessionId || undefined);
+        const persona = await loadPersona(projectId, activeSessionId || undefined, true);
 
         // ── STEP 1: AI STT ────────────────────────────────────────────
             let basePrompt = "";
@@ -588,7 +578,8 @@ export const processAudio = functions
                 if (sourceLang === 'zh' && persona.basePromptZh) basePrompt = persona.basePromptZh;
             }
 
-            const whisperPrompt = [basePrompt, customKeywords].filter(Boolean).join(', ');
+            const personaTerms = persona?.enabled ? persona.medicalTerms || '' : '';
+            const whisperPrompt = [basePrompt, personaTerms, customKeywords].filter(Boolean).join(', ');
 
             const sttResult = await STTFactory.executeWithFallback(buf, sourceLang, whisperPrompt, primarySTT, fallbackSTT);
             functions.logger.info(`[STT][${sttResult.provider}]`, { ms: sttResult.ms });
@@ -659,7 +650,7 @@ export const processAudio = functions
                 // 버퍼 상태에서 lastRefinedList를 추출하여 flushData에 함께 넘김
                 let previousContext = "";
                 const list: string[] = langChanged ? [] : (Array.isArray(st.lastRefinedList) ? st.lastRefinedList : []);
-                previousContext = list.slice(-2).join(' / ');
+                previousContext = list.slice(-5).join('\n');
 
                 const newBufferText = currentBufferText ? currentBufferText + ' ' + rawText : rawText
                 const newBufferIds = [...currentBufferIds, id]

@@ -2,8 +2,11 @@ import * as functions from "firebase-functions/v1";
 import * as admin from "firebase-admin";
 import type { Request } from "express";
 
-// API Key Auth middleware
-const authenticateAPIKey = (req: Request) => {
+const sanitizeProjectId = (slug: string): string => slug.replace(/[^a-z0-9-_]/gi, '').toLowerCase();
+
+// Management APIs accept either the server-side admin API key or a Firebase
+// admin-session ID token from the authenticated dashboard.
+const authenticateManagementRequest = async (req: Request) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return false;
@@ -11,14 +14,14 @@ const authenticateAPIKey = (req: Request) => {
     
     const token = authHeader.split("Bearer ")[1];
     const expectedKey = process.env.ADMIN_API_KEY || (functions.config()?.admin?.apikey as string);
-    
-    // Fallback for development if no key is set (DANGEROUS in prod)
-    if (!expectedKey) {
-        functions.logger.warn("ADMIN_API_KEY is not set in environment. Falling back to default key.");
-        return token === "hongcomm-admin-secret-2025";
-    }
+    if (expectedKey && token === expectedKey) return true;
 
-    return token === expectedKey;
+    try {
+        await admin.auth().verifyIdToken(token);
+        return true;
+    } catch {
+        return false;
+    }
 };
 
 export const createConferenceAPI = functions.https.onRequest(async (req, res) => {
@@ -39,7 +42,7 @@ export const createConferenceAPI = functions.https.onRequest(async (req, res) =>
         return;
     }
 
-    if (!authenticateAPIKey(req as Request)) {
+    if (!(await authenticateManagementRequest(req as Request))) {
         res.status(401).json({ success: false, error: "Unauthorized" });
         return;
     }
@@ -73,7 +76,7 @@ export const createConferenceAPI = functions.https.onRequest(async (req, res) =>
             projects.forEach((proj: any, index: number) => {
                 if (!proj.name || !proj.slug) return; // Skip invalid projects
 
-                const projectId = proj.slug.replace(/[^a-z0-9-_]/gi, '').toLowerCase();
+                const projectId = sanitizeProjectId(proj.slug);
                 
                 updates[`projects/${projectId}/settings`] = {
                     name: proj.name,
@@ -85,8 +88,8 @@ export const createConferenceAPI = functions.https.onRequest(async (req, res) =>
                     // Default AI & Overlay settings
                     hideRaw: true,
                     ai: {
-                        primarySTT: "openai", fallbackSTT: "deepgram",
-                        primaryTrans: "openai", fallbackTrans: "claude"
+                        primarySTT: "openai", fallbackSTT: "openai",
+                        primaryTrans: "openai", fallbackTrans: "openai"
                     },
                     overlay: {
                         fontSize: 48, fontColor: '#ffffff', fontWeight: 'bold', 
@@ -130,7 +133,7 @@ export const createConferenceAPI = functions.https.onRequest(async (req, res) =>
 });
 
 // Helper for CORS and Auth
-const handleCorsAndAuth = (req: Request, res: any) => {
+const handleCorsAndAuth = async (req: Request, res: any) => {
     const origin = req.headers.origin as string;
     const allowedOrigin = process.env.ALLOWED_ORIGIN || (functions.config()?.app?.allowed_origin as string) || "*";
     if (allowedOrigin === "*" || allowedOrigin === origin) {
@@ -147,7 +150,7 @@ const handleCorsAndAuth = (req: Request, res: any) => {
         return false;
     }
 
-    if (!authenticateAPIKey(req as Request)) {
+    if (!(await authenticateManagementRequest(req as Request))) {
         res.status(401).json({ success: false, error: "Unauthorized" });
         return false;
     }
@@ -155,7 +158,7 @@ const handleCorsAndAuth = (req: Request, res: any) => {
 };
 
 export const deleteConferenceAPI = functions.https.onRequest(async (req, res) => {
-    if (!handleCorsAndAuth(req as Request, res)) return;
+    if (!(await handleCorsAndAuth(req as Request, res))) return;
 
     try {
         const { confId } = req.body;
@@ -191,10 +194,10 @@ export const deleteConferenceAPI = functions.https.onRequest(async (req, res) =>
 });
 
 export const deleteProjectAPI = functions.https.onRequest(async (req, res) => {
-    if (!handleCorsAndAuth(req as Request, res)) return;
+    if (!(await handleCorsAndAuth(req as Request, res))) return;
 
     try {
-        const { projectId } = req.body;
+        const projectId = sanitizeProjectId((req.body.projectId || '').toString());
         if (!projectId) {
             res.status(400).json({ success: false, error: "Missing required field: projectId" });
             return;
@@ -207,6 +210,69 @@ export const deleteProjectAPI = functions.https.onRequest(async (req, res) => {
         res.status(200).json({ success: true, deleted: { projectId } });
     } catch (error: any) {
         functions.logger.error("[API] Failed to delete project", error);
+        res.status(500).json({ success: false, error: error.message || "Internal server error" });
+    }
+});
+
+export const createProjectAPI = functions.https.onRequest(async (req, res) => {
+    const origin = req.headers.origin as string;
+    const allowedOrigin = process.env.ALLOWED_ORIGIN || (functions.config()?.app?.allowed_origin as string) || "*";
+    if (allowedOrigin === "*" || allowedOrigin === origin) {
+        res.set("Access-Control-Allow-Origin", allowedOrigin === "*" ? "*" : origin);
+    } else {
+        res.set("Access-Control-Allow-Origin", origin || allowedOrigin);
+    }
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Target-Languages");
+    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+
+    if (req.method !== "POST") {
+        res.status(405).json({ success: false, error: "Method not allowed" });
+        return;
+    }
+
+    if (!(await authenticateManagementRequest(req as Request))) {
+        res.status(401).json({ success: false, error: "Unauthorized" });
+        return;
+    }
+
+    try {
+        const { project } = req.body;
+        const projectId = sanitizeProjectId((project?.slug || '').toString());
+        if (!projectId || !project?.name || !project?.conferenceId) {
+            res.status(400).json({ success: false, error: "Missing required project fields" });
+            return;
+        }
+
+        const db = admin.database();
+        const projectRef = db.ref(`projects/${projectId}`);
+        const now = Date.now();
+        await projectRef.set({
+            settings: {
+                ...project,
+                slug: projectId,
+                targetLanguages: Array.isArray(project.targetLanguages) && project.targetLanguages.length > 0
+                    ? project.targetLanguages
+                    : ["ko", "en", "ja", "zh"],
+                ai: {
+                    primarySTT: "openai", fallbackSTT: "openai",
+                    primaryTrans: "openai", fallbackTrans: "openai",
+                },
+            },
+            state: {
+                bufferText: "",
+                bufferIds: [],
+                lastRefinedList: [],
+                lastFlushTime: now,
+            },
+            stream: null,
+            activeSessionId: null,
+        });
+
+        functions.logger.info(`[API] Created/Replaced Project ${projectId}.`);
+        res.status(200).json({ success: true, projectId });
+    } catch (error: any) {
+        functions.logger.error("[API] Failed to create project", error);
         res.status(500).json({ success: false, error: error.message || "Internal server error" });
     }
 });
@@ -230,7 +296,7 @@ export const replaceSessionsAPI = functions.https.onRequest(async (req, res) => 
     }
 
     // 2. Auth
-    if (!authenticateAPIKey(req as Request)) {
+    if (!(await authenticateManagementRequest(req as Request))) {
         res.status(401).json({ success: false, error: "Unauthorized" });
         return;
     }
@@ -244,7 +310,7 @@ export const replaceSessionsAPI = functions.https.onRequest(async (req, res) => 
         }
 
         const db = admin.database();
-        const projectId = projectSlug.replace(/[^a-z0-9-_]/gi, '').toLowerCase();
+        const projectId = sanitizeProjectId(projectSlug);
 
         // 3. 기존 세션 데이터 검증 및 삭제
         const projectRef = db.ref(`projects/${projectId}`);
@@ -278,8 +344,33 @@ export const replaceSessionsAPI = functions.https.onRequest(async (req, res) => 
             };
         });
 
-        // 5. 전체 덮어쓰기 (기존 sessions 노드를 완전히 교체)
-        await projectRef.child('sessions').set(sessionsObj);
+        // 5. 전체 덮어쓰기 + 제거된 세션의 라이브 스트림/활성 상태 정리
+        const existingSessionsSnap = await projectRef.child('sessions').once('value');
+        const existingSessionIds = existingSessionsSnap.exists() ? Object.keys(existingSessionsSnap.val() || {}) : [];
+        const nextSessionIds = new Set(Object.keys(sessionsObj));
+        const removedSessionIds = existingSessionIds.filter(id => !nextSessionIds.has(id));
+
+        const updates: Record<string, any> = { sessions: sessionsObj };
+        if (removedSessionIds.length > 0) {
+            const removed = new Set(removedSessionIds);
+            const streamSnap = await projectRef.child('stream').once('value');
+            if (streamSnap.exists()) {
+                const stream = streamSnap.val() || {};
+                Object.entries(stream).forEach(([segmentId, segment]: [string, any]) => {
+                    if (segment?.sessionId && removed.has(segment.sessionId)) {
+                        updates[`stream/${segmentId}`] = null;
+                    }
+                });
+            }
+
+            const activeSnap = await projectRef.child('activeSessionId').once('value');
+            if (activeSnap.exists() && removed.has(activeSnap.val())) {
+                updates.activeSessionId = null;
+                updates.state = { bufferText: "", bufferIds: [], lastRefinedList: [], lastFlushTime: Date.now() };
+            }
+        }
+
+        await projectRef.update(updates);
 
         functions.logger.info(`[API] Replaced sessions for project ${projectId}. Total: ${sessions.length}`);
         res.status(200).json({ success: true, message: "Successfully replaced sessions.", count: sessions.length });
@@ -291,17 +382,39 @@ export const replaceSessionsAPI = functions.https.onRequest(async (req, res) => 
 });
 
 export const deleteSessionAPI = functions.https.onRequest(async (req, res) => {
-    if (!handleCorsAndAuth(req as Request, res)) return;
+    if (!(await handleCorsAndAuth(req as Request, res))) return;
 
     try {
-        const { projectId, sessionId } = req.body;
+        const projectId = sanitizeProjectId((req.body.projectId || '').toString());
+        const { sessionId } = req.body;
         if (!projectId || !sessionId) {
             res.status(400).json({ success: false, error: "Missing required fields: projectId, sessionId" });
             return;
         }
 
         const db = admin.database();
-        await db.ref(`projects/${projectId}/sessions/${sessionId}`).remove();
+        const projectRef = db.ref(`projects/${projectId}`);
+        const updates: Record<string, any> = {
+            [`sessions/${sessionId}`]: null,
+        };
+
+        const streamSnap = await projectRef.child('stream').once('value');
+        if (streamSnap.exists()) {
+            const stream = streamSnap.val() || {};
+            Object.entries(stream).forEach(([segmentId, segment]: [string, any]) => {
+                if (segment?.sessionId === sessionId) {
+                    updates[`stream/${segmentId}`] = null;
+                }
+            });
+        }
+
+        const activeSnap = await projectRef.child('activeSessionId').once('value');
+        if (activeSnap.exists() && activeSnap.val() === sessionId) {
+            updates.activeSessionId = null;
+            updates.state = { bufferText: "", bufferIds: [], lastRefinedList: [], lastFlushTime: Date.now() };
+        }
+
+        await projectRef.update(updates);
 
         functions.logger.info(`[API] Deleted Session ${sessionId} in Project ${projectId}.`);
         res.status(200).json({ success: true, deleted: { projectId, sessionId } });

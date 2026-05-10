@@ -1,7 +1,7 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "description": "Realtime relay between admin clients and the OpenAI Realtime API (gpt-realtime-whisper + gpt-realtime-2).",
+  "description": "Realtime relay between admin clients and the OpenAI Realtime API (gpt-realtime-whisper + gpt-4.1-mini).",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

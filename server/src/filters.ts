@@ -74,7 +74,7 @@ export function isGarbage(text: string, _originalText?: string, promptText?: str
     if (/^\s*[\(\[][^\)\]]{1,40}[\)\]]\s*[\.!]?\s*$/.test(text.trim())) return true
 
     const filterGarbage =
-        /(치과 학술대회|Transcribe exactly|발화 내용만 정확히|구독과 좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사|^감사합니다\.?$|영상편집|자막 제공|광고를 포함|알 수 없는 소리|subtitles by|subtitle by|자막.*제작|번역.*제공|MBC 뉴스|SBS 뉴스|KBS 뉴스|임플란트.*상악동.*골이식|상악동.*골이식.*픽스처|픽스처.*어버트먼트|충분한.*수직|충분한.*수직이|ご視聴|チャンネル登録|新しい話者、所属、新しいトピック|新しい話題|字幕提供)/i
+        /(Transcribe exactly|발화 내용만 정확히|구독과 좋아요|알림.*설정|Please subscribe|Thank you for|Thanks for watching|시청.*감사|^감사합니다\.?$|영상편집|자막 제공|광고를 포함|알 수 없는 소리|subtitles by|subtitle by|자막.*제작|번역.*제공|MBC 뉴스|SBS 뉴스|KBS 뉴스|ご視聴|チャンネル登録|新しい話者、所属、新しいトピック|新しい話題|字幕提供)/i
     if (filterGarbage.test(text.trim()) && text.length < 150) return true
 
     const alphanumeric = text.replace(/[^\p{L}\p{N}]/gu, "")

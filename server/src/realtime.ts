@@ -10,7 +10,7 @@
 //      each frame as input_audio_buffer.append to OpenAI.
 //   4. OpenAI emits conversation.item.input_audio_transcription.delta and
 //      .completed events. We surface deltas to the client immediately, persist
-//      "translating" rows to RTDB, and on completion run the gpt-realtime-2
+//      "translating" rows to RTDB, and on completion run the gpt-4.1-mini
 //      Translator to produce refined + ko/en/ja JSON.
 //   5. Final segment is written back to RTDB; audience views update via the
 //      existing onValue subscription (no client changes there).
@@ -24,15 +24,27 @@ import { isGarbage, sanitize } from "./filters.js"
 import { loadPersona, mergePersona } from "./persona.js"
 import { Translator, type PersonaConfig, type TranslateResult } from "./translate.js"
 
-const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
+const OPENAI_REALTIME_URL = process.env.OPENAI_REALTIME_URL || "wss://api.openai.com/v1/realtime"
 // The actual upgrade is the STT side (gpt-realtime-whisper). Translation
 // stays on the model that was working in production. Both are env-overridable
 // for instant rollback or experimentation.
 const STT_MODEL = process.env.OPENAI_STT_MODEL || "gpt-realtime-whisper"
-const TRANSLATION_MODEL = process.env.OPENAI_REASONING_MODEL || "gpt-4o-mini"
+const TRANSLATION_MODEL = process.env.OPENAI_REASONING_MODEL || process.env.OPENAI_TRANSLATION_MODEL || "gpt-4.1-mini"
+const PARTIAL_DB_INTERVAL_MS = Number(process.env.REALTIME_PARTIAL_DB_INTERVAL_MS || 120)
+const VAD_THRESHOLD = Number(process.env.REALTIME_VAD_THRESHOLD || 0.5)
+const VAD_PREFIX_PADDING_MS = Number(process.env.REALTIME_VAD_PREFIX_PADDING_MS || 500)
+const VAD_SILENCE_DURATION_MS = Number(process.env.REALTIME_VAD_SILENCE_DURATION_MS || 700)
+const CONTEXT_SEGMENT_LIMIT = 5
+const TRANSLATION_BUFFER_MIN_CHARS = Number(process.env.REALTIME_TRANSLATION_MIN_CHARS || 45)
+const TRANSLATION_BUFFER_TIMEOUT_MS = Number(process.env.REALTIME_TRANSLATION_TIMEOUT_MS || 1800)
+const TRANSLATION_BUFFER_SENTENCE_END = (process.env.REALTIME_TRANSLATION_SENTENCE_END || "true") === "true"
 
-const DENTAL_PROMPT_KO = "임플란트, 상악동, 골이식, 픽스처, 어버트먼트, 크라운, 보철"
-const DENTAL_PROMPT_EN = "Implant, Sinus, Bone Graft, Fixture, Abutment, Crown"
+const DEFAULT_STT_PROMPTS: Record<string, string> = {
+    ko: process.env.DEFAULT_STT_PROMPT_KO || "",
+    en: process.env.DEFAULT_STT_PROMPT_EN || "",
+    ja: process.env.DEFAULT_STT_PROMPT_JA || "",
+    zh: process.env.DEFAULT_STT_PROMPT_ZH || "",
+}
 
 interface RelayInit {
     projectId: string
@@ -50,9 +62,13 @@ interface OpenAIRealtimeEvent {
     [key: string]: unknown
 }
 
+interface TranslationBufferEntry {
+    segmentId: string
+    transcript: string
+}
+
 function defaultBasePrompt(lang: string): string {
-    if (lang === "en") return DENTAL_PROMPT_EN
-    return DENTAL_PROMPT_KO
+    return DEFAULT_STT_PROMPTS[lang] || ""
 }
 
 function pickBasePrompt(lang: string, persona: PersonaConfig | null): string {
@@ -65,6 +81,13 @@ function pickBasePrompt(lang: string, persona: PersonaConfig | null): string {
     return defaultBasePrompt(lang)
 }
 
+function buildSttPrompt(lang: string, persona: PersonaConfig | null, customKeywords: string): string {
+    const parts = [pickBasePrompt(lang, persona)]
+    if (persona?.enabled && persona.medicalTerms) parts.push(persona.medicalTerms)
+    if (customKeywords) parts.push(customKeywords)
+    return parts.filter(Boolean).join(", ")
+}
+
 export class RealtimeRelaySession {
     private clientSocket: Socket
     private openaiSocket: WebSocket | null = null
@@ -74,7 +97,15 @@ export class RealtimeRelaySession {
     private apiKey: string
     private currentSegmentId: string | null = null
     private currentPartial = ""
-    private previousRefined = ""
+    private pendingInitialWrite: Promise<void> | null = null
+    private pendingPartialText = ""
+    private partialFlushTimer: NodeJS.Timeout | null = null
+    private lastPartialWriteAt = 0
+    private translationBuffer: TranslationBufferEntry[] = []
+    private translationBufferStartedAt = 0
+    private translationFlushTimer: NodeJS.Timeout | null = null
+    private translationFlushPromise: Promise<void> = Promise.resolve()
+    private previousRefinedList: string[] = []
     private closed = false
 
     constructor(socket: Socket, init: RelayInit, apiKey: string) {
@@ -101,6 +132,7 @@ export class RealtimeRelaySession {
             true,
         )
         this.init.persona = mergePersona(serverPersona, this.init.persona)
+        await this.loadPreviousContext()
 
         await this.connectUpstream()
         this.wireClientEvents()
@@ -141,8 +173,11 @@ export class RealtimeRelaySession {
     }
 
     private sendSessionConfig(): void {
-        const basePrompt = pickBasePrompt(this.init.sourceLang, this.init.persona)
-        const prompt = [basePrompt, this.init.customKeywords].filter(Boolean).join(", ")
+        const prompt = buildSttPrompt(
+            this.init.sourceLang,
+            this.init.persona,
+            this.init.customKeywords,
+        )
 
         const config: OpenAIRealtimeEvent = {
             type: "transcription_session.update",
@@ -157,9 +192,9 @@ export class RealtimeRelaySession {
                 // mirroring the client-side VAD we used in the chunked HTTP path.
                 turn_detection: {
                     type: "server_vad",
-                    threshold: 0.5,
-                    prefix_padding_ms: 300,
-                    silence_duration_ms: 500,
+                    threshold: VAD_THRESHOLD,
+                    prefix_padding_ms: VAD_PREFIX_PADDING_MS,
+                    silence_duration_ms: VAD_SILENCE_DURATION_MS,
                 },
             },
         }
@@ -183,6 +218,7 @@ export class RealtimeRelaySession {
 
         this.clientSocket.on("force_flush", () => {
             this.sendUpstream({ type: "input_audio_buffer.commit" })
+            this.enqueueTranslationFlush()
         })
 
         this.clientSocket.on("disconnect", () => {
@@ -218,46 +254,40 @@ export class RealtimeRelaySession {
         const delta = (event.delta as string) || ""
         if (!delta) return
 
-        // First delta of a new segment — allocate a stable id and an immediate
-        // RTDB row so the audience sees raw text in ~200ms instead of waiting
-        // for the final transcript.
+        // First delta of a new segment — allocate a stable id immediately.
+        // Do not await Firebase here; that would put the Realtime delta stream
+        // behind an RTDB round trip and make the UI feel less instant.
         if (!this.currentSegmentId) {
             this.currentSegmentId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
             this.currentPartial = ""
-
-            const sessionStillActive = await this.guardSessionActive()
-            if (!sessionStillActive) {
-                this.currentSegmentId = null
-                return
-            }
-
-            await this.writeInitial(this.currentSegmentId)
+            this.pendingInitialWrite = null
         }
 
         this.currentPartial += delta
+        const segmentId = this.currentSegmentId
         this.clientSocket.emit("relay:partial", {
-            id: this.currentSegmentId,
+            id: segmentId,
             text: this.currentPartial,
         })
 
         // Live-update RTDB with the running partial so the audience overlay can
-        // type it in. We intentionally keep status:"translating" until completion.
-        await this.partialUpdate(this.currentSegmentId, this.currentPartial)
+        // type it in. Throttle DB writes; the admin socket already receives
+        // every delta instantly.
+        this.queuePartialUpdate(segmentId, this.currentPartial)
     }
 
     private async onCompleted(event: OpenAIRealtimeEvent): Promise<void> {
         const transcript = sanitize(((event.transcript as string) || this.currentPartial).trim())
         const segmentId = this.currentSegmentId
         const promptText = [
-            pickBasePrompt(this.init.sourceLang, this.init.persona),
-            this.init.customKeywords,
-        ]
-            .filter(Boolean)
-            .join(", ")
+            buildSttPrompt(this.init.sourceLang, this.init.persona, this.init.customKeywords),
+        ].join(", ")
 
         // Reset so the next delta starts a fresh segment.
         this.currentSegmentId = null
         this.currentPartial = ""
+        await this.flushPartialUpdate(segmentId)
+        this.pendingInitialWrite = null
 
         if (!segmentId) return
 
@@ -273,13 +303,69 @@ export class RealtimeRelaySession {
             return
         }
 
+        this.queueTranslation(segmentId, transcript)
+    }
+
+    private queueTranslation(segmentId: string, transcript: string): void {
+        if (this.translationBuffer.length === 0) {
+            this.translationBufferStartedAt = Date.now()
+        }
+
+        this.translationBuffer.push({ segmentId, transcript })
+        const bufferText = this.translationBuffer.map((entry) => entry.transcript).join(" ")
+        const elapsed = Date.now() - this.translationBufferStartedAt
+        const shouldFlush =
+            bufferText.length >= TRANSLATION_BUFFER_MIN_CHARS ||
+            elapsed >= TRANSLATION_BUFFER_TIMEOUT_MS ||
+            (TRANSLATION_BUFFER_SENTENCE_END && /[.!?。！？]$/.test(bufferText.trim()))
+
+        if (shouldFlush) {
+            this.enqueueTranslationFlush()
+            return
+        }
+
+        if (!this.translationFlushTimer) {
+            this.translationFlushTimer = setTimeout(() => {
+                this.translationFlushTimer = null
+                this.enqueueTranslationFlush()
+            }, TRANSLATION_BUFFER_TIMEOUT_MS - elapsed)
+        }
+    }
+
+    private enqueueTranslationFlush(): void {
+        this.translationFlushPromise = this.translationFlushPromise
+            .catch(() => {})
+            .then(() => this.flushTranslationBuffer())
+            .catch((err) => {
+                this.emitClientError(
+                    `translation_flush_error:${err instanceof Error ? err.message : String(err)}`,
+                )
+            })
+    }
+
+    private async flushTranslationBuffer(): Promise<void> {
+        if (this.translationFlushTimer) {
+            clearTimeout(this.translationFlushTimer)
+            this.translationFlushTimer = null
+        }
+
+        const entries = this.translationBuffer
+        this.translationBuffer = []
+        this.translationBufferStartedAt = 0
+        if (entries.length === 0) return
+
+        const target = entries[0]
+        const mergedIds = entries.slice(1).map((entry) => entry.segmentId)
+        const flushText = sanitize(entries.map((entry) => entry.transcript).join(" ").trim())
+        if (!flushText) return
+
         let result: TranslateResult | null = null
         try {
             result = await this.translator.translate({
-                rawText: transcript,
+                rawText: flushText,
                 sourceLang: this.init.sourceLang,
                 sessionContext: this.init.sessionContext,
-                previousRefined: this.previousRefined,
+                previousRefined: this.previousRefinedList.join("\n"),
                 targetLanguages: this.init.targetLanguages,
                 persona: this.init.persona,
             })
@@ -290,18 +376,36 @@ export class RealtimeRelaySession {
         }
 
         if (!result) {
-            await this.writeFallbackFinal(segmentId, transcript)
-            this.clientSocket.emit("relay:final", { id: segmentId, text: transcript, fallback: true })
+            await this.writeFallbackFinal(target.segmentId, flushText, mergedIds)
+            this.previousRefinedList = [...this.previousRefinedList, flushText].slice(-CONTEXT_SEGMENT_LIMIT)
+            this.clientSocket.emit("relay:final", { id: target.segmentId, text: flushText, fallback: true })
             return
         }
 
-        await this.writeFinal(segmentId, transcript, result)
-        this.previousRefined = result.refined
+        await this.writeFinal(target.segmentId, flushText, result, mergedIds)
+        this.previousRefinedList = [...this.previousRefinedList, result.refined].slice(-CONTEXT_SEGMENT_LIMIT)
         this.clientSocket.emit("relay:final", {
-            id: segmentId,
+            id: target.segmentId,
             text: result.refined,
             isMedical: result.isMedical,
         })
+    }
+
+    private async loadPreviousContext(): Promise<void> {
+        try {
+            const snap = await admin
+                .database()
+                .ref(`projects/${this.init.projectId}/state/lastRefinedList`)
+                .get()
+            const value = snap.val()
+            if (Array.isArray(value)) {
+                this.previousRefinedList = value
+                    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+                    .slice(-CONTEXT_SEGMENT_LIMIT)
+            }
+        } catch {
+            this.previousRefinedList = []
+        }
     }
 
     private async guardSessionActive(): Promise<boolean> {
@@ -318,7 +422,7 @@ export class RealtimeRelaySession {
         }
     }
 
-    private async writeInitial(segmentId: string): Promise<void> {
+    private async writeInitial(segmentId: string, partial: string): Promise<void> {
         const projectRef = admin.database().ref(`projects/${this.init.projectId}`)
         const seqResult = await projectRef
             .child("lastSequence")
@@ -326,8 +430,8 @@ export class RealtimeRelaySession {
         const seq = seqResult.snapshot.val()
 
         await projectRef.child(`stream/${segmentId}`).set({
-            original: "",
-            refined: "",
+            original: partial,
+            refined: partial,
             status: "translating",
             timestamp: Date.now(),
             sourceLabel: this.init.sourceLabel,
@@ -335,6 +439,54 @@ export class RealtimeRelaySession {
             seq,
             version: "v13_realtime",
         })
+    }
+
+    private queuePartialUpdate(segmentId: string, partial: string): void {
+        this.pendingPartialText = partial
+
+        if (!this.pendingInitialWrite) {
+            this.pendingInitialWrite = this.writeInitial(segmentId, partial).catch((err) => {
+                this.emitClientError(
+                    `partial_write_error:${err instanceof Error ? err.message : String(err)}`,
+                )
+            })
+            this.lastPartialWriteAt = Date.now()
+            return
+        }
+
+        const elapsed = Date.now() - this.lastPartialWriteAt
+        if (elapsed >= PARTIAL_DB_INTERVAL_MS) {
+            void this.flushPartialUpdate(segmentId).catch((err) => {
+                this.emitClientError(
+                    `partial_write_error:${err instanceof Error ? err.message : String(err)}`,
+                )
+            })
+            return
+        }
+
+        if (!this.partialFlushTimer) {
+            this.partialFlushTimer = setTimeout(() => {
+                this.partialFlushTimer = null
+                void this.flushPartialUpdate(segmentId).catch((err) => {
+                    this.emitClientError(
+                        `partial_write_error:${err instanceof Error ? err.message : String(err)}`,
+                    )
+                })
+            }, PARTIAL_DB_INTERVAL_MS - elapsed)
+        }
+    }
+
+    private async flushPartialUpdate(segmentId: string | null): Promise<void> {
+        if (!segmentId || !this.pendingPartialText) return
+        const partial = this.pendingPartialText
+        this.lastPartialWriteAt = Date.now()
+        if (this.partialFlushTimer) {
+            clearTimeout(this.partialFlushTimer)
+            this.partialFlushTimer = null
+        }
+
+        await this.pendingInitialWrite
+        await this.partialUpdate(segmentId, partial)
     }
 
     private async partialUpdate(segmentId: string, partial: string): Promise<void> {
@@ -352,14 +504,22 @@ export class RealtimeRelaySession {
             .catch(() => {})
     }
 
-    private async writeFallbackFinal(segmentId: string, raw: string): Promise<void> {
+    private async writeFallbackFinal(
+        segmentId: string,
+        raw: string,
+        mergedIds: string[] = [],
+    ): Promise<void> {
         const updates: Record<string, unknown> = {}
         const base = `projects/${this.init.projectId}/stream/${segmentId}`
         updates[`${base}/original`] = raw
         updates[`${base}/refined`] = raw
         updates[`${base}/status`] = "final"
+        if (mergedIds.length > 0) updates[`${base}/mergedIds`] = mergedIds
         for (const lang of this.init.targetLanguages) {
             updates[`${base}/${lang}`] = raw
+        }
+        for (const id of mergedIds) {
+            updates[`projects/${this.init.projectId}/stream/${id}/status`] = "merged"
         }
         await admin.database().ref().update(updates)
     }
@@ -368,6 +528,7 @@ export class RealtimeRelaySession {
         segmentId: string,
         raw: string,
         result: TranslateResult,
+        mergedIds: string[] = [],
     ): Promise<void> {
         const updates: Record<string, unknown> = {}
         const base = `projects/${this.init.projectId}/stream/${segmentId}`
@@ -375,8 +536,12 @@ export class RealtimeRelaySession {
         updates[`${base}/refined`] = result.refined
         updates[`${base}/isMedical`] = result.isMedical
         updates[`${base}/status`] = "final"
+        if (mergedIds.length > 0) updates[`${base}/mergedIds`] = mergedIds
         for (const lang of this.init.targetLanguages) {
             updates[`${base}/${lang}`] = result.translations[lang] ?? ""
+        }
+        for (const id of mergedIds) {
+            updates[`projects/${this.init.projectId}/stream/${id}/status`] = "merged"
         }
         await admin.database().ref().update(updates)
 
@@ -401,6 +566,14 @@ export class RealtimeRelaySession {
             this.openaiSocket?.close()
         } catch {
             // ignore
+        }
+        if (this.partialFlushTimer) {
+            clearTimeout(this.partialFlushTimer)
+            this.partialFlushTimer = null
+        }
+        if (this.translationFlushTimer) {
+            clearTimeout(this.translationFlushTimer)
+            this.translationFlushTimer = null
         }
         this.openaiSocket = null
     }

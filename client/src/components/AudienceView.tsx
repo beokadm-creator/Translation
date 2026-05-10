@@ -5,7 +5,9 @@ import { ref, onValue, get } from 'firebase/database';
 import { useProjectStream } from '../hooks/useProjectStream';
 import TextItem from './TextItem';
 
-const CF_BASE = import.meta.env.VITE_CF_BASE_URL || 'https://us-central1-translation-comm.cloudfunctions.net';
+const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined;
+const FUNCTIONS_REGION = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1';
+const CF_BASE = import.meta.env.VITE_CF_BASE_URL || (FIREBASE_PROJECT_ID ? `https://${FUNCTIONS_REGION}-${FIREBASE_PROJECT_ID}.cloudfunctions.net` : '');
 
 const HALLUCINATION_BLACKLIST = [
     '자막제작', '자막 제작', 'Subtitles by', 'Subtitle by', 'MBC 뉴스', 'SBS 뉴스', 'KBS 뉴스',
@@ -20,7 +22,6 @@ const isGarbage = (text: string) => {
     if (HALLUCINATION_BLACKLIST.some(bad => text.includes(bad))) return true;
     if (/(.+)\1{2,}/.test(text)) return true;
     if (/(.*,){4,}/.test(text)) return true;
-    if (/^(Implant, Surgery|임플란트, 보철)/i.test(text)) return true;
     // 전체가 괄호/대괄호 소리 표기인 경우
     if (/^\s*[\[(][^\])]{1,40}[\])]\s*$/.test(text.trim())) return true;
     return false;

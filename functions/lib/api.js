@@ -33,23 +33,28 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteSessionAPI = exports.replaceSessionsAPI = exports.deleteProjectAPI = exports.deleteConferenceAPI = exports.createConferenceAPI = void 0;
+exports.deleteSessionAPI = exports.replaceSessionsAPI = exports.createProjectAPI = exports.deleteProjectAPI = exports.deleteConferenceAPI = exports.createConferenceAPI = void 0;
 const functions = __importStar(require("firebase-functions/v1"));
 const admin = __importStar(require("firebase-admin"));
-// API Key Auth middleware
-const authenticateAPIKey = (req) => {
+const sanitizeProjectId = (slug) => slug.replace(/[^a-z0-9-_]/gi, '').toLowerCase();
+// Management APIs accept either the server-side admin API key or a Firebase
+// admin-session ID token from the authenticated dashboard.
+const authenticateManagementRequest = async (req) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return false;
     }
     const token = authHeader.split("Bearer ")[1];
     const expectedKey = process.env.ADMIN_API_KEY || functions.config()?.admin?.apikey;
-    // Fallback for development if no key is set (DANGEROUS in prod)
-    if (!expectedKey) {
-        functions.logger.warn("ADMIN_API_KEY is not set in environment. Falling back to default key.");
-        return token === "hongcomm-admin-secret-2025";
+    if (expectedKey && token === expectedKey)
+        return true;
+    try {
+        await admin.auth().verifyIdToken(token);
+        return true;
     }
-    return token === expectedKey;
+    catch {
+        return false;
+    }
 };
 exports.createConferenceAPI = functions.https.onRequest(async (req, res) => {
     // CORS Handling
@@ -71,7 +76,7 @@ exports.createConferenceAPI = functions.https.onRequest(async (req, res) => {
         res.status(405).json({ success: false, error: "Method not allowed" });
         return;
     }
-    if (!authenticateAPIKey(req)) {
+    if (!(await authenticateManagementRequest(req))) {
         res.status(401).json({ success: false, error: "Unauthorized" });
         return;
     }
@@ -99,7 +104,7 @@ exports.createConferenceAPI = functions.https.onRequest(async (req, res) => {
             projects.forEach((proj, index) => {
                 if (!proj.name || !proj.slug)
                     return; // Skip invalid projects
-                const projectId = proj.slug.replace(/[^a-z0-9-_]/gi, '').toLowerCase();
+                const projectId = sanitizeProjectId(proj.slug);
                 updates[`projects/${projectId}/settings`] = {
                     name: proj.name,
                     slug: projectId,
@@ -110,8 +115,8 @@ exports.createConferenceAPI = functions.https.onRequest(async (req, res) => {
                     // Default AI & Overlay settings
                     hideRaw: true,
                     ai: {
-                        primarySTT: "openai", fallbackSTT: "deepgram",
-                        primaryTrans: "openai", fallbackTrans: "claude"
+                        primarySTT: "openai", fallbackSTT: "openai",
+                        primaryTrans: "openai", fallbackTrans: "openai"
                     },
                     overlay: {
                         fontSize: 48, fontColor: '#ffffff', fontWeight: 'bold',
@@ -151,7 +156,7 @@ exports.createConferenceAPI = functions.https.onRequest(async (req, res) => {
     }
 });
 // Helper for CORS and Auth
-const handleCorsAndAuth = (req, res) => {
+const handleCorsAndAuth = async (req, res) => {
     const origin = req.headers.origin;
     const allowedOrigin = process.env.ALLOWED_ORIGIN || functions.config()?.app?.allowed_origin || "*";
     if (allowedOrigin === "*" || allowedOrigin === origin) {
@@ -170,14 +175,14 @@ const handleCorsAndAuth = (req, res) => {
         res.status(405).json({ success: false, error: "Method not allowed" });
         return false;
     }
-    if (!authenticateAPIKey(req)) {
+    if (!(await authenticateManagementRequest(req))) {
         res.status(401).json({ success: false, error: "Unauthorized" });
         return false;
     }
     return true;
 };
 exports.deleteConferenceAPI = functions.https.onRequest(async (req, res) => {
-    if (!handleCorsAndAuth(req, res))
+    if (!(await handleCorsAndAuth(req, res)))
         return;
     try {
         const { confId } = req.body;
@@ -209,10 +214,10 @@ exports.deleteConferenceAPI = functions.https.onRequest(async (req, res) => {
     }
 });
 exports.deleteProjectAPI = functions.https.onRequest(async (req, res) => {
-    if (!handleCorsAndAuth(req, res))
+    if (!(await handleCorsAndAuth(req, res)))
         return;
     try {
-        const { projectId } = req.body;
+        const projectId = sanitizeProjectId((req.body.projectId || '').toString());
         if (!projectId) {
             res.status(400).json({ success: false, error: "Missing required field: projectId" });
             return;
@@ -224,6 +229,68 @@ exports.deleteProjectAPI = functions.https.onRequest(async (req, res) => {
     }
     catch (error) {
         functions.logger.error("[API] Failed to delete project", error);
+        res.status(500).json({ success: false, error: error.message || "Internal server error" });
+    }
+});
+exports.createProjectAPI = functions.https.onRequest(async (req, res) => {
+    const origin = req.headers.origin;
+    const allowedOrigin = process.env.ALLOWED_ORIGIN || functions.config()?.app?.allowed_origin || "*";
+    if (allowedOrigin === "*" || allowedOrigin === origin) {
+        res.set("Access-Control-Allow-Origin", allowedOrigin === "*" ? "*" : origin);
+    }
+    else {
+        res.set("Access-Control-Allow-Origin", origin || allowedOrigin);
+    }
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Target-Languages");
+    if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+    }
+    if (req.method !== "POST") {
+        res.status(405).json({ success: false, error: "Method not allowed" });
+        return;
+    }
+    if (!(await authenticateManagementRequest(req))) {
+        res.status(401).json({ success: false, error: "Unauthorized" });
+        return;
+    }
+    try {
+        const { project } = req.body;
+        const projectId = sanitizeProjectId((project?.slug || '').toString());
+        if (!projectId || !project?.name || !project?.conferenceId) {
+            res.status(400).json({ success: false, error: "Missing required project fields" });
+            return;
+        }
+        const db = admin.database();
+        const projectRef = db.ref(`projects/${projectId}`);
+        const now = Date.now();
+        await projectRef.set({
+            settings: {
+                ...project,
+                slug: projectId,
+                targetLanguages: Array.isArray(project.targetLanguages) && project.targetLanguages.length > 0
+                    ? project.targetLanguages
+                    : ["ko", "en", "ja", "zh"],
+                ai: {
+                    primarySTT: "openai", fallbackSTT: "openai",
+                    primaryTrans: "openai", fallbackTrans: "openai",
+                },
+            },
+            state: {
+                bufferText: "",
+                bufferIds: [],
+                lastRefinedList: [],
+                lastFlushTime: now,
+            },
+            stream: null,
+            activeSessionId: null,
+        });
+        functions.logger.info(`[API] Created/Replaced Project ${projectId}.`);
+        res.status(200).json({ success: true, projectId });
+    }
+    catch (error) {
+        functions.logger.error("[API] Failed to create project", error);
         res.status(500).json({ success: false, error: error.message || "Internal server error" });
     }
 });
@@ -248,7 +315,7 @@ exports.replaceSessionsAPI = functions.https.onRequest(async (req, res) => {
         return;
     }
     // 2. Auth
-    if (!authenticateAPIKey(req)) {
+    if (!(await authenticateManagementRequest(req))) {
         res.status(401).json({ success: false, error: "Unauthorized" });
         return;
     }
@@ -259,7 +326,7 @@ exports.replaceSessionsAPI = functions.https.onRequest(async (req, res) => {
             return;
         }
         const db = admin.database();
-        const projectId = projectSlug.replace(/[^a-z0-9-_]/gi, '').toLowerCase();
+        const projectId = sanitizeProjectId(projectSlug);
         // 3. 기존 세션 데이터 검증 및 삭제
         const projectRef = db.ref(`projects/${projectId}`);
         const snap = await projectRef.child('settings').once('value');
@@ -288,8 +355,30 @@ exports.replaceSessionsAPI = functions.https.onRequest(async (req, res) => {
                 sourceLanguage: sess.sourceLanguage || "ko",
             };
         });
-        // 5. 전체 덮어쓰기 (기존 sessions 노드를 완전히 교체)
-        await projectRef.child('sessions').set(sessionsObj);
+        // 5. 전체 덮어쓰기 + 제거된 세션의 라이브 스트림/활성 상태 정리
+        const existingSessionsSnap = await projectRef.child('sessions').once('value');
+        const existingSessionIds = existingSessionsSnap.exists() ? Object.keys(existingSessionsSnap.val() || {}) : [];
+        const nextSessionIds = new Set(Object.keys(sessionsObj));
+        const removedSessionIds = existingSessionIds.filter(id => !nextSessionIds.has(id));
+        const updates = { sessions: sessionsObj };
+        if (removedSessionIds.length > 0) {
+            const removed = new Set(removedSessionIds);
+            const streamSnap = await projectRef.child('stream').once('value');
+            if (streamSnap.exists()) {
+                const stream = streamSnap.val() || {};
+                Object.entries(stream).forEach(([segmentId, segment]) => {
+                    if (segment?.sessionId && removed.has(segment.sessionId)) {
+                        updates[`stream/${segmentId}`] = null;
+                    }
+                });
+            }
+            const activeSnap = await projectRef.child('activeSessionId').once('value');
+            if (activeSnap.exists() && removed.has(activeSnap.val())) {
+                updates.activeSessionId = null;
+                updates.state = { bufferText: "", bufferIds: [], lastRefinedList: [], lastFlushTime: Date.now() };
+            }
+        }
+        await projectRef.update(updates);
         functions.logger.info(`[API] Replaced sessions for project ${projectId}. Total: ${sessions.length}`);
         res.status(200).json({ success: true, message: "Successfully replaced sessions.", count: sessions.length });
     }
@@ -299,16 +388,35 @@ exports.replaceSessionsAPI = functions.https.onRequest(async (req, res) => {
     }
 });
 exports.deleteSessionAPI = functions.https.onRequest(async (req, res) => {
-    if (!handleCorsAndAuth(req, res))
+    if (!(await handleCorsAndAuth(req, res)))
         return;
     try {
-        const { projectId, sessionId } = req.body;
+        const projectId = sanitizeProjectId((req.body.projectId || '').toString());
+        const { sessionId } = req.body;
         if (!projectId || !sessionId) {
             res.status(400).json({ success: false, error: "Missing required fields: projectId, sessionId" });
             return;
         }
         const db = admin.database();
-        await db.ref(`projects/${projectId}/sessions/${sessionId}`).remove();
+        const projectRef = db.ref(`projects/${projectId}`);
+        const updates = {
+            [`sessions/${sessionId}`]: null,
+        };
+        const streamSnap = await projectRef.child('stream').once('value');
+        if (streamSnap.exists()) {
+            const stream = streamSnap.val() || {};
+            Object.entries(stream).forEach(([segmentId, segment]) => {
+                if (segment?.sessionId === sessionId) {
+                    updates[`stream/${segmentId}`] = null;
+                }
+            });
+        }
+        const activeSnap = await projectRef.child('activeSessionId').once('value');
+        if (activeSnap.exists() && activeSnap.val() === sessionId) {
+            updates.activeSessionId = null;
+            updates.state = { bufferText: "", bufferIds: [], lastRefinedList: [], lastFlushTime: Date.now() };
+        }
+        await projectRef.update(updates);
         functions.logger.info(`[API] Deleted Session ${sessionId} in Project ${projectId}.`);
         res.status(200).json({ success: true, deleted: { projectId, sessionId } });
     }

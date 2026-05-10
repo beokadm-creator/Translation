@@ -1,9 +1,53 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { rtdb } from '../firebase';
-import { ref, set, get, child, remove } from 'firebase/database';
+import { auth, rtdb } from '../firebase';
+import { ref, get } from 'firebase/database';
 import type { ProjectSettings, Conference } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
+
+const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined;
+const FUNCTIONS_REGION = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1';
+const CF_BASE = import.meta.env.VITE_CF_BASE_URL || (FIREBASE_PROJECT_ID ? `https://${FUNCTIONS_REGION}-${FIREBASE_PROJECT_ID}.cloudfunctions.net` : '');
+
+async function callManagementApi<T>(endpoint: string, body: unknown): Promise<T> {
+  if (!CF_BASE) throw new Error('Cloud Functions URL is not configured');
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('Not authenticated');
+
+  const response = await fetch(`${CF_BASE}/${endpoint}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    throw new Error(data.error || data.message || `HTTP ${response.status}`);
+  }
+  return data as T;
+}
+
+async function callManagementDelete<T>(endpoint: string, body: unknown): Promise<T> {
+  if (!CF_BASE) throw new Error('Cloud Functions URL is not configured');
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('Not authenticated');
+
+  const response = await fetch(`${CF_BASE}/${endpoint}`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    throw new Error(data.error || data.message || `HTTP ${response.status}`);
+  }
+  return data as T;
+}
 
 const AdminLanding: React.FC = () => {
   const navigate = useNavigate();
@@ -110,16 +154,12 @@ const AdminLanding: React.FC = () => {
           return alert("Title and Dates are required.");
       }
       
-      const id = `conf_${Date.now()}`;
-      const dates = `${confForm.startDate} ~ ${confForm.endDate}`;
-      
       try {
-          await set(ref(rtdb, `conferences/${id}`), { 
-              id, 
+          await callManagementApi('createConferenceAPI', {
               title: confForm.title, 
-              dates,
               startDate: confForm.startDate,
-              endDate: confForm.endDate
+              endDate: confForm.endDate,
+              projects: [],
           });
           
           setIsCreatingConf(false);
@@ -137,30 +177,20 @@ const AdminLanding: React.FC = () => {
       if (!selectedConfId) return alert("No Conference Selected");
 
       const projectId = projForm.slug.replace(/[^a-z0-9-_]/gi, '').toLowerCase();
-      const projectRef = ref(rtdb, `projects/${projectId}`);
-      
-      const snap = await get(projectRef);
+      const snap = await get(ref(rtdb, `projects/${projectId}`));
       if (snap.exists()) {
           // 확인: 사용자가 지운 줄 알았는데 남아있다면(고아 데이터), 덮어쓸 것인지 경고
           if (!window.confirm(`Project ID (Slug) "${projectId}" already exists in the database. Do you want to overwrite it? All previous data in this Hall will be PERMANENTLY ERASED.`)) {
               return;
           }
-          // 기존 데이터 삭제(초기화)
-          await remove(projectRef);
       }
 
-      await set(child(projectRef, 'settings'), {
-          ...projForm,
-          slug: projectId,
-          conferenceId: selectedConfId
-      });
-
-      // Init State
-      await set(child(projectRef, 'state'), {
-          bufferText: "",
-          bufferIds: [],
-          lastRefinedList: [],
-          lastFlushTime: Date.now()
+      await callManagementApi('createProjectAPI', {
+          project: {
+              ...projForm,
+              slug: projectId,
+              conferenceId: selectedConfId,
+          },
       });
 
       // Add to local state immediately so it shows up in the list
@@ -185,7 +215,7 @@ const AdminLanding: React.FC = () => {
       if (!window.confirm(`PERMANENTLY DELETE project (Hall) "${projectId}"? All data will be lost.`)) return;
       
       try {
-          await remove(ref(rtdb, `projects/${projectId}`));
+          await callManagementDelete('deleteProjectAPI', { projectId });
           
           // Refresh list
           setAllProjects(prev => prev.filter(p => p.id !== projectId));
@@ -201,25 +231,7 @@ const AdminLanding: React.FC = () => {
       if (!window.confirm(`PERMANENTLY DELETE conference? All related projects will also be affected.`)) return;
       
       try {
-          // 1. Remove conference from RTDB
-          await remove(ref(rtdb, `conferences/${confId}`));
-          
-          // 2. Remove all projects (Halls) associated with this conference
-          const snap = await get(ref(rtdb, 'projects'));
-          if (snap.exists()) {
-              const data = snap.val();
-              const updates: Record<string, null> = {};
-              Object.keys(data).forEach(projectId => {
-                  if (data[projectId]?.settings?.conferenceId === confId) {
-                      updates[`projects/${projectId}`] = null;
-                  }
-              });
-              
-              if (Object.keys(updates).length > 0) {
-                  // Remove projects using multi-path update
-                  await import('firebase/database').then(({ update }) => update(ref(rtdb), updates));
-              }
-          }
+          await callManagementDelete('deleteConferenceAPI', { confId });
           
           // Refresh list
           setConferences(prev => prev.filter(c => c.id !== confId));

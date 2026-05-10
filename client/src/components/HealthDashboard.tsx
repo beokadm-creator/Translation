@@ -15,6 +15,10 @@ import React, { useEffect, useState, useRef } from 'react';
 import { rtdb as database } from '../firebase';
 import { ref, onValue, get } from 'firebase/database';
 
+const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined;
+const FUNCTIONS_REGION = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1';
+const CF_BASE = import.meta.env.VITE_CF_BASE_URL || (FIREBASE_PROJECT_ID ? `https://${FUNCTIONS_REGION}-${FIREBASE_PROJECT_ID}.cloudfunctions.net` : '');
+
 interface HealthProps {
     projectId: string;
 }
@@ -104,8 +108,13 @@ const HealthDashboard: React.FC<HealthProps> = ({ projectId }) => {
         // ── 5. Cloud Function 헬스 체크 (폴링 제거, 초기 마운트 시 1회만 확인)
         const checkCF = async () => {
             setCfStatus('idle');
+            if (!CF_BASE) {
+                setCfStatus('warn');
+                setCfMsg('CF: Not configured');
+                return;
+            }
             try {
-                const r = await fetch('https://us-central1-translation-comm.cloudfunctions.net/diagnoseSystem');
+                const r = await fetch(`${CF_BASE}/diagnoseSystem`);
                 if (r.ok) {
                     const d = await r.json();
                     const allOk = d.tests?.rtdbWrite === 'SUCCESS' && d.tests?.rtdbRead === 'SUCCESS';

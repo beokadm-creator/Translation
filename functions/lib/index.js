@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.replaceSessionsAPI = exports.deleteSessionAPI = exports.deleteProjectAPI = exports.deleteConferenceAPI = exports.createConferenceAPI = exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.synthesizeSpeech = exports.processAudio = void 0;
+exports.replaceSessionsAPI = exports.deleteSessionAPI = exports.deleteProjectAPI = exports.deleteConferenceAPI = exports.createProjectAPI = exports.createConferenceAPI = exports.purgeSession = exports.archiveSession = exports.diagnoseSystem = exports.synthesizeSpeech = exports.processAudio = void 0;
 const admin = __importStar(require("firebase-admin"));
 // Initialize Firebase Admin
 // Cloud Functions auto-initialize correctly. 
@@ -54,6 +54,7 @@ var purge_1 = require("./purge");
 Object.defineProperty(exports, "purgeSession", { enumerable: true, get: function () { return purge_1.purgeSession; } });
 var api_1 = require("./api");
 Object.defineProperty(exports, "createConferenceAPI", { enumerable: true, get: function () { return api_1.createConferenceAPI; } });
+Object.defineProperty(exports, "createProjectAPI", { enumerable: true, get: function () { return api_1.createProjectAPI; } });
 Object.defineProperty(exports, "deleteConferenceAPI", { enumerable: true, get: function () { return api_1.deleteConferenceAPI; } });
 Object.defineProperty(exports, "deleteProjectAPI", { enumerable: true, get: function () { return api_1.deleteProjectAPI; } });
 Object.defineProperty(exports, "deleteSessionAPI", { enumerable: true, get: function () { return api_1.deleteSessionAPI; } });

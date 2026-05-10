@@ -23,10 +23,10 @@ export interface ProjectSettings {
   parkingMessage?: string;
   recordMode?: 'chunk' | 'vad';
   hideRaw?: boolean;
-  primarySTT?: 'openai' | 'deepgram';
-  fallbackSTT?: 'openai' | 'deepgram';
-  primaryTrans?: 'openai' | 'claude';
-  fallbackTrans?: 'openai' | 'claude';
+  primarySTT?: 'openai';
+  fallbackSTT?: 'openai';
+  primaryTrans?: 'openai';
+  fallbackTrans?: 'openai';
   // Overlay Settings
   overlay?: {
       fontSize: number;
