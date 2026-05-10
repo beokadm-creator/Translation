@@ -1105,18 +1105,25 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                             type="checkbox"
                                             id="chkSessionPersona"
                                             checked={Boolean(formData.persona?.enabled)}
-                                            onChange={e => setFormData({
-                                                ...formData,
-                                                persona: {
-                                                    enabled: e.target.checked,
-                                                    basePromptKo: formData.persona?.basePromptKo ?? '',
-                                                    basePromptEn: formData.persona?.basePromptEn ?? '',
-                                                    basePromptJa: formData.persona?.basePromptJa ?? '',
-                                                    basePromptZh: formData.persona?.basePromptZh ?? '',
-                                                    customInstructions: formData.persona?.customInstructions ?? '',
-                                                    medicalTerms: formData.persona?.medicalTerms ?? '',
-                                                },
-                                            })}
+                                            onChange={e => {
+                                                const enabling = e.target.checked;
+                                                // When first enabling, pre-populate from project persona so the
+                                                // user starts from a working baseline rather than a blank form.
+                                                const hasExistingOverride = Boolean(formData.persona?.customInstructions || formData.persona?.medicalTerms || formData.persona?.basePromptKo);
+                                                const proj = projectSettings.persona;
+                                                setFormData({
+                                                    ...formData,
+                                                    persona: {
+                                                        enabled: enabling,
+                                                        basePromptKo: formData.persona?.basePromptKo ?? (enabling && !hasExistingOverride ? (proj?.basePromptKo ?? '') : ''),
+                                                        basePromptEn: formData.persona?.basePromptEn ?? (enabling && !hasExistingOverride ? (proj?.basePromptEn ?? '') : ''),
+                                                        basePromptJa: formData.persona?.basePromptJa ?? (enabling && !hasExistingOverride ? (proj?.basePromptJa ?? '') : ''),
+                                                        basePromptZh: formData.persona?.basePromptZh ?? (enabling && !hasExistingOverride ? (proj?.basePromptZh ?? '') : ''),
+                                                        customInstructions: formData.persona?.customInstructions ?? (enabling && !hasExistingOverride ? (proj?.customInstructions ?? '') : ''),
+                                                        medicalTerms: formData.persona?.medicalTerms ?? (enabling && !hasExistingOverride ? (proj?.medicalTerms ?? '') : ''),
+                                                    },
+                                                });
+                                            }}
                                             className="mt-0.5 w-4 h-4 rounded border-gray-600 bg-[#111111] accent-blue-500"
                                         />
                                         <div className="flex-1">
@@ -1395,66 +1402,67 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                                     </label>
                                 </div>
                                 
-                                {projectSettings.persona?.enabled && (
-                                    <div className="space-y-4">
-                                        <div className="space-y-1.5">
-                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block font-medium">Global Custom Instructions</label>
-                                            <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-3 text-sm text-gray-200 outline-none focus:border-white/20 resize-none h-20 placeholder-gray-600"
-                                                placeholder="e.g. Always output professional and academic tone..."
-                                                value={projectSettings.persona?.customInstructions || ''}
-                                                onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, customInstructions: e.target.value } })}
-                                            />
-                                        </div>
-
-                                        <div className="space-y-1.5">
-                                            <label className="text-[10px] text-gray-500 uppercase tracking-wider block font-medium">Medical Terms / Dictionary</label>
-                                            <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-3 text-sm text-gray-200 outline-none focus:border-white/20 resize-none h-20 placeholder-gray-600"
-                                                placeholder="e.g. Fixture: 픽스쳐, Abutment: 지대주..."
-                                                value={projectSettings.persona?.medicalTerms || ''}
-                                                onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, medicalTerms: e.target.value } })}
-                                            />
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-4">
-                                            {(projectSettings.targetLanguages || []).includes('ko') && (
-                                                <div className="space-y-1.5">
-                                                    <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Base Prompt (Korean)</label>
-                                                    <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs text-gray-300 outline-none focus:border-white/20 resize-none h-16"
-                                                        value={projectSettings.persona?.basePromptKo || ''}
-                                                        onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, basePromptKo: e.target.value } })}
-                                                    />
-                                                </div>
-                                            )}
-                                            {(projectSettings.targetLanguages || []).includes('en') && (
-                                                <div className="space-y-1.5">
-                                                    <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Base Prompt (English)</label>
-                                                    <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs text-gray-300 outline-none focus:border-white/20 resize-none h-16"
-                                                        value={projectSettings.persona?.basePromptEn || ''}
-                                                        onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, basePromptEn: e.target.value } })}
-                                                    />
-                                                </div>
-                                            )}
-                                            {(projectSettings.targetLanguages || []).includes('ja') && (
-                                                <div className="space-y-1.5">
-                                                    <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Base Prompt (Japanese)</label>
-                                                    <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs text-gray-300 outline-none focus:border-white/20 resize-none h-16"
-                                                        value={projectSettings.persona?.basePromptJa || ''}
-                                                        onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, basePromptJa: e.target.value } })}
-                                                    />
-                                                </div>
-                                            )}
-                                            {(projectSettings.targetLanguages || []).includes('zh') && (
-                                                <div className="space-y-1.5">
-                                                    <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Base Prompt (Chinese)</label>
-                                                    <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs text-gray-300 outline-none focus:border-white/20 resize-none h-16"
-                                                        value={projectSettings.persona?.basePromptZh || ''}
-                                                        onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, basePromptZh: e.target.value } })}
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
+                                <div className={`space-y-4 transition-opacity ${projectSettings.persona?.enabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                                    {!projectSettings.persona?.enabled && (
+                                        <p className="text-[10px] text-gray-600 italic">Toggle on to activate — your saved data is preserved below.</p>
+                                    )}
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] text-gray-500 uppercase tracking-wider block font-medium">Global Custom Instructions</label>
+                                        <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-3 text-sm text-gray-200 outline-none focus:border-white/20 resize-none h-20 placeholder-gray-600"
+                                            placeholder="e.g. Always output professional and academic tone..."
+                                            value={projectSettings.persona?.customInstructions || ''}
+                                            onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, customInstructions: e.target.value } })}
+                                        />
                                     </div>
-                                )}
+
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] text-gray-500 uppercase tracking-wider block font-medium">Medical Terms / Dictionary</label>
+                                        <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-3 text-sm text-gray-200 outline-none focus:border-white/20 resize-none h-20 placeholder-gray-600"
+                                            placeholder="e.g. Fixture: 픽스쳐, Abutment: 지대주..."
+                                            value={projectSettings.persona?.medicalTerms || ''}
+                                            onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, medicalTerms: e.target.value } })}
+                                        />
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {(projectSettings.targetLanguages || []).includes('ko') && (
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Base Prompt (Korean)</label>
+                                                <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs text-gray-300 outline-none focus:border-white/20 resize-none h-16"
+                                                    value={projectSettings.persona?.basePromptKo || ''}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, basePromptKo: e.target.value } })}
+                                                />
+                                            </div>
+                                        )}
+                                        {(projectSettings.targetLanguages || []).includes('en') && (
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Base Prompt (English)</label>
+                                                <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs text-gray-300 outline-none focus:border-white/20 resize-none h-16"
+                                                    value={projectSettings.persona?.basePromptEn || ''}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, basePromptEn: e.target.value } })}
+                                                />
+                                            </div>
+                                        )}
+                                        {(projectSettings.targetLanguages || []).includes('ja') && (
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Base Prompt (Japanese)</label>
+                                                <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs text-gray-300 outline-none focus:border-white/20 resize-none h-16"
+                                                    value={projectSettings.persona?.basePromptJa || ''}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, basePromptJa: e.target.value } })}
+                                                />
+                                            </div>
+                                        )}
+                                        {(projectSettings.targetLanguages || []).includes('zh') && (
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] text-gray-500 uppercase tracking-wider block">Base Prompt (Chinese)</label>
+                                                <textarea className="w-full bg-[#111111] border border-white/5 rounded-md p-2 text-xs text-gray-300 outline-none focus:border-white/20 resize-none h-16"
+                                                    value={projectSettings.persona?.basePromptZh || ''}
+                                                    onChange={e => setProjectSettings({ ...projectSettings, persona: { ...projectSettings.persona!, basePromptZh: e.target.value } })}
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
                             </>}
 
                             {/* AI Settings */}
