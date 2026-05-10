@@ -85,12 +85,17 @@ export class RealtimeRelaySession {
     async start(): Promise<void> {
         // Defense in depth: even if the client init omits persona or sends a
         // stale snapshot, we always re-read the canonical config from RTDB
-        // (5-minute cache) and merge with the client-provided override.
-        // Per-session persona (e.g. "Opening Ceremony") wins over project
-        // default — see persona.ts loadPersona for the resolution order.
+        // and merge with the client-provided override. Per-session persona
+        // (e.g. "Opening Ceremony") wins over project default — see
+        // persona.ts loadPersona for the resolution order.
+        //
+        // `forceFresh: true` bypasses the 5-min cache because an admin may
+        // have just edited the persona seconds before clicking START
+        // BROADCAST — we always want the newest config on session start.
         const serverPersona = await loadPersona(
             this.init.projectId,
             this.init.activeSessionId,
+            true,
         )
         this.init.persona = mergePersona(serverPersona, this.init.persona)
 

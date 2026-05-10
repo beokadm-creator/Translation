@@ -267,7 +267,7 @@ class OpenAITranslationProvider {
             `If source_lang matches a target language, the text for that language must remain in the source language.`
         ].filter(Boolean).join('\n');
         const completion = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: "gpt-4.1-mini",
             temperature: 0,
             max_tokens: 1000,
             response_format: { type: "json_object" },
@@ -306,7 +306,7 @@ class OpenAITranslationProvider {
             ].join('\n');
             try {
                 const repair = await openai.chat.completions.create({
-                    model: "gpt-4o-mini",
+                    model: "gpt-4.1-mini",
                     temperature: 0,
                     max_tokens: 800,
                     response_format: { type: "json_object" },
@@ -390,7 +390,24 @@ class TranslationFactory {
 }
 // 메모리 캐시 (key: projectId, value: { data: PersonaConfig, expiresAt: number })
 const personaCache = new Map();
-const loadPersona = async (projectId) => {
+// Two-tier persona resolution:
+//   1. Per-session override at projects/{p}/sessions/{s}/persona (if enabled)
+//   2. Project default at projects/{p}/settings/persona
+// Cache key includes sessionId so opening-ceremony vs. clinical-research
+// sessions don't shadow each other in the 5-minute cache window.
+const readPersonaPath = async (path) => {
+    try {
+        const snap = await admin.database().ref(path).get();
+        if (!snap.exists())
+            return null;
+        return snap.val();
+    }
+    catch (err) {
+        functions.logger.warn(`Failed to read persona at ${path}`, { err: String(err) });
+        return null;
+    }
+};
+const loadPersona = async (projectId, sessionId) => {
     if (!projectId)
         return null;
     const now = Date.now();
@@ -401,30 +418,28 @@ const loadPersona = async (projectId) => {
                 personaCache.delete(key);
             }
         }
-        // 여전히 크면 무작위(첫번째) 삭제
         if (personaCache.size > 100) {
             const firstKey = personaCache.keys().next().value;
             if (firstKey)
                 personaCache.delete(firstKey);
         }
     }
-    const cached = personaCache.get(projectId);
+    const cacheKey = sessionId ? `${projectId}::${sessionId}` : projectId;
+    const cached = personaCache.get(cacheKey);
     if (cached && cached.expiresAt > now) {
         return cached.data;
     }
-    try {
-        const snap = await admin.database().ref(`projects/${projectId}/settings/persona`).get();
-        if (snap.exists()) {
-            const data = snap.val();
-            // 5분(300000ms) 캐싱
-            personaCache.set(projectId, { data, expiresAt: now + 300000 });
-            return data;
-        }
+    let resolved = null;
+    if (sessionId) {
+        const sessionPersona = await readPersonaPath(`projects/${projectId}/sessions/${sessionId}/persona`);
+        if (sessionPersona && sessionPersona.enabled)
+            resolved = sessionPersona;
     }
-    catch (err) {
-        functions.logger.warn(`Failed to load persona for ${projectId}`, { err: String(err) });
+    if (!resolved) {
+        resolved = await readPersonaPath(`projects/${projectId}/settings/persona`);
     }
-    return null;
+    personaCache.set(cacheKey, { data: resolved, expiresAt: now + 300000 });
+    return resolved;
 };
 // ── OpenAI 클라이언트 ─────────────────────────────────────────────────────────
 const getOpenAI = () => {
@@ -436,8 +451,6 @@ const getOpenAI = () => {
     }
     return _openai;
 };
-const DENTAL_PROMPT_KO = "임플란트, 상악동, 골이식, 픽스처, 어버트먼트, 크라운, 보철";
-const DENTAL_PROMPT_EN = "Implant, Sinus, Bone Graft, Fixture, Abutment, Crown";
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. HTTP Trigger: Immediate Display + Progressive Buffering
 // ─────────────────────────────────────────────────────────────────────────────
@@ -522,7 +535,9 @@ exports.processAudio = functions
         const fallbackSTT = (req.headers['x-stt-fallback'] || "deepgram").toString();
         const primaryTrans = (req.headers['x-trans-primary'] || "openai").toString();
         const fallbackTrans = (req.headers['x-trans-fallback'] || "claude").toString();
-        const persona = await loadPersona(projectId);
+        // Pass activeSessionId so per-session persona overrides (e.g. opening
+        // ceremony vs. clinical research) take precedence over the project default.
+        const persona = await loadPersona(projectId, activeSessionId || undefined);
         // ── STEP 1: AI STT ────────────────────────────────────────────
         let basePrompt = "";
         // Persona 기본 프롬프트가 있으면 우선 적용

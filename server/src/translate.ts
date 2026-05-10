@@ -120,13 +120,31 @@ function buildResult(
     }
 }
 
+type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh"
+
+function parseReasoningEffort(raw: string | undefined): ReasoningEffort {
+    const v = (raw || "medium").toLowerCase()
+    if (v === "minimal" || v === "low" || v === "medium" || v === "high" || v === "xhigh") {
+        return v
+    }
+    return "medium"
+}
+
 export class Translator {
     private openai: OpenAI
     private readonly model: string
+    private readonly reasoningEffort: ReasoningEffort
 
     constructor(openai: OpenAI, model = "gpt-realtime-2") {
         this.openai = openai
         this.model = model
+        // OPENAI_REASONING_EFFORT — defaults to "medium" for medical accuracy
+        // over raw speed. Set to "low" (~30% faster) for casual sessions like
+        // an opening ceremony, or "high" / "xhigh" for highly clinical talks
+        // where ambiguous terminology disambiguation matters most. Each
+        // bump roughly doubles latency but materially improves context
+        // grounding per OpenAI's Audio MultiChallenge numbers.
+        this.reasoningEffort = parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT)
     }
 
     async translate(input: TranslateInput): Promise<TranslateResult | null> {
@@ -138,10 +156,7 @@ export class Translator {
 
         const completion = await this.openai.chat.completions.create({
             model: this.model,
-            // gpt-realtime-2 supports adjustable reasoning effort; "low" gives the
-            // best latency/quality tradeoff for short live segments per OpenAI's
-            // own guidance (default is also "low").
-            reasoning_effort: "low",
+            reasoning_effort: this.reasoningEffort,
             temperature: 0,
             max_tokens: 1000,
             response_format: { type: "json_object" },

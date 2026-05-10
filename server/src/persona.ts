@@ -49,12 +49,16 @@ async function readPath(path: string): Promise<PersonaConfig | null> {
  *   1. If the session has its own persona with `enabled: true`, return it.
  *   2. Otherwise, return the project-level default (may be disabled or null).
  *
- * Both lookups are cached for 5 minutes under composite keys so admins still
- * see fresh edits within seconds of saving.
+ * Both lookups are cached for 5 minutes under composite keys.
+ *
+ * Pass `forceFresh: true` to bypass the cache — used by the Realtime relay
+ * on session start so admins never see a stale persona after editing it
+ * just before clicking START BROADCAST.
  */
 export async function loadPersona(
     projectId: string,
     sessionId?: string,
+    forceFresh = false,
 ): Promise<PersonaConfig | null> {
     if (!projectId) return null
 
@@ -62,8 +66,10 @@ export async function loadPersona(
     evict(now)
 
     const cacheKey = sessionId ? `${projectId}::${sessionId}` : projectId
-    const cached = cache.get(cacheKey)
-    if (cached && cached.expiresAt > now) return cached.data
+    if (!forceFresh) {
+        const cached = cache.get(cacheKey)
+        if (cached && cached.expiresAt > now) return cached.data
+    }
 
     let resolved: PersonaConfig | null = null
 
