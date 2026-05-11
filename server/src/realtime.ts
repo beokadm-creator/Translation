@@ -30,6 +30,7 @@ const OPENAI_REALTIME_URL = process.env.OPENAI_REALTIME_URL || "wss://api.openai
 // for instant rollback or experimentation.
 const STT_MODEL = process.env.OPENAI_STT_MODEL || "gpt-realtime-whisper"
 const TRANSLATION_MODEL = process.env.OPENAI_REASONING_MODEL || process.env.OPENAI_TRANSLATION_MODEL || "gpt-4.1-mini"
+const IS_GA_REALTIME_WHISPER = STT_MODEL === "gpt-realtime-whisper"
 const PARTIAL_DB_INTERVAL_MS = Number(process.env.REALTIME_PARTIAL_DB_INTERVAL_MS || 120)
 const VAD_THRESHOLD = Number(process.env.REALTIME_VAD_THRESHOLD || 0.5)
 const VAD_PREFIX_PADDING_MS = Number(process.env.REALTIME_VAD_PREFIX_PADDING_MS || 500)
@@ -38,6 +39,7 @@ const CONTEXT_SEGMENT_LIMIT = 5
 const TRANSLATION_BUFFER_MIN_CHARS = Number(process.env.REALTIME_TRANSLATION_MIN_CHARS || 45)
 const TRANSLATION_BUFFER_TIMEOUT_MS = Number(process.env.REALTIME_TRANSLATION_TIMEOUT_MS || 1800)
 const TRANSLATION_BUFFER_SENTENCE_END = (process.env.REALTIME_TRANSLATION_SENTENCE_END || "true") === "true"
+const MANUAL_COMMIT_INTERVAL_MS = Number(process.env.REALTIME_MANUAL_COMMIT_INTERVAL_MS || 1800)
 
 const DEFAULT_STT_PROMPTS: Record<string, string> = {
     ko: process.env.DEFAULT_STT_PROMPT_KO || "",
@@ -105,6 +107,7 @@ export class RealtimeRelaySession {
     private translationBufferStartedAt = 0
     private translationFlushTimer: NodeJS.Timeout | null = null
     private translationFlushPromise: Promise<void> = Promise.resolve()
+    private manualCommitTimer: NodeJS.Timeout | null = null
     private previousRefinedList: string[] = []
     private closed = false
 
@@ -140,11 +143,11 @@ export class RealtimeRelaySession {
 
     private connectUpstream(): Promise<void> {
         return new Promise((resolve, reject) => {
-            const url = `${OPENAI_REALTIME_URL}?intent=transcription&model=${encodeURIComponent(STT_MODEL)}`
+            const url = `${OPENAI_REALTIME_URL}?intent=transcription`
             const ws = new WebSocket(url, {
                 headers: {
                     Authorization: `Bearer ${this.apiKey}`,
-                    "OpenAI-Beta": "realtime=v1",
+                    ...(IS_GA_REALTIME_WHISPER ? {} : { "OpenAI-Beta": "realtime=v1" }),
                 },
             })
 
@@ -178,6 +181,29 @@ export class RealtimeRelaySession {
             this.init.persona,
             this.init.customKeywords,
         )
+
+        if (IS_GA_REALTIME_WHISPER) {
+            const config: OpenAIRealtimeEvent = {
+                type: "session.update",
+                session: {
+                    type: "transcription",
+                    audio: {
+                        input: {
+                            format: { type: "audio/pcm", rate: 24000 },
+                            transcription: {
+                                model: STT_MODEL,
+                                language: this.init.sourceLang,
+                            },
+                            // The live API currently rejects prompt/VAD for this
+                            // model in our environment, so we segment manually.
+                            turn_detection: null,
+                        },
+                    },
+                },
+            }
+            this.sendUpstream(config)
+            return
+        }
 
         const config: OpenAIRealtimeEvent = {
             type: "transcription_session.update",
@@ -214,6 +240,7 @@ export class RealtimeRelaySession {
                 type: "input_audio_buffer.append",
                 audio: payload.audio,
             })
+            if (IS_GA_REALTIME_WHISPER) this.scheduleManualCommit()
         })
 
         this.clientSocket.on("force_flush", () => {
@@ -224,6 +251,14 @@ export class RealtimeRelaySession {
         this.clientSocket.on("disconnect", () => {
             this.close()
         })
+    }
+
+    private scheduleManualCommit(): void {
+        if (this.manualCommitTimer) return
+        this.manualCommitTimer = setTimeout(() => {
+            this.manualCommitTimer = null
+            this.sendUpstream({ type: "input_audio_buffer.commit" })
+        }, MANUAL_COMMIT_INTERVAL_MS)
     }
 
     private async handleUpstreamMessage(raw: string): Promise<void> {
@@ -242,7 +277,12 @@ export class RealtimeRelaySession {
                 await this.onCompleted(event)
                 break
             case "error":
-                this.emitClientError(`openai_error:${(event as { error?: { message?: string } }).error?.message ?? "unknown"}`)
+                {
+                    const message = (event as { error?: { message?: string } }).error?.message ?? "unknown"
+                    // eslint-disable-next-line no-console
+                    console.error(`[relay] OpenAI error: ${message}`)
+                    this.emitClientError(`openai_error:${message}`)
+                }
                 break
             default:
                 // Ignore housekeeping events.
@@ -574,6 +614,10 @@ export class RealtimeRelaySession {
         if (this.translationFlushTimer) {
             clearTimeout(this.translationFlushTimer)
             this.translationFlushTimer = null
+        }
+        if (this.manualCommitTimer) {
+            clearTimeout(this.manualCommitTimer)
+            this.manualCommitTimer = null
         }
         this.openaiSocket = null
     }
