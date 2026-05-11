@@ -777,6 +777,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             setStream(mic);
 
             // ── Phase 3: Realtime streaming path ─────────────────────────────
+            console.log("[Realtime] startRecording useRealtime=", useRealtime, "RELAY_URL=", RELAY_URL)
             if (useRealtime && RELAY_URL) {
                 const activeSession = sessions.find((s) => s.id === activeSessionId);
                 const sourceLang = (liveSourceLangOverrideRef.current || activeSession?.sourceLanguage || 'ko') as 'ko' | 'en' | 'ja' | 'zh';

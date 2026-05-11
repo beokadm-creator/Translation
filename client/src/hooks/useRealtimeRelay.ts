@@ -73,50 +73,67 @@ export function useRealtimeRelay(options: UseRealtimeRelayOptions): UseRealtimeR
 
     const connect = useCallback(async (init: RelayInit) => {
         setStatus("connecting")
+        console.log("[Relay] connect() called, url=", optionsRef.current.relayUrl)
         const token = await auth.currentUser?.getIdToken()
         if (!token) {
+            console.error("[Relay] no auth token")
             setStatus("error")
             optionsRef.current.onError?.("not_authenticated")
             return
         }
 
-        const socket = io(optionsRef.current.relayUrl, {
-            transports: ["websocket"],
-            auth: { token },
-            reconnection: false,
-        })
-        socketRef.current = socket
+        return new Promise<void>((resolve, reject) => {
+            const socket = io(optionsRef.current.relayUrl, {
+                transports: ["websocket"],
+                auth: { token },
+                reconnection: false,
+            })
+            socketRef.current = socket
 
-        socket.on("connect", () => {
-            socket.emit(
-                "init",
-                init,
-                (response: { ok: boolean; error?: string }) => {
-                    if (response?.ok) {
-                        setStatus("ready")
-                    } else {
-                        setStatus("error")
-                        optionsRef.current.onError?.(response?.error || "init_failed")
-                    }
-                },
-            )
-        })
+            socket.on("connect", () => {
+                console.log("[Relay] socket connected, sending init")
+                socket.emit(
+                    "init",
+                    init,
+                    (response: { ok: boolean; error?: string }) => {
+                        if (response?.ok) {
+                            console.log("[Relay] init ok")
+                            setStatus("ready")
+                            resolve()
+                        } else {
+                            console.error("[Relay] init failed:", response?.error)
+                            setStatus("error")
+                            optionsRef.current.onError?.(response?.error || "init_failed")
+                            reject(new Error(response?.error || "init_failed"))
+                        }
+                    },
+                )
+            })
 
-        socket.on("relay:partial", (msg: { id: string; text: string }) => {
-            setStatus("streaming")
-            optionsRef.current.onPartial?.(msg.id, msg.text)
-        })
+            socket.on("connect_error", (err) => {
+                console.error("[Relay] connect_error:", err.message)
+                setStatus("error")
+                optionsRef.current.onError?.(`connect_error: ${err.message}`)
+                reject(err)
+            })
 
-        socket.on("relay:final", (msg: { id: string; text: string; fallback?: boolean }) => {
-            optionsRef.current.onFinal?.(msg.id, msg.text, msg.fallback)
-        })
+            socket.on("relay:partial", (msg: { id: string; text: string }) => {
+                setStatus("streaming")
+                optionsRef.current.onPartial?.(msg.id, msg.text)
+            })
 
-        socket.on("relay:error", (msg: { message: string }) => {
-            optionsRef.current.onError?.(msg.message)
-        })
+            socket.on("relay:final", (msg: { id: string; text: string; fallback?: boolean }) => {
+                optionsRef.current.onFinal?.(msg.id, msg.text, msg.fallback)
+            })
 
-        socket.on("disconnect", () => {
-            setStatus("closed")
+            socket.on("relay:error", (msg: { message: string }) => {
+                console.error("[Relay] relay:error:", msg.message)
+                optionsRef.current.onError?.(msg.message)
+            })
+
+            socket.on("disconnect", () => {
+                setStatus("closed")
+            })
         })
     }, [])
 
