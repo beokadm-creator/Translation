@@ -91,6 +91,9 @@ const AdminDashboard: React.FC = () => {
         primaryTrans: 'openai';
         fallbackTrans: 'openai';
         targetLanguages?: string[];
+        realtime?: {
+            enabled?: boolean;
+        };
         persona?: {
             enabled: boolean;
             basePromptKo?: string;
@@ -118,6 +121,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
     primarySTT: 'openai', fallbackSTT: 'openai',
     primaryTrans: 'openai', fallbackTrans: 'openai',
     targetLanguages: ['ko', 'en', 'ja', 'zh'],
+    realtime: { enabled: REALTIME_ENABLED && REALTIME_DEFAULT_ON },
     persona: {
         enabled: false,
         basePromptKo: '',
@@ -145,6 +149,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                 primaryTrans: 'openai',
                 fallbackTrans: 'openai',
                 targetLanguages: val.targetLanguages || ['ko', 'en', 'ja', 'zh'],
+                realtime: val.realtime || { enabled: REALTIME_ENABLED && REALTIME_DEFAULT_ON },
                 chunk: val.chunk || { minLength: 35, timeoutMs: 5000, sentenceEnd: true },
                 persona: val.persona || {
                     enabled: false,
@@ -156,6 +161,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
                     medicalTerms: ''
                 }
             }));
+                setUseRealtime(Boolean(RELAY_URL) && Boolean(val.realtime?.enabled));
             }
         }).catch(err => console.error("설정 로드 실패:", err));
     }, [activeProjectId]);
@@ -202,6 +208,7 @@ const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
             };
             updates[`projects/${activeProjectId}/settings/hideRaw`] = Boolean(projectSettings.hideRaw);
             updates[`projects/${activeProjectId}/settings/targetLanguages`] = projectSettings.targetLanguages;
+            updates[`projects/${activeProjectId}/settings/realtime`] = { enabled: Boolean(RELAY_URL) && useRealtime };
             updates[`projects/${activeProjectId}/settings/chunk`] = projectSettings.chunk;
             updates[`projects/${activeProjectId}/settings/persona`] = projectSettings.persona;
 
