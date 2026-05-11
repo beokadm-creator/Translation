@@ -172,6 +172,11 @@ export async function createPcm16Pipeline(
     await audioContext.audioWorklet.addModule(pcm16WorkletUrl)
     const source = audioContext.createMediaStreamSource(stream)
     const workletNode = new AudioWorkletNode(audioContext, "pcm16-processor")
+    const silentGain = audioContext.createGain()
+    silentGain.gain.value = 0
     source.connect(workletNode)
+    workletNode.connect(silentGain)
+    silentGain.connect(audioContext.destination)
+    if (audioContext.state === "suspended") await audioContext.resume()
     return { audioContext, workletNode, sampleRate: audioContext.sampleRate }
 }

@@ -108,6 +108,7 @@ export class RealtimeRelaySession {
     private translationFlushTimer: NodeJS.Timeout | null = null
     private translationFlushPromise: Promise<void> = Promise.resolve()
     private manualCommitTimer: NodeJS.Timeout | null = null
+    private audioFrameCount = 0
     private previousRefinedList: string[] = []
     private closed = false
 
@@ -236,6 +237,11 @@ export class RealtimeRelaySession {
         // Audio frames from the browser AudioWorklet — base64 PCM16 24kHz mono.
         this.clientSocket.on("audio", (payload: { audio: string }) => {
             if (!payload?.audio) return
+            this.audioFrameCount += 1
+            if (this.audioFrameCount === 1 || this.audioFrameCount % 100 === 0) {
+                // eslint-disable-next-line no-console
+                console.log(`[relay] audio frames=${this.audioFrameCount}`)
+            }
             this.sendUpstream({
                 type: "input_audio_buffer.append",
                 audio: payload.audio,

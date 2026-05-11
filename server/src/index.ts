@@ -76,6 +76,8 @@ io.use(async (socket, next) => {
 
 io.on("connection", (socket) => {
     let session: RealtimeRelaySession | null = null
+    // eslint-disable-next-line no-console
+    console.log(`[relay] client connected ${socket.id}`)
 
     socket.on("init", async (payload: RelayInitPayload, ack?: (response: unknown) => void) => {
         try {
@@ -87,15 +89,21 @@ io.on("connection", (socket) => {
 
             session = new RealtimeRelaySession(socket, payload, apiKey)
             await session.start()
+            // eslint-disable-next-line no-console
+            console.log(`[relay] init ok project=${payload.projectId} session=${payload.activeSessionId || "none"}`)
             ack?.({ ok: true })
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err)
+            // eslint-disable-next-line no-console
+            console.error(`[relay] init failed: ${message}`)
             ack?.({ ok: false, error: message })
             socket.emit("relay:error", { message })
         }
     })
 
     socket.on("disconnect", () => {
+        // eslint-disable-next-line no-console
+        console.log(`[relay] client disconnected ${socket.id}`)
         session?.close()
         session = null
     })
