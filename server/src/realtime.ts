@@ -16,7 +16,7 @@
 //      existing onValue subscription (no client changes there).
 
 import WebSocket from "ws"
-import * as admin from "firebase-admin"
+import admin from "firebase-admin"
 import OpenAI from "openai"
 import type { Socket } from "socket.io"
 

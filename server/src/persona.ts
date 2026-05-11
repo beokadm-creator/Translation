@@ -10,7 +10,7 @@
 // even if the client init payload omits or stales the persona, the server
 // still applies it to both the STT prompt and the refinement prompt.
 
-import * as admin from "firebase-admin"
+import admin from "firebase-admin"
 import type { PersonaConfig } from "./translate.js"
 
 interface CacheEntry {

@@ -12,7 +12,7 @@ import { createServer } from "node:http"
 import express from "express"
 import cors from "cors"
 import { Server as SocketIOServer } from "socket.io"
-import * as admin from "firebase-admin"
+import admin from "firebase-admin"
 
 import { RealtimeRelaySession } from "./realtime.js"
 import type { PersonaConfig } from "./translate.js"
