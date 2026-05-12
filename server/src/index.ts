@@ -12,14 +12,15 @@ import { createServer } from "node:http"
 import express from "express"
 import cors from "cors"
 import { Server as SocketIOServer } from "socket.io"
-import admin from "firebase-admin"
+import { applicationDefault, initializeApp } from "firebase-admin/app"
+import { getAuth } from "firebase-admin/auth"
 
 import { RealtimeRelaySession } from "./realtime.js"
 import type { PersonaConfig } from "./translate.js"
 
 try {
-    admin.initializeApp({
-        credential: admin.credential.applicationDefault(),
+    initializeApp({
+        credential: applicationDefault(),
         databaseURL: process.env.FIREBASE_DATABASE_URL,
     })
 } catch {
@@ -66,7 +67,7 @@ io.use(async (socket, next) => {
     try {
         const token = socket.handshake.auth?.token as string | undefined
         if (!token) return next(new Error("missing_token"))
-        const decoded = await admin.auth().verifyIdToken(token)
+        const decoded = await getAuth().verifyIdToken(token)
         socket.data.uid = decoded.uid
         next()
     } catch (err) {
